@@ -505,7 +505,8 @@ public:
 
   static std::array<uint8_t, ACTION_SIZE> get_action_mask(const Game &game) {
     std::array<uint8_t, ACTION_SIZE> mask = {};
-    const auto &legal_actions = game.legal_actions();
+    MoveList legal_actions =
+        MoveGenerator::generate_all_fixed(game.board, game.simple_payment_mode);
 
     for (const auto &action : legal_actions) {
       int id = encode(action, game);
@@ -529,7 +530,8 @@ public:
   }
 
   static Action decode_and_match(int action_id, const Game &game) {
-    const auto &legal_actions = game.legal_actions();
+    MoveList legal_actions =
+        MoveGenerator::generate_all_fixed(game.board, game.simple_payment_mode);
 
     for (const auto &legal : legal_actions) {
       if (encode(legal, game) == action_id) {

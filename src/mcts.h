@@ -556,7 +556,7 @@ public:
                 break;
               }
 
-              if (!world_game.apply(decoded_action, false)) {
+              if (!world_game.apply_trusted(decoded_action, false)) {
                 path_valid = false;
                 break;
               }
@@ -614,7 +614,7 @@ public:
         // Apply action - decode the encoded action ID to get the actual Action
         Action decoded_action = ActionEncoderCpp::decode(action, search_game);
         if (decoded_action.type == ACTION_TYPE_COUNT ||
-            !search_game.apply(decoded_action, false)) {
+            !search_game.apply_trusted(decoded_action, false)) {
           std::array<float, NUM_PLAYERS> v = {0};
           result.terminals.push_back({path, v});
           break;

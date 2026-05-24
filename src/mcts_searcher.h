@@ -87,7 +87,7 @@ public:
 
       // Apply action
       Action decoded = encoder_.decode(action, game);
-      if (!game.apply(decoded, false)) {
+      if (!game.apply_trusted(decoded, false)) {
         auto value = get_terminal_value(game);
         backpropagate(value);
         return false;

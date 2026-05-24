@@ -3,7 +3,7 @@
 `csplendor` is a fast C++ based engine for the board game Splendor, optimized for 2-player competitive play and machine-learning workflows.
 
 ## Features
-- **Fast logic**: C++17 implementation capable of about 20,000 moves/sec.
+- **Fast logic**: C++17 implementation capable of ~20,000 Python `legal_actions` calls/sec, ~330,000 C++ internal legal-action counts/sec, and ~160,000 C++ internal self-play moves/sec.
 - **Python bindings**: Seamless integration via `pybind11`.
 - **ML ready**: Built-in state featurization and action-space encoders.
 - **Web API**: FastAPI integration for GUI development.

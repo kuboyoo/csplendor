@@ -20,7 +20,7 @@ dev = ["pytest>=7.0", "pytest-cov>=4.0", "fastapi>=0.100", "httpx>=0.24,<0.28"]
 testpaths = ["tests"]
 addopts = ["-q", "-m", "not performance"]
 markers = [
-    "performance: opt-in performance and benchmark smoke tests",
+    "performance: opt-in speed regression benchmarks",
 ]
 
 [tool.coverage.run]
