@@ -93,3 +93,23 @@ def test_solver_loads_usi_position_text():
     ] == [
         set(int(card_id) for card_id in deck) for deck in original.board.decks
     ]
+
+
+def test_parallel_solver_matches_sequential_result_on_small_branching_state():
+    game = cs.Game(seed=0)
+    game.board.bank = [0, 0, 0, 0, 0, 0]
+    game.board.visible = [
+        [0, 1, -1, -1],
+        [-1, -1, -1, -1],
+        [-1, -1, -1, -1],
+    ]
+    game.board.decks = [[], [], []]
+    game.board.nobles = []
+    game.board.current_player = 0
+
+    sequential = solve_game(game, attacker=0, max_depth=1, options=_fast_options(jobs=1))
+    parallel = solve_game(game, attacker=0, max_depth=1, options=_fast_options(jobs=2))
+
+    assert parallel.status == sequential.status
+    assert parallel.depth == sequential.depth
+    assert parallel.stats.nodes > 0

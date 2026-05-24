@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 import json
+import os
 import time
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -29,6 +31,8 @@ class SolverOptions:
     include_proof: bool = True
     allow_deck_reserve: bool = False
     use_memo: bool = True
+    jobs: int = 1
+    parallel_min_actions: int = 2
 
 
 @dataclass
@@ -95,6 +99,12 @@ class SearchLimitExceeded(Exception):
     pass
 
 
+_WORKER_STATE: Optional[SolverState] = None
+_WORKER_ATTACKER = 0
+_WORKER_MAX_DEPTH = 0
+_WORKER_OPTIONS: Dict[str, Any] = {}
+
+
 class MateSolver:
     def __init__(self, attacker: int, max_depth: int, options: Optional[SolverOptions] = None):
         if attacker not in (0, 1):
@@ -104,6 +114,8 @@ class MateSolver:
         self.attacker = attacker
         self.max_depth = max_depth
         self.options = options or SolverOptions()
+        if self.options.jobs < 0:
+            raise ValueError("jobs must be non-negative")
         self.stats = SearchStats()
         self._memo: Dict[Tuple[Any, int], bool] = {}
         self._start_time = 0.0
@@ -114,7 +126,10 @@ class MateSolver:
         self._start_time = time.monotonic()
 
         try:
-            result = self._solve(state, self.max_depth)
+            if self._effective_jobs() > 1:
+                result = self._solve_root_parallel(state, self.max_depth)
+            else:
+                result = self._solve(state, self.max_depth)
             status = MATE if result.winning else NO_MATE
             depth = self.max_depth if result.winning else None
             return SearchResult(status, depth, result.proof, result.refutation, self._finish_stats())
@@ -125,6 +140,45 @@ class MateSolver:
     def _finish_stats(self) -> SearchStats:
         self.stats.elapsed_ms = (time.monotonic() - self._start_time) * 1000.0
         return self.stats
+
+    def _effective_jobs(self) -> int:
+        if self.options.jobs == 0:
+            return max(1, os.cpu_count() or 1)
+        return max(1, self.options.jobs)
+
+    def _solve_root_parallel(self, state: SolverState, depth: int) -> _NodeResult:
+        self._check_limits()
+        self.stats.nodes += 1
+        self.stats.max_depth_reached = max(self.stats.max_depth_reached, self.max_depth - depth)
+
+        game = state.game
+        board = game.board
+        if game.is_game_over():
+            self.stats.terminal_nodes += 1
+            winning = int(game.winner) == self.attacker
+            node = self._state_summary(state, depth)
+            node["terminal_winner"] = int(game.winner)
+            if winning:
+                return _NodeResult(True, proof=node if self.options.include_proof else None)
+            return _NodeResult(False, refutation=node if self.options.include_proof else None)
+
+        if bool(board.waiting_noble):
+            return self._solve_waiting_noble(state, depth)
+
+        if int(board.current_player) == self.attacker:
+            if depth <= 0:
+                node = self._state_summary(state, depth)
+                node["reason"] = "attacker_depth_exhausted"
+                return _NodeResult(False, refutation=node if self.options.include_proof else None)
+            actions = self._legal_actions(state)
+            if len(actions) < self.options.parallel_min_actions:
+                return self._solve_attacker_actions(state, depth, actions)
+            return self._solve_attacker_actions_parallel(state, depth, actions)
+
+        actions = self._legal_actions(state)
+        if len(actions) < self.options.parallel_min_actions:
+            return self._solve_defender_actions(state, depth, actions)
+        return self._solve_defender_actions_parallel(state, depth, actions)
 
     def _solve(self, state: SolverState, depth: int) -> _NodeResult:
         self._check_limits()
@@ -203,37 +257,21 @@ class MateSolver:
 
     def _solve_attacker_turn(self, state: SolverState, depth: int) -> _NodeResult:
         actions = self._legal_actions(state)
+        return self._solve_attacker_actions(state, depth, actions)
+
+    def _solve_attacker_actions(
+        self,
+        state: SolverState,
+        depth: int,
+        actions: Sequence[cs.Action],
+    ) -> _NodeResult:
         failures: List[Dict[str, Any]] = []
         for action in self._ordered_actions(actions):
-            outcomes = self._transition_outcomes(state, action)
-            if not outcomes:
-                continue
-
-            proof_branches: List[Dict[str, Any]] = []
-            failed = None
-            for outcome in outcomes:
-                child_win = None
-                child_proof = None
-                child_failures: List[Dict[str, Any]] = []
-                for child in outcome.children:
-                    child_result = self._solve(child, depth - 1)
-                    if child_result.winning:
-                        child_win = child_result
-                        child_proof = child_result.proof
-                        break
-                    if self.options.include_proof and child_result.refutation is not None:
-                        child_failures.append(child_result.refutation)
-                if child_win is None:
-                    failed = self._failure_node(action, outcome, {"children": child_failures})
-                    break
-                if self.options.include_proof:
-                    proof_branches.append(self._outcome_node(action, outcome, child_proof))
-
-            if failed is None:
-                proof = self._choice_node(state, depth, action, outcomes, proof_branches)
-                return _NodeResult(True, proof=proof if self.options.include_proof else None)
-            if self.options.include_proof:
-                failures.append(failed)
+            branch = self._evaluate_attacker_action_branch(state, depth, action)
+            if branch.winning:
+                return branch
+            if self.options.include_proof and branch.refutation is not None:
+                failures.append(branch.refutation)
 
         node = self._state_summary(state, depth)
         node["failed_attacker_moves"] = failures
@@ -241,29 +279,162 @@ class MateSolver:
 
     def _solve_defender_turn(self, state: SolverState, depth: int) -> _NodeResult:
         actions = self._legal_actions(state)
+        return self._solve_defender_actions(state, depth, actions)
+
+    def _solve_defender_actions(
+        self,
+        state: SolverState,
+        depth: int,
+        actions: Sequence[cs.Action],
+    ) -> _NodeResult:
         proof_moves: List[Dict[str, Any]] = []
         for action in self._ordered_actions(actions):
-            outcomes = self._transition_outcomes(state, action)
-            if not outcomes:
-                refutation = self._failure_node(action, None, {"reason": "no_transition"})
-                return _NodeResult(False, refutation=refutation if self.options.include_proof else None)
-
-            proof_outcomes: List[Dict[str, Any]] = []
-            for outcome in outcomes:
-                for child in outcome.children:
-                    child_result = self._solve(child, depth)
-                    if not child_result.winning:
-                        refutation = self._outcome_node(action, outcome, child_result.refutation)
-                        return _NodeResult(False, refutation=refutation if self.options.include_proof else None)
-                    if self.options.include_proof:
-                        proof_outcomes.append(self._outcome_node(action, outcome, child_result.proof))
-
-            if self.options.include_proof:
-                proof_moves.append(self._choice_node(state, depth, action, outcomes, proof_outcomes))
+            branch = self._evaluate_defender_action_branch(state, depth, action)
+            if not branch.winning:
+                return branch
+            if self.options.include_proof and branch.proof is not None:
+                proof_moves.append(branch.proof)
 
         node = self._state_summary(state, depth)
         node["all_defender_moves"] = proof_moves
         return _NodeResult(True, proof=node if self.options.include_proof else None)
+
+    def _evaluate_attacker_action_branch(
+        self,
+        state: SolverState,
+        depth: int,
+        action: cs.Action,
+    ) -> _NodeResult:
+        outcomes = self._transition_outcomes(state, action)
+        if not outcomes:
+            return _NodeResult(False, refutation=self._failure_node(action, None, {"reason": "no_transition"}))
+
+        proof_branches: List[Dict[str, Any]] = []
+        for outcome in outcomes:
+            child_win = None
+            child_proof = None
+            child_failures: List[Dict[str, Any]] = []
+            for child in outcome.children:
+                child_result = self._solve(child, depth - 1)
+                if child_result.winning:
+                    child_win = child_result
+                    child_proof = child_result.proof
+                    break
+                if self.options.include_proof and child_result.refutation is not None:
+                    child_failures.append(child_result.refutation)
+            if child_win is None:
+                return _NodeResult(
+                    False,
+                    refutation=self._failure_node(action, outcome, {"children": child_failures}),
+                )
+            if self.options.include_proof:
+                proof_branches.append(self._outcome_node(action, outcome, child_proof))
+
+        proof = self._choice_node(state, depth, action, outcomes, proof_branches)
+        return _NodeResult(True, proof=proof if self.options.include_proof else None)
+
+    def _evaluate_defender_action_branch(
+        self,
+        state: SolverState,
+        depth: int,
+        action: cs.Action,
+    ) -> _NodeResult:
+        outcomes = self._transition_outcomes(state, action)
+        if not outcomes:
+            refutation = self._failure_node(action, None, {"reason": "no_transition"})
+            return _NodeResult(False, refutation=refutation if self.options.include_proof else None)
+
+        proof_outcomes: List[Dict[str, Any]] = []
+        for outcome in outcomes:
+            for child in outcome.children:
+                child_result = self._solve(child, depth)
+                if not child_result.winning:
+                    refutation = self._outcome_node(action, outcome, child_result.refutation)
+                    return _NodeResult(False, refutation=refutation if self.options.include_proof else None)
+                if self.options.include_proof:
+                    proof_outcomes.append(self._outcome_node(action, outcome, child_result.proof))
+
+        proof = self._choice_node(state, depth, action, outcomes, proof_outcomes)
+        return _NodeResult(True, proof=proof if self.options.include_proof else None)
+
+    def _solve_attacker_actions_parallel(
+        self,
+        state: SolverState,
+        depth: int,
+        actions: Sequence[cs.Action],
+    ) -> _NodeResult:
+        failures: List[Dict[str, Any]] = []
+        for branch in self._run_parallel_action_tasks("attacker", state, depth, actions):
+            self._merge_worker_stats(branch["stats"])
+            if branch.get("unknown_reason"):
+                raise SearchLimitExceeded(str(branch["unknown_reason"]))
+            if branch["winning"]:
+                return _NodeResult(True, proof=branch.get("proof"))
+            if self.options.include_proof and branch.get("refutation") is not None:
+                failures.append(branch["refutation"])
+
+        node = self._state_summary(state, depth)
+        node["failed_attacker_moves"] = failures
+        return _NodeResult(False, refutation=node if self.options.include_proof else None)
+
+    def _solve_defender_actions_parallel(
+        self,
+        state: SolverState,
+        depth: int,
+        actions: Sequence[cs.Action],
+    ) -> _NodeResult:
+        proof_moves: List[Dict[str, Any]] = []
+        for branch in self._run_parallel_action_tasks("defender", state, depth, actions):
+            self._merge_worker_stats(branch["stats"])
+            if branch.get("unknown_reason"):
+                raise SearchLimitExceeded(str(branch["unknown_reason"]))
+            if not branch["winning"]:
+                return _NodeResult(False, refutation=branch.get("refutation"))
+            if self.options.include_proof and branch.get("proof") is not None:
+                proof_moves.append(branch["proof"])
+
+        node = self._state_summary(state, depth)
+        node["all_defender_moves"] = proof_moves
+        return _NodeResult(True, proof=node if self.options.include_proof else None)
+
+    def _run_parallel_action_tasks(
+        self,
+        mode: str,
+        state: SolverState,
+        depth: int,
+        actions: Sequence[cs.Action],
+    ) -> List[Dict[str, Any]]:
+        jobs = min(self._effective_jobs(), len(actions))
+        options_payload = asdict(self.options)
+        options_payload["jobs"] = 1
+        state_payload = _state_to_payload(state)
+        tasks = [
+            {
+                "mode": mode,
+                "index": index,
+                "depth": depth,
+                "action_code": int(action.pack()),
+            }
+            for index, action in enumerate(self._ordered_actions(actions))
+        ]
+
+        with ProcessPoolExecutor(
+            max_workers=jobs,
+            initializer=_parallel_worker_init,
+            initargs=(state_payload, self.attacker, self.max_depth, options_payload),
+        ) as executor:
+            return list(executor.map(_parallel_root_worker, tasks, chunksize=1))
+
+    def _merge_worker_stats(self, stats: Dict[str, Any]) -> None:
+        self.stats.nodes += int(stats.get("nodes", 0))
+        self.stats.memo_hits += int(stats.get("memo_hits", 0))
+        self.stats.terminal_nodes += int(stats.get("terminal_nodes", 0))
+        self.stats.reveal_branches += int(stats.get("reveal_branches", 0))
+        self.stats.legal_moves += int(stats.get("legal_moves", 0))
+        self.stats.max_depth_reached = max(
+            self.stats.max_depth_reached,
+            int(stats.get("max_depth_reached", 0)),
+        )
 
     def _check_limits(self) -> None:
         if self.options.max_nodes and self.stats.nodes >= self.options.max_nodes:
@@ -503,6 +674,142 @@ class MateSolver:
         return self._outcome_node(action, outcome, child)
 
 
+def _parallel_worker_init(
+    state_payload: Dict[str, Any],
+    attacker: int,
+    max_depth: int,
+    options_payload: Dict[str, Any],
+) -> None:
+    global _WORKER_STATE, _WORKER_ATTACKER, _WORKER_MAX_DEPTH, _WORKER_OPTIONS
+    _WORKER_STATE = _state_from_payload(state_payload)
+    _WORKER_ATTACKER = attacker
+    _WORKER_MAX_DEPTH = max_depth
+    _WORKER_OPTIONS = dict(options_payload)
+
+
+def _parallel_root_worker(task: Dict[str, Any]) -> Dict[str, Any]:
+    if _WORKER_STATE is None:
+        raise RuntimeError("parallel worker was not initialized")
+
+    options = SolverOptions(**_WORKER_OPTIONS)
+    solver = MateSolver(_WORKER_ATTACKER, _WORKER_MAX_DEPTH, options)
+    solver._start_time = time.monotonic()
+    action = cs.Action.unpack(int(task["action_code"]))
+
+    try:
+        if task["mode"] == "attacker":
+            result = solver._evaluate_attacker_action_branch(_WORKER_STATE, int(task["depth"]), action)
+        elif task["mode"] == "defender":
+            result = solver._evaluate_defender_action_branch(_WORKER_STATE, int(task["depth"]), action)
+        else:
+            raise ValueError(f"unknown parallel task mode: {task['mode']}")
+        return {
+            "index": int(task["index"]),
+            "winning": result.winning,
+            "proof": result.proof,
+            "refutation": result.refutation,
+            "stats": asdict(solver.stats),
+            "unknown_reason": None,
+        }
+    except SearchLimitExceeded as exc:
+        return {
+            "index": int(task["index"]),
+            "winning": False,
+            "proof": None,
+            "refutation": None,
+            "stats": asdict(solver.stats),
+            "unknown_reason": str(exc),
+        }
+
+
+def _state_to_payload(state: SolverState) -> Dict[str, Any]:
+    return {
+        "game": _game_to_payload(state.game),
+        "unseen_by_level": [
+            sorted(int(card_id) for card_id in level)
+            for level in state.unseen_by_level
+        ],
+    }
+
+
+def _state_from_payload(payload: Dict[str, Any]) -> SolverState:
+    return SolverState(
+        game=_game_from_payload(payload["game"]),
+        unseen_by_level=tuple(
+            frozenset(int(card_id) for card_id in level)
+            for level in payload["unseen_by_level"]
+        ),
+    )
+
+
+def _game_to_payload(game: cs.Game) -> Dict[str, Any]:
+    board = game.board
+    players = []
+    for player_idx in range(2):
+        player = board.get_player(player_idx)
+        players.append({
+            "points": int(player.points),
+            "gems": [int(v) for v in player.gems],
+            "bonuses": [int(v) for v in player.bonuses],
+            "reserved": [int(v) for v in player.reserved],
+            "reserved_is_hidden": [bool(v) for v in player.reserved_is_hidden],
+            "reserved_count": int(player.reserved_count),
+            "purchased_count": int(player.purchased_count),
+            "purchased_cards": [int(v) for v in player.purchased_cards],
+            "acquired_nobles": [int(v) for v in player.acquired_nobles],
+        })
+
+    return {
+        "simple_payment_mode": bool(game.simple_payment_mode),
+        "blank_refill_mode": bool(game.blank_refill_mode),
+        "board": {
+            "turn": int(board.turn),
+            "current_player": int(board.current_player),
+            "bank": [int(v) for v in board.bank],
+            "visible": [[int(card_id) for card_id in row] for row in board.visible],
+            "decks": [[int(card_id) for card_id in deck] for deck in board.decks],
+            "nobles": [int(noble_id) for noble_id in board.nobles],
+            "final_round": bool(board.final_round),
+            "waiting_noble": bool(board.waiting_noble),
+            "winner": int(board.winner),
+            "players": players,
+        },
+    }
+
+
+def _game_from_payload(payload: Dict[str, Any]) -> cs.Game:
+    game = cs.Game(seed=0)
+    game.simple_payment_mode = bool(payload.get("simple_payment_mode", False))
+    game.blank_refill_mode = bool(payload.get("blank_refill_mode", False))
+
+    board_payload = payload["board"]
+    board = game.board
+    board.turn = int(board_payload["turn"])
+    board.current_player = int(board_payload["current_player"])
+    board.bank = [int(v) for v in board_payload["bank"]]
+    board.visible = board_payload["visible"]
+    board.decks = board_payload["decks"]
+    board.nobles = board_payload["nobles"]
+    board.final_round = bool(board_payload["final_round"])
+    board.waiting_noble = bool(board_payload["waiting_noble"])
+    board.winner = int(board_payload["winner"])
+
+    for player_idx, player_payload in enumerate(board_payload["players"]):
+        player = board.get_player(player_idx)
+        player.points = int(player_payload["points"])
+        player.gems = [int(v) for v in player_payload["gems"]]
+        player.bonuses = [int(v) for v in player_payload["bonuses"]]
+        player.reserved = [int(v) for v in player_payload["reserved"]]
+        player.reserved_is_hidden = [bool(v) for v in player_payload["reserved_is_hidden"]]
+        player.reserved_count = int(player_payload["reserved_count"])
+        player.purchased_count = int(player_payload["purchased_count"])
+        player.purchased_cards = [int(v) for v in player_payload["purchased_cards"]]
+        player.acquired_nobles = [int(v) for v in player_payload["acquired_nobles"]]
+        board.set_player(player_idx, player)
+
+    return game
+
+
 def solve_game(
     game: cs.Game,
     attacker: int,
@@ -641,6 +948,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--max-depth", type=int, required=True)
     parser.add_argument("--node-limit", type=int, default=200000)
     parser.add_argument("--time-limit", type=float, default=10.0)
+    parser.add_argument("--jobs", type=int, default=1, help="worker processes for root parallel search; 0 uses CPU count")
     parser.add_argument("--allow-deck-reserve", action="store_true")
     parser.add_argument("--no-proof", action="store_true")
     parser.add_argument("--pretty", action="store_true")
@@ -661,6 +969,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             time_limit=args.time_limit,
             include_proof=not args.no_proof,
             allow_deck_reserve=args.allow_deck_reserve,
+            jobs=args.jobs,
         )
         result = solve_game(game, attacker=args.attacker, max_depth=args.max_depth, options=options)
         print(json.dumps(result.to_dict(), indent=2 if args.pretty else None, sort_keys=True))

@@ -78,6 +78,7 @@ python scripts/mate_solver.py \
   --position-file position.txt \
   --attacker 0 \
   --max-depth 2 \
+  --jobs 0 \
   --pretty
 ```
 
@@ -100,6 +101,7 @@ python scripts/mate_solver.py --state-json state.json --attacker 0 --max-depth 2
 | `--max-depth N` | 必須 | なし | 攻撃側の着手回数で数えた探索深さ。 |
 | `--node-limit N` | 任意 | `200000` | 探索ノード上限。超えると `Unknown`。 |
 | `--time-limit SEC` | 任意 | `10.0` | 探索時間上限秒。超えると `Unknown`。 |
+| `--jobs N` | 任意 | `1` | root候補手を並列探索するworkerプロセス数。`0` ならCPU数を使います。 |
 | `--allow-deck-reserve` | 任意 | false | 伏せ予約を探索の合法手に含めます。通常の詰み問題では使いません。 |
 | `--no-proof` | 任意 | false | `proof_tree` / `refutation` の生成を抑制します。 |
 | `--pretty` | 任意 | false | JSON出力をインデントします。 |
@@ -443,6 +445,7 @@ result = solver.solve(state)
 
 - `Mate` のみを問題集生成に採用してください。`NoMate` は指定深さ内に詰みなし、`Unknown` は未判定です。
 - 深さを1増やすと、防御手とめくれ分岐の組み合わせで探索量が大きく増えます。
+- CPUを使い切って探索したい場合は `--jobs 0` を指定してください。root候補手ごとのプロセス並列なので、候補手が少ない局面や浅い探索では効果が小さいことがあります。
 - 証明木は大きくなりやすいので、大量検証では `--no-proof` を使ってください。
 - 伏せ予約は詰み問題用ルールとしてデフォルト除外です。通常は `--allow-deck-reserve` を使わないでください。
 - JSONローダーは完全な局面合法性検証をしません。カード重複、購入枚数、得点、ボーナス、銀行トークン数は呼び出し側で整合させてください。
