@@ -432,7 +432,7 @@ def spn_to_game(spn: str, seed: int = 0) -> Game:
         player.reserved_is_hidden = pdata["reserved_is_hidden"]
         player.reserved_count = pdata["reserved_count"]
         player.purchased_cards = pdata["bought"]
-        player.purchased_count = len(pdata["bought"])
+        player.purchased_count = pdata["purchased_count"]
         player.acquired_nobles = []
         board.set_player(idx, player)
 
@@ -570,6 +570,8 @@ def _parse_player_section(section: str, expected_player: int) -> Dict[str, objec
         raise ValueError("a player can reserve at most 3 cards")
     reserved_slots = reserved + [-1] * (3 - len(reserved))
 
+    bought_ids, purchased_count, unknown_bought_count = _parse_bought_section(fields["bought"])
+
     return {
         "gems": _parse_prefixed_counts("gems:" + fields["gems"], "gems:", include_gold=True),
         "bonuses": _parse_prefixed_counts("bonuses:" + fields["bonuses"], "bonuses:", include_gold=False),
@@ -577,7 +579,9 @@ def _parse_player_section(section: str, expected_player: int) -> Dict[str, objec
         "reserved": reserved_slots,
         "reserved_is_hidden": reserved_is_hidden[:3] + [False] * (3 - len(reserved_is_hidden)),
         "reserved_count": len(reserved),
-        "bought": _parse_id_list(fields["bought"], "card"),
+        "bought": bought_ids,
+        "purchased_count": purchased_count,
+        "unknown_bought_count": unknown_bought_count,
     }
 
 
@@ -641,6 +645,29 @@ def _parse_reserved_section(text: str) -> Tuple[List[int], List[bool]]:
     return reserved, hidden
 
 
+def _parse_bought_section(text: str) -> Tuple[List[int], int, int]:
+    text = text.strip()
+    match = re.fullmatch(r"\[([^\]]*)\]", text)
+    if not match:
+        raise ValueError(f"invalid bought list: {text}")
+    body = match.group(1).strip()
+    if not body:
+        return [], 0, 0
+
+    bought_ids: List[int] = []
+    unknown_count = 0
+    for part in body.split(","):
+        item = part.strip()
+        if item in {"_", "-"}:
+            unknown_count += 1
+            continue
+        card_id = int(item)
+        if not 0 <= card_id < 90:
+            raise ValueError(f"bought card id out of range: {card_id}")
+        bought_ids.append(card_id)
+    return bought_ids, len(bought_ids) + unknown_count, unknown_count
+
+
 def _collect_known_cards(visible: Sequence[Sequence[int]], players: Sequence[Dict[str, object]]) -> List[int]:
     used: List[int] = []
     for row in visible:
@@ -653,7 +680,10 @@ def _collect_known_cards(visible: Sequence[Sequence[int]], players: Sequence[Dic
     return used
 
 
-def _infer_decks_from_spn(deck_counts: Sequence[int], used_cards: Sequence[int]) -> List[List[int]]:
+def _infer_decks_from_spn(
+    deck_counts: Sequence[int],
+    used_cards: Sequence[int],
+) -> List[List[int]]:
     used = set(int(card_id) for card_id in used_cards)
     decks: List[List[int]] = []
     for level in range(1, 4):

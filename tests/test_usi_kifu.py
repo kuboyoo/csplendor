@@ -140,3 +140,28 @@ def test_spn_hidden_reserved_cards_are_rejected_for_exact_solver_state():
 
     with pytest.raises(ValueError, match="hidden reserved"):
         spn_to_game(spn)
+
+
+def test_editor_spn_with_unknown_bought_cards_keeps_non_visible_non_reserved_cards_in_decks():
+    spn = (
+        "bank:W1U3G3R3K0D4 | "
+        "visible:L1[35,33,20,24]L2[46,61,51,66]L3[80,86,87,88] | "
+        "decks:36,23,15 | "
+        "nobles:[1,10,6] | "
+        "P0:name:Player0;gems:W3U1G1R1K2D0;bonuses:W2U2G1R3K3;"
+        "points:0;nobles:[-,-,-];reserved:[68];bought:[_,_,_,_,_,_,_,_,_,_,_] | "
+        "P1:name:Player1;gems:W0U0G0R0K2D1;bonuses:W3U1G0R0K3;"
+        "points:0;nobles:[-,-,-];reserved:[85,44,43];bought:[_,_,_,_,_,_,_] | 0"
+    )
+
+    game = spn_to_game(spn)
+
+    assert [len(deck) for deck in game.board.decks] == [36, 23, 15]
+    assert int(game.board.current_player) == 0
+    assert int(game.board.get_player(0).purchased_count) == 11
+    assert int(game.board.get_player(1).purchased_count) == 7
+    assert list(game.board.get_player(0).purchased_cards) == []
+    assert list(game.board.get_player(1).purchased_cards) == []
+    assert 68 not in game.board.decks[1]
+    assert 85 not in game.board.decks[2]
+    assert 35 not in game.board.decks[0]
