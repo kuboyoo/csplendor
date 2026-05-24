@@ -77,148 +77,55 @@ uvicorn csplendor.api:app --reload
 - [Web API リファレンス](doc/web_api.md)
 
 ## テスト
-正しく動作していることを確認するには、検証スクリプトを実行してください。
+通常のテストは次で実行します。
 ```bash
-PYTHONPATH=. python tests/test_random.py
-PYTHONPATH=. python tests/test_ml.py
-PYTHONPATH=. python tests/test_api.py
+pip install -e ".[dev,web]"
+python -m pytest
+python -m compileall -q csplendor
+```
+
+性能確認は明示的に指定して実行します。
+```bash
+python -m pytest -m performance
 ```
 
 ---
 
-## 行動空間リファレンス (ActionEncoderV2)
+## 行動空間リファレンス
 
-> **バージョン**: V2 (749 actions, redundancy-free)  
-> **ヘッダー**: `src/action_encoder_v2.h`  
-> **Python**: `csplendor.ActionEncoderV2`
+現行の推奨エンコーダは `ActionEncoderV3` です。購入行動をカードIDベースで表すため、スロット位置に依存する重複を減らしています。
 
-### 概要
+### ActionEncoderV3 (3133 actions)
 
-| カテゴリ | オフセット | サイズ | 計算式 |
-|----------|------------|--------|--------|
-| TAKE_DIFFERENT | 0 | 100 | 10 combos x 10 return patterns |
-| TAKE_SAME | 100 | 105 | 5 colors x 21 return patterns |
-| RESERVE_VISIBLE | 205 | 336 | 12 slots x 28 return patterns |
-| RESERVE_DECK | 541 | 84 | 3 levels x 28 return patterns |
-| PURCHASE_VISIBLE | 625 | 96 | 12 slots x 8 payment patterns |
-| PURCHASE_RESERVED | 721 | 24 | 3 slots x 8 payment patterns |
-| VISIT_NOBLE | 745 | 3 | 3 nobles |
-| PASS | 748 | 1 | なし |
-| **合計** | なし | **749** | なし |
+| カテゴリ | オフセット | サイズ | 内容 |
+|----------|------------|--------|------|
+| TAKE_DIFFERENT | 0 | 840 | 10 combos x 84 return patterns |
+| TAKE_SAME | 840 | 140 | 5 colors x 28 return patterns |
+| RESERVE_VISIBLE | 980 | 84 | 12 slots x 7 return patterns |
+| RESERVE_DECK | 1064 | 21 | 3 levels x 7 return patterns |
+| PURCHASE | 1085 | 2035 | 90 cards x card-specific payment patterns |
+| VISIT_NOBLE | 3120 | 12 | noble ID 0-11 |
+| PASS | 3132 | 1 | なし |
+| **合計** | なし | **3133** | なし |
 
-### Action ID の計算
+### ActionEncoderV2 (4869 actions)
 
-```
-TAKE_DIFFERENT: ID = combo_idx * 10 + return_pattern
-TAKE_SAME:      ID = 100 + color * 21 + return_pattern
-RESERVE_VISIBLE: ID = 205 + (level * 4 + slot) * 28 + return_pattern
-RESERVE_DECK:   ID = 541 + level * 28 + return_pattern
-PURCHASE_VISIBLE: ID = 625 + (level * 4 + slot) * 8 + payment_pattern
-PURCHASE_RESERVED: ID = 721 + slot * 8 + payment_pattern
-VISIT_NOBLE:    ID = 745 + noble_idx
-PASS:           ID = 748
-```
+`ActionEncoderV2` は互換用のフル行動空間エンコーダです。購入行動を表示スロット/予約スロット別に表します。
 
-### TAKE_DIFFERENT (10 combos x 10 return patterns = 100)
-
-**コンボインデックス -> 取得する色**:
-| コンボ | 色 |
-|--------|----|
-| 0 | W(0), B(1), G(2) |
-| 1 | W(0), B(1), R(3) |
-| 2 | W(0), B(1), K(4) |
-| 3 | W(0), G(2), R(3) |
-| 4 | W(0), G(2), K(4) |
-| 5 | W(0), R(3), K(4) |
-| 6 | B(1), G(2), R(3) |
-| 7 | B(1), G(2), K(4) |
-| 8 | B(1), R(3), K(4) |
-| 9 | G(2), R(3), K(4) |
-
-**返却可能な色** (コンボごと): 取得していない2色 + Gold。
-
-| コンボ | 返却可能 |
-|--------|----------|
-| 0 (WBG) | R(3), K(4), Gold(5) |
-| 1 (WBR) | G(2), K(4), Gold(5) |
-| ... | ... |
-
-**返却パターンインデックス** (10 patterns):
-| パターン | 説明 |
-|----------|------|
-| 0 | 返却なし |
-| 1-3 | [r0, r1, gold] のうち1つを返却 |
-| 4-9 | 2つを返却 (重複組合せ) |
-
-> **制約**: 直前に取得した色は返却できません。
-
-### TAKE_SAME (5 colors x 21 return patterns = 105)
-
-**返却可能な色**: 取得していない4色 + Gold。
-
-**返却パターンインデックス** (21 patterns):
-| パターン | 説明 |
-|----------|------|
-| 0 | 返却なし |
-| 1-5 | 返却可能な5色のうち1つを返却 |
-| 6-20 | 2つを返却 (H(5,2) = 15 combinations) |
-
-> **制約**: 直前に取得した色は返却できません。
-
-### RESERVE (12/3 slots x 28 return patterns = 336/84)
-
-**スロットインデックス**:
-- VISIBLE: `level * 4 + slot` (0-11)
-- DECK: `level` (0-2)
-
-**返却パターンインデックス** (28 patterns):
-| パターン | 説明 |
-|----------|------|
-| 0 | 返却なし |
-| 1-6 | 6色のうち1つを返却 (gold を含む) |
-| 7-27 | 2つを返却 (H(6,2) = 21 combinations) |
-
-> 予約時の gold 受け取りは必須のため、gold も返却できます。
-
-### PURCHASE (12/3 slots x 8 payment patterns = 96/24)
-
-**スロットインデックス**: RESERVE と同じです。
-
-**支払いパターンインデックス**: ワイルドカードとして使う gold の総数 (0-7)。
-
-> 正確な gold_as の内訳は、合法手との照合により決定されます。
-
-### 色インデックス
-
-| インデックス | 色 | 記号 |
-|--------------|----|------|
-| 0 | White (Diamond) | W |
-| 1 | Blue (Sapphire) | B |
-| 2 | Green (Emerald) | G |
-| 3 | Red (Ruby) | R |
-| 4 | Black (Onyx) | K |
-| 5 | Gold | $ |
+| カテゴリ | オフセット | サイズ | 内容 |
+|----------|------------|--------|------|
+| TAKE_DIFFERENT | 0 | 840 | 10 combos x 84 return patterns |
+| TAKE_SAME | 840 | 140 | 5 colors x 28 return patterns |
+| RESERVE_VISIBLE | 980 | 84 | 12 slots x 7 return patterns |
+| RESERVE_DECK | 1064 | 21 | 3 levels x 7 return patterns |
+| PURCHASE_VISIBLE | 1085 | 3024 | 12 slots x 252 payment patterns |
+| PURCHASE_RESERVED | 4109 | 756 | 3 slots x 252 payment patterns |
+| VISIT_NOBLE | 4865 | 3 | visible noble slots |
+| PASS | 4868 | 1 | なし |
+| **合計** | なし | **4869** | なし |
 
 ### 互換性メモ
 
-- **ActionEncoderCpp (V1)**: 48 actions, compressed (return/payment variants なし)
-- **ori (genbu.pt)**: 406 actions, 別のエンコード方式
-- **ActionEncoderV2**: 749 actions, full detail with redundancy elimination
-
-エンコーダ間の対応付けには、`OriAdapter.py` のマッピング関数を使用してください。
-
-### 検証スニペット
-
-```python
-from csplendor._csplendor import ActionEncoderV2, Game, ActionType
-
-game = Game(42)
-for action in game.legal_actions:
-    if action.type == ActionType.TAKE_DIFFERENT:
-        taken = {i for i in range(5) if action.take[i] > 0}
-        returned = {i for i in range(5) if action.return_gems[i] > 0}
-        assert not (taken & returned), "Redundant action detected!"
-
-    encoded = ActionEncoderV2.encode(action, game)
-    assert 0 <= encoded < 749, f"Invalid action ID: {encoded}"
-```
+- **ActionEncoderCpp**: 48 actions, return/payment variants なしの圧縮表現。
+- **ActionEncoderV2**: 4869 actions, return/payment variants をすべて含むスロットベース表現。
+- **ActionEncoderV3**: 3133 actions, 現行推奨のカードIDベース表現。
