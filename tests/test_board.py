@@ -33,7 +33,7 @@ def test_initial_board_layout_and_resources():
     assert [len(deck) for deck in board.decks] == [36, 26, 16]
     assert all(len(row) == 4 for row in board.visible)
     assert all(card_id >= 0 for row in board.visible for card_id in row)
-    assert all(player.total_gems() == 0 for player in board.players)
+    assert all(sum(player.gems) == 0 for player in board.players)
     assert all(player.reserved_count == 0 for player in board.players)
     assert_card_partition_is_complete(board)
 
