@@ -3,10 +3,11 @@ from collections import defaultdict
 from csplendor import Game, ActionType, get_card
 
 
-def _setup_rich_player(seed=42):
+def _setup_player_with_payment_choices(seed=42):
     game = Game(seed=seed)
     player = game.board.players[0]
-    player.gems = [3, 3, 3, 3, 3, 3]
+    player.gems = [2, 2, 2, 2, 1, 1]
+    player.reserved = [5, -1, -1]
     game.board.set_player(0, player)
     return game
 
@@ -16,14 +17,14 @@ def _effective_cost(card, player):
 
 
 def test_purchase_actions_have_valid_gold_assignments_and_apply():
-    game = _setup_rich_player()
+    game = _setup_player_with_payment_choices()
     player = game.board.players[0]
     purchase_actions = [a for a in game.legal_actions if a.type == ActionType.PURCHASE]
 
     assert purchase_actions
     by_card = defaultdict(list)
     for action in purchase_actions:
-        by_card[int(action.card_id)].append(action)
+        by_card[(int(action.card_id), bool(action.from_reserved))].append(action)
         card = get_card(int(action.card_id))
         effective = _effective_cost(card, player)
         gold_as = [int(v) for v in action.gold_as]
@@ -44,7 +45,7 @@ def test_purchase_actions_have_valid_gold_assignments_and_apply():
 
 
 def test_simple_payment_mode_keeps_minimal_gold_options_only():
-    full_game = _setup_rich_player(seed=7)
+    full_game = _setup_player_with_payment_choices(seed=7)
     simple_game = full_game.clone()
     simple_game.simple_payment_mode = True
 
