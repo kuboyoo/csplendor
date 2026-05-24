@@ -8,6 +8,22 @@
 
 class MoveGenerator {
 public:
+  struct EligibleNobles {
+    std::array<uint8_t, Board::MAX_NOBLES_ON_BOARD> data = {0};
+    uint8_t count = 0;
+
+    void push_back(uint8_t noble_id) {
+      if (count < data.size())
+        data[count++] = noble_id;
+    }
+
+    bool empty() const { return count == 0; }
+    size_t size() const { return count; }
+    uint8_t operator[](size_t i) const { return data[i]; }
+    const uint8_t *begin() const { return data.data(); }
+    const uint8_t *end() const { return data.data() + count; }
+  };
+
   // Fixed-size version - no heap allocations
   static MoveList generate_all_fixed(const Board &board, bool simple_payment_mode = false) {
     MoveList result;
@@ -33,6 +49,30 @@ public:
     return result;
   }
 
+  static uint16_t count_all_fixed(const Board &board, bool simple_payment_mode = false) {
+    if (board.current_player >= Board::NUM_PLAYERS)
+      return 0;
+
+    if (board.waiting_noble) {
+      return get_eligible_nobles_fixed(board, board.current_player).count;
+    }
+
+    MoveList actions;
+    generate_take_different_fixed(board, actions);
+    generate_take_same_fixed(board, actions);
+    generate_reserve_visible_fixed(board, actions);
+    generate_reserve_deck_fixed(board, actions);
+    generate_purchase_fixed(board, actions, simple_payment_mode);
+
+    uint32_t count = 0;
+    for (size_t i = 0; i < actions.size(); ++i) {
+      count += count_with_returns_fixed(board, actions[i]);
+      if (count >= MAX_MOVES)
+        return MAX_MOVES;
+    }
+    return static_cast<uint16_t>(count);
+  }
+
   // Legacy vector version for compatibility
   static std::vector<Action> generate_all(const Board &board, bool simple_payment_mode = false) {
     MoveList fixed = generate_all_fixed(board, simple_payment_mode);
@@ -54,11 +94,17 @@ public:
 
   static std::vector<uint8_t> get_eligible_nobles(const Board &board,
                                                   int player_idx) {
+    EligibleNobles fixed = get_eligible_nobles_fixed(board, player_idx);
+    return std::vector<uint8_t>(fixed.begin(), fixed.end());
+  }
+
+  static EligibleNobles get_eligible_nobles_fixed(const Board &board,
+                                                  int player_idx) {
+    EligibleNobles eligible;
     if (player_idx < 0 || player_idx >= Board::NUM_PLAYERS)
-      return {};
+      return eligible;
 
     const auto &p = board.players[player_idx];
-    std::vector<uint8_t> eligible;
 
     // Use cached eligibility mask for fast lookup
     uint16_t mask = p.noble_eligibility_mask;
@@ -518,6 +564,59 @@ private:
     }
   }
 
+  static uint16_t count_with_returns_fixed(const Board &b,
+                                           const Action &action) {
+    const auto &p = b.players[b.current_player];
+    uint8_t next_gems[6];
+    for (int i = 0; i < 6; ++i)
+      next_gems[i] = p.gems[i];
+
+    if (action.type == TAKE_DIFFERENT || action.type == TAKE_SAME) {
+      for (int i = 0; i < 5; ++i)
+        next_gems[i] += action.take[i];
+    } else if (action.type == RESERVE_VISIBLE || action.type == RESERVE_DECK) {
+      if (b.bank[GOLD] > 0)
+        next_gems[GOLD]++;
+    } else if (action.type == PURCHASE) {
+      const auto &card = get_card(action.card_id);
+      int gold_used = 0;
+      for (int i = 0; i < 5; ++i) {
+        int cost = std::max(0, (int)card.cost[i] - (int)p.bonuses[i]);
+        int from_gems = std::min((int)next_gems[i], cost);
+        next_gems[i] -= from_gems;
+        gold_used += (cost - from_gems);
+      }
+      next_gems[GOLD] -= gold_used;
+    }
+
+    int total = 0;
+    for (int i = 0; i < 6; ++i)
+      total += next_gems[i];
+
+    int excess = std::max(0, total - Board::MAX_TOKENS);
+    if (excess <= 0)
+      return 1;
+
+    return count_return_combinations_fixed(next_gems, excess, 0);
+  }
+
+  static uint16_t count_return_combinations_fixed(const uint8_t available[6],
+                                                  int remaining,
+                                                  int color_idx) {
+    if (remaining == 0)
+      return 1;
+    if (color_idx == 6)
+      return 0;
+
+    uint16_t count = 0;
+    int max_return = std::min(remaining, (int)available[color_idx]);
+    for (int i = 0; i <= max_return; ++i) {
+      count += count_return_combinations_fixed(available, remaining - i,
+                                               color_idx + 1);
+    }
+    return count;
+  }
+
   static void recursive_return_fixed(const uint8_t available[6], int remaining,
                                      int color_idx,
                                      std::array<uint8_t, 6> current_return,
@@ -539,11 +638,11 @@ private:
   }
 
   static void generate_noble_visit_choices_fixed(const Board &b, MoveList &out) {
-    auto eligible = get_eligible_nobles(b, b.current_player);
-    for (uint8_t noble_id : eligible) {
+    auto eligible = get_eligible_nobles_fixed(b, b.current_player);
+    for (size_t i = 0; i < eligible.size(); ++i) {
       Action a;
       a.type = VISIT_NOBLE;
-      a.noble_choice = noble_id;
+      a.noble_choice = eligible[i];
       out.push_back(a);
     }
   }

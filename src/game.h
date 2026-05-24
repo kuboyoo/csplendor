@@ -51,7 +51,103 @@ public:
   bool apply(const Action &action, bool record_history = true) {
     if (!can_apply(action))
       return false;
+    return apply_unchecked(action, record_history);
+  }
 
+  bool apply_trusted(const Action &action, bool record_history = false) {
+    if (!valid_current_player() || board.is_game_over())
+      return false;
+    return apply_unchecked(action, record_history);
+  }
+
+  uint16_t legal_action_count() const {
+    return MoveGenerator::count_all_fixed(board, simple_payment_mode);
+  }
+
+  std::vector<uint64_t> legal_action_codes() const {
+    MoveList fixed = MoveGenerator::generate_all_fixed(board, simple_payment_mode);
+    std::vector<uint64_t> codes;
+    codes.reserve(fixed.size());
+    for (const Action &action : fixed)
+      codes.push_back(action.pack());
+    return codes;
+  }
+
+  uint64_t legal_action_code_at(uint16_t index) const {
+    MoveList fixed = MoveGenerator::generate_all_fixed(board, simple_payment_mode);
+    if (index >= fixed.size())
+      return 0;
+    return fixed[index].pack();
+  }
+
+  bool apply_action_code(uint64_t code, bool record_history = true) {
+    return apply(Action::unpack(code), record_history);
+  }
+
+  bool apply_action_code_trusted(uint64_t code, bool record_history = false) {
+    return apply_trusted(Action::unpack(code), record_history);
+  }
+
+  bool apply_legal_action_index(uint16_t index, bool record_history = false) {
+    MoveList fixed = MoveGenerator::generate_all_fixed(board, simple_payment_mode);
+    if (index >= fixed.size())
+      return false;
+    return apply_trusted(fixed[index], record_history);
+  }
+
+  bool apply_random_action(uint64_t random_value, bool record_history = false) {
+    MoveList fixed = MoveGenerator::generate_all_fixed(board, simple_payment_mode);
+    if (fixed.empty())
+      return false;
+    return apply_trusted(fixed[random_value % fixed.size()], record_history);
+  }
+
+  bool undo() {
+    if (board_history.empty())
+      return false;
+    board = board_history.back();
+    board_history.pop_back();
+    if (!history.empty())
+      history.pop_back();
+    return true;
+  }
+
+  bool is_legal(const Action &action) const {
+    MoveList legals =
+        MoveGenerator::generate_all_fixed(board, simple_payment_mode);
+    for (const auto &l : legals) {
+      if (l == action)
+        return true;
+    }
+    return false;
+  }
+
+  std::vector<Action> legal_actions() const {
+    return MoveGenerator::generate_all(board, simple_payment_mode);
+  }
+
+  std::vector<Action> base_actions() const {
+    return MoveGenerator::generate_base(board, simple_payment_mode);
+  }
+
+  void set_simple_payment_mode(bool mode) { simple_payment_mode = mode; }
+  bool get_simple_payment_mode() const { return simple_payment_mode; }
+  void set_blank_refill_mode(bool mode) { blank_refill_mode = mode; }
+  bool get_blank_refill_mode() const { return blank_refill_mode; }
+
+  std::array<int, 2> scores() const {
+    return {(int)board.players[0].points, (int)board.players[1].points};
+  }
+
+  bool is_game_over() const { return board.winner != -1; }
+  int winner() const { return board.winner; }
+  int current_player() const { return board.current_player; }
+  int turn() const { return board.turn; }
+
+private:
+  explicit Game(NoInit) {}
+
+  bool apply_unchecked(const Action &action, bool record_history) {
     Board previous;
     if (record_history)
       previous = board;
@@ -95,7 +191,7 @@ public:
     // Standard turn processing (Take Gems, Reserve, Purchase)
     // After standard action, check if noble visits are triggered.
     auto eligible =
-        MoveGenerator::get_eligible_nobles(board, board.current_player);
+        MoveGenerator::get_eligible_nobles_fixed(board, board.current_player);
 
     if (eligible.size() > 1) {
       // Multiple nobles: wait for manual selection.
@@ -115,50 +211,6 @@ public:
     }
     return true;
   }
-
-  bool undo() {
-    if (board_history.empty())
-      return false;
-    board = board_history.back();
-    board_history.pop_back();
-    if (!history.empty())
-      history.pop_back();
-    return true;
-  }
-
-  bool is_legal(const Action &action) const {
-    auto legals = MoveGenerator::generate_all(board);
-    for (const auto &l : legals) {
-      if (l == action)
-        return true;
-    }
-    return false;
-  }
-
-  std::vector<Action> legal_actions() const {
-    return MoveGenerator::generate_all(board, simple_payment_mode);
-  }
-
-  std::vector<Action> base_actions() const {
-    return MoveGenerator::generate_base(board, simple_payment_mode);
-  }
-
-  void set_simple_payment_mode(bool mode) { simple_payment_mode = mode; }
-  bool get_simple_payment_mode() const { return simple_payment_mode; }
-  void set_blank_refill_mode(bool mode) { blank_refill_mode = mode; }
-  bool get_blank_refill_mode() const { return blank_refill_mode; }
-
-  std::array<int, 2> scores() const {
-    return {(int)board.players[0].points, (int)board.players[1].points};
-  }
-
-  bool is_game_over() const { return board.winner != -1; }
-  int winner() const { return board.winner; }
-  int current_player() const { return board.current_player; }
-  int turn() const { return board.turn; }
-
-private:
-  explicit Game(NoInit) {}
 
   bool valid_current_player() const {
     return board.current_player < Board::NUM_PLAYERS;
@@ -303,9 +355,12 @@ private:
       return false;
 
     auto eligible =
-        MoveGenerator::get_eligible_nobles(board, board.current_player);
-    return std::find(eligible.begin(), eligible.end(), a.noble_choice) !=
-           eligible.end();
+        MoveGenerator::get_eligible_nobles_fixed(board, board.current_player);
+    for (uint8_t noble_id : eligible) {
+      if (noble_id == a.noble_choice)
+        return true;
+    }
+    return false;
   }
 
   bool can_apply(const Action &a) const {
@@ -495,14 +550,20 @@ private:
   bool apply_noble_visit(const Action &a) {
     auto &p = board.players[board.current_player];
     auto eligible =
-        MoveGenerator::get_eligible_nobles(board, board.current_player);
+        MoveGenerator::get_eligible_nobles_fixed(board, board.current_player);
     if (eligible.empty())
       return a.type != VISIT_NOBLE;
 
     uint8_t noble_id;
     if (a.type == VISIT_NOBLE) {
-      auto it = std::find(eligible.begin(), eligible.end(), a.noble_choice);
-      if (it == eligible.end())
+      bool found = false;
+      for (uint8_t eligible_id : eligible) {
+        if (eligible_id == a.noble_choice) {
+          found = true;
+          break;
+        }
+      }
+      if (!found)
         return false;
       noble_id = static_cast<uint8_t>(a.noble_choice);
     } else if (eligible.size() == 1) {

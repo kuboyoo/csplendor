@@ -164,8 +164,8 @@ public:
   static std::array<uint8_t, BASE_ACTION_COUNT> get_action_mask(const Game &game) {
     std::array<uint8_t, BASE_ACTION_COUNT> mask = {0};
 
-    // Get legal actions from the game
-    const auto &legal_actions = game.legal_actions();
+    MoveList legal_actions =
+        MoveGenerator::generate_all_fixed(game.board, game.simple_payment_mode);
 
     // Encode each legal action and mark in mask
     for (const Action &action : legal_actions) {
@@ -187,7 +187,8 @@ public:
    * payment method (minimizing gold usage).
    */
   static Action decode(int index, const Game &game) {
-    const auto &legal_actions = game.legal_actions();
+    MoveList legal_actions =
+        MoveGenerator::generate_all_fixed(game.board, game.simple_payment_mode);
 
     // Find all actions that encode to this index
     Action best_action;
@@ -284,7 +285,8 @@ public:
 
     const Board &board = game.board;
     const PlayerState &player = board.players[board.current_player];
-    const auto &legal_actions = game.legal_actions();
+    MoveList legal_actions =
+        MoveGenerator::generate_all_fixed(game.board, game.simple_payment_mode);
 
     for (const Action &action : legal_actions) {
       int idx = encode(action, game);

@@ -27,6 +27,105 @@ struct Action {
   // For noble choice (if multiple are eligible)
   int8_t noble_choice = -1; // ID of the noble chosen
 
+  uint64_t pack() const {
+    uint64_t code = static_cast<uint64_t>(type) & 0x7ULL;
+
+    switch (type) {
+    case TAKE_DIFFERENT:
+    case TAKE_SAME: {
+      int shift = 3;
+      for (int i = 0; i < 5; ++i, shift += 2)
+        code |= (static_cast<uint64_t>(take[i]) & 0x3ULL) << shift;
+      for (int i = 0; i < 6; ++i, shift += 4)
+        code |= (static_cast<uint64_t>(return_gems[i]) & 0xFULL) << shift;
+      break;
+    }
+    case RESERVE_VISIBLE: {
+      code |= (static_cast<uint64_t>(card_id + 1) & 0x7FULL) << 3;
+      int shift = 10;
+      for (int i = 0; i < 6; ++i, shift += 4)
+        code |= (static_cast<uint64_t>(return_gems[i]) & 0xFULL) << shift;
+      break;
+    }
+    case RESERVE_DECK: {
+      code |= (static_cast<uint64_t>(deck_level + 1) & 0x3ULL) << 3;
+      int shift = 5;
+      for (int i = 0; i < 6; ++i, shift += 4)
+        code |= (static_cast<uint64_t>(return_gems[i]) & 0xFULL) << shift;
+      break;
+    }
+    case PURCHASE: {
+      code |= (static_cast<uint64_t>(card_id + 1) & 0x7FULL) << 3;
+      code |= (static_cast<uint64_t>(from_reserved ? 1 : 0) & 0x1ULL) << 10;
+      int shift = 11;
+      for (int i = 0; i < 5; ++i, shift += 3)
+        code |= (static_cast<uint64_t>(gold_as[i]) & 0x7ULL) << shift;
+      break;
+    }
+    case VISIT_NOBLE:
+      code |= (static_cast<uint64_t>(noble_choice + 1) & 0x1FULL) << 3;
+      break;
+    default:
+      break;
+    }
+
+    return code;
+  }
+
+  static Action unpack(uint64_t code) {
+    Action action;
+    action.type = static_cast<ActionType>(code & 0x7ULL);
+
+    switch (action.type) {
+    case TAKE_DIFFERENT:
+    case TAKE_SAME: {
+      int shift = 3;
+      for (int i = 0; i < 5; ++i, shift += 2)
+        action.take[i] = static_cast<uint8_t>((code >> shift) & 0x3ULL);
+      for (int i = 0; i < 6; ++i, shift += 4)
+        action.return_gems[i] =
+            static_cast<uint8_t>((code >> shift) & 0xFULL);
+      break;
+    }
+    case RESERVE_VISIBLE: {
+      int card = static_cast<int>((code >> 3) & 0x7FULL);
+      action.card_id = static_cast<int8_t>(card - 1);
+      int shift = 10;
+      for (int i = 0; i < 6; ++i, shift += 4)
+        action.return_gems[i] =
+            static_cast<uint8_t>((code >> shift) & 0xFULL);
+      break;
+    }
+    case RESERVE_DECK: {
+      int deck = static_cast<int>((code >> 3) & 0x3ULL);
+      action.deck_level = static_cast<int8_t>(deck - 1);
+      int shift = 5;
+      for (int i = 0; i < 6; ++i, shift += 4)
+        action.return_gems[i] =
+            static_cast<uint8_t>((code >> shift) & 0xFULL);
+      break;
+    }
+    case PURCHASE: {
+      int card = static_cast<int>((code >> 3) & 0x7FULL);
+      action.card_id = static_cast<int8_t>(card - 1);
+      action.from_reserved = ((code >> 10) & 0x1ULL) != 0;
+      int shift = 11;
+      for (int i = 0; i < 5; ++i, shift += 3)
+        action.gold_as[i] = static_cast<uint8_t>((code >> shift) & 0x7ULL);
+      break;
+    }
+    case VISIT_NOBLE:
+      action.noble_choice =
+          static_cast<int8_t>(static_cast<int>((code >> 3) & 0x1FULL) - 1);
+      break;
+    default:
+      action.type = ACTION_TYPE_COUNT;
+      break;
+    }
+
+    return action;
+  }
+
   bool operator==(const Action &other) const {
     if (type != other.type)
       return false;

@@ -153,6 +153,9 @@ PYBIND11_MODULE(_csplendor, m) {
       .def_readwrite("gold_as", &Action::gold_as)
       .def_readwrite("return_gems", &Action::return_gems)
       .def_readwrite("noble_choice", &Action::noble_choice)
+      .def("pack", &Action::pack, "Pack action into a compact uint64 code")
+      .def_static("unpack", &Action::unpack, py::arg("code"),
+                  "Unpack a compact uint64 action code")
       .def("__repr__", &Action::to_string);
 
   py::enum_<ActionType>(m, "ActionType")
@@ -262,6 +265,19 @@ PYBIND11_MODULE(_csplendor, m) {
       .def_readonly("board", &Game::board)
       .def("apply", &Game::apply, py::arg("action"),
            py::arg("record_history") = true)
+      .def("apply_trusted", &Game::apply_trusted, py::arg("action"),
+           py::arg("record_history") = false,
+           "Apply an already-known legal action without full validation")
+      .def("apply_action_code", &Game::apply_action_code, py::arg("code"),
+           py::arg("record_history") = true)
+      .def("apply_action_code_trusted", &Game::apply_action_code_trusted,
+           py::arg("code"), py::arg("record_history") = false)
+      .def("apply_legal_action_index", &Game::apply_legal_action_index,
+           py::arg("index"), py::arg("record_history") = false,
+           "Generate legal actions internally and apply the selected index")
+      .def("apply_random_action", &Game::apply_random_action,
+           py::arg("random_value"), py::arg("record_history") = false,
+           "Generate legal actions internally and apply random_value % count")
       .def("undo", &Game::undo)
       .def("is_legal", &Game::is_legal)
       .def("is_game_over", &Game::is_game_over)
@@ -274,6 +290,10 @@ PYBIND11_MODULE(_csplendor, m) {
                              [](const Game &g) { return (int)g.board.turn; })
       .def_property_readonly("scores", &Game::scores)
       .def_property_readonly("legal_actions", &Game::legal_actions)
+      .def_property_readonly("legal_action_count", &Game::legal_action_count)
+      .def_property_readonly("legal_action_codes", &Game::legal_action_codes)
+      .def("legal_action_code_at", &Game::legal_action_code_at,
+           py::arg("index"))
       .def_property_readonly("base_actions", &Game::base_actions)
       .def_property("simple_payment_mode", &Game::get_simple_payment_mode,
                     &Game::set_simple_payment_mode,
