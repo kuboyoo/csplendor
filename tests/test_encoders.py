@@ -44,7 +44,7 @@ def test_action_encoder_sizes_match_current_cpp_implementation():
         [0, 0, 0, 0, 0, 0],
         [2, 2, 2, 1, 1, 0],
         [2, 2, 2, 2, 2, 0],
-        [3, 3, 3, 3, 3, 3],
+        [2, 2, 2, 2, 1, 1],
     ],
 )
 def test_action_masks_cover_every_encoded_legal_action(encoder, gems):
