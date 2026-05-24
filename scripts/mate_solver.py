@@ -8,7 +8,12 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import csplendor as cs
-from csplendor.api.usi_kifu import action_to_usi, find_legal_action_index_by_usi
+from csplendor.api.usi_kifu import (
+    action_to_usi,
+    find_legal_action_index_by_usi,
+    position_to_game,
+    spn_to_game,
+)
 
 
 MATE = "Mate"
@@ -569,6 +574,18 @@ def load_game_from_json(path: str) -> cs.Game:
     return game
 
 
+def load_game_from_usi_text(text: str, seed: int = 0) -> cs.Game:
+    text = _extract_position_text(text)
+    if text.lower().startswith("position "):
+        return position_to_game(text, seed=seed)
+    return spn_to_game(text, seed=seed)
+
+
+def load_game_from_usi_file(path: str, seed: int = 0) -> cs.Game:
+    with open(path, "r", encoding="utf-8") as fh:
+        return load_game_from_usi_text(fh.read(), seed=seed)
+
+
 def apply_usi_moves(game: cs.Game, moves: Sequence[str]) -> None:
     for move in moves:
         move = move.strip()
@@ -595,11 +612,29 @@ def _parse_moves(values: Sequence[str]) -> List[str]:
     return moves
 
 
+def _extract_position_text(text: str) -> str:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        raise ValueError("empty USI position text")
+
+    position_lines = [line for line in lines if line.lower().startswith("position ")]
+    if position_lines:
+        return position_lines[-1]
+
+    if len(lines) == 1:
+        return lines[0]
+
+    return " ".join(lines)
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Search guaranteed Splendor mate with universal reveal branching."
     )
-    parser.add_argument("--state-json", help="JSON file describing an arbitrary state")
+    state_group = parser.add_mutually_exclusive_group()
+    state_group.add_argument("--state-json", help="JSON file describing an arbitrary state")
+    state_group.add_argument("--position", help="USI position command or raw SPN text")
+    state_group.add_argument("--position-file", help="file containing a USI position command or raw SPN")
     parser.add_argument("--seed", type=int, default=0, help="initial game seed when state-json is omitted")
     parser.add_argument("--moves", action="append", default=[], help="USI move list, comma-separated or repeated")
     parser.add_argument("--attacker", type=int, default=0, choices=(0, 1))
@@ -612,7 +647,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        game = load_game_from_json(args.state_json) if args.state_json else cs.Game(seed=args.seed)
+        if args.state_json:
+            game = load_game_from_json(args.state_json)
+        elif args.position:
+            game = load_game_from_usi_text(args.position, seed=args.seed)
+        elif args.position_file:
+            game = load_game_from_usi_file(args.position_file, seed=args.seed)
+        else:
+            game = cs.Game(seed=args.seed)
         apply_usi_moves(game, _parse_moves(args.moves))
         options = SolverOptions(
             max_nodes=args.node_limit,

@@ -61,6 +61,26 @@ python scripts/mate_solver.py \
   --pretty
 ```
 
+USIプロトコルの `position` コマンドをそのまま渡すこともできます。
+
+```bash
+python scripts/mate_solver.py \
+  --position 'position bank:W4U4G4R4K4D5 | visible:L1[0,8,16,24]L2[40,46,52,58]L3[70,74,78,82] | decks:36,26,16 | nobles:[0,3,7] | P0:gems:W0U0G0R0K0D0;bonuses:W0U0G0R0K0;points:0;reserved:[];bought:[] | P1:gems:W0U0G0R0K0D0;bonuses:W0U0G0R0K0;points:0;reserved:[];bought:[] 0' \
+  --attacker 0 \
+  --max-depth 2 \
+  --pretty
+```
+
+長い場合はファイルから読み込めます。
+
+```bash
+python scripts/mate_solver.py \
+  --position-file position.txt \
+  --attacker 0 \
+  --max-depth 2 \
+  --pretty
+```
+
 証明木が大きい場合は、`--no-proof` を付けると結果と統計だけを出します。
 
 ```bash
@@ -72,6 +92,8 @@ python scripts/mate_solver.py --state-json state.json --attacker 0 --max-depth 2
 | 引数 | 必須 | 既定値 | 内容 |
 | --- | --- | --- | --- |
 | `--state-json PATH` | 任意 | なし | 任意盤面を表すJSONファイル。省略時は `--seed` から初期化します。 |
+| `--position TEXT` | 任意 | なし | USI `position` コマンド、`startpos 2`、またはSPN文字列を直接渡します。 |
+| `--position-file PATH` | 任意 | なし | USI `position` コマンド、`startpos 2`、またはSPN文字列をファイルから読み込みます。 |
 | `--seed N` | 任意 | `0` | `--state-json` を使わない場合の初期局面seed。`--state-json` 内にも `seed` を書けます。 |
 | `--moves TEXT` | 任意 | なし | 探索前に適用するUSI風の手。カンマ区切り、または複数回指定できます。 |
 | `--attacker {0,1}` | 任意 | `0` | 詰みを探す側のプレイヤーID。 |
@@ -81,6 +103,8 @@ python scripts/mate_solver.py --state-json state.json --attacker 0 --max-depth 2
 | `--allow-deck-reserve` | 任意 | false | 伏せ予約を探索の合法手に含めます。通常の詰み問題では使いません。 |
 | `--no-proof` | 任意 | false | `proof_tree` / `refutation` の生成を抑制します。 |
 | `--pretty` | 任意 | false | JSON出力をインデントします。 |
+
+`--state-json`, `--position`, `--position-file` は同時指定できません。`--position` や `--position-file` に含まれる `moves` を適用したあと、追加で `--moves` に指定した手が適用されます。
 
 終了コード:
 
@@ -422,3 +446,56 @@ result = solver.solve(state)
 - 証明木は大きくなりやすいので、大量検証では `--no-proof` を使ってください。
 - 伏せ予約は詰み問題用ルールとしてデフォルト除外です。通常は `--allow-deck-reserve` を使わないでください。
 - JSONローダーは完全な局面合法性検証をしません。カード重複、購入枚数、得点、ボーナス、銀行トークン数は呼び出し側で整合させてください。
+
+## USI position / SPNの渡し方
+
+`doc/USI.md` の `position` コマンドとSPNを読み込めます。以下の3形式はいずれも有効です。
+
+```text
+position startpos 2 moves take:WUG reserve:C12
+```
+
+```text
+position bank:W4U4G4R4K4D5 | visible:L1[0,8,16,24]L2[40,46,52,58]L3[70,74,78,82] | decks:36,26,16 | nobles:[0,3,7] | P0:gems:W0U0G0R0K0D0;bonuses:W0U0G0R0K0;points:0;reserved:[];bought:[] | P1:gems:W0U0G0R0K0D0;bonuses:W0U0G0R0K0;points:0;reserved:[];bought:[] 0 moves take:WUG
+```
+
+```text
+bank:W4U4G4R4K4D5 | visible:L1[0,8,16,24]L2[40,46,52,58]L3[70,74,78,82] | decks:36,26,16 | nobles:[0,3,7] | P0:gems:W0U0G0R0K0D0;bonuses:W0U0G0R0K0;points:0;reserved:[];bought:[] | P1:gems:W0U0G0R0K0D0;bonuses:W0U0G0R0K0;points:0;reserved:[];bought:[] 0
+```
+
+`--position-file` に複数行のプロトコルログを渡した場合は、最後に現れる `position ...` 行を読み込みます。`position` 行がない場合は、ファイル全体をSPNとして連結して読み込みます。
+
+SPNの基本形:
+
+```text
+<bank> | <visible> | <decks> | <nobles> | <player0> | <player1> <current_player>
+```
+
+各セクション:
+
+```text
+bank:W4U4G4R4K4D5
+visible:L1[0,8,16,24]L2[40,46,52,58]L3[70,74,78,82]
+decks:36,26,16
+nobles:[0,3,7]
+P0:gems:W0U0G0R0K0D0;bonuses:W0U0G0R0K0;points:0;reserved:[];bought:[]
+P1:gems:W0U0G0R0K0D0;bonuses:W0U0G0R0K0;points:0;reserved:[];bought:[]
+0
+```
+
+SPNの `decks` はカードIDではなく残数です。ソルバーは次の情報から未公開カード集合を復元します。
+
+- 全90枚のカードID
+- `visible` に出ているカードID
+- 各プレイヤーの `reserved` にあるカードID
+- 各プレイヤーの `bought` にあるカードID
+- `decks:<L1>,<L2>,<L3>` の残数
+
+このため、SPN内の残数と既知カードIDから推定される残数が一致しない場合は `InvalidInput` になります。たとえばレベル1は全40枚なので、レベル1の場カード4枚と購入済みカード1枚がSPNに含まれているなら、`decks` のレベル1残数は `35` である必要があります。
+
+伏せ予約 `?L1` / `?L2` / `?L3` はUSI仕様上は表現できますが、詰みソルバーでは正確な合法手生成と購入可否判定にカードIDが必要です。そのため、ソルバー入力では `reserved:[?L1]` のような伏せ予約は `InvalidInput` とし、具体的なカードIDを渡してください。
+
+```text
+reserved:[12]       # OK
+reserved:[?L1]      # ソルバーではInvalidInput
+```

@@ -1,6 +1,15 @@
 import csplendor as cs
+from csplendor.api.usi_kifu import game_to_spn
 
-from scripts.mate_solver import MATE, NO_MATE, MateSolver, SolverOptions, SolverState, solve_game
+from scripts.mate_solver import (
+    MATE,
+    NO_MATE,
+    MateSolver,
+    SolverOptions,
+    SolverState,
+    load_game_from_usi_text,
+    solve_game,
+)
 
 
 def _fast_options(**overrides):
@@ -70,3 +79,17 @@ def test_reveal_branching_does_not_mutate_source_state():
 
     assert [[int(card_id) for card_id in row] for row in state.game.board.visible] == original_visible
     assert state.unseen_by_level == original_unseen
+
+
+def test_solver_loads_usi_position_text():
+    original = cs.Game(seed=4)
+    loaded = load_game_from_usi_text(f"position {game_to_spn(original)}")
+
+    assert [[int(card_id) for card_id in row] for row in loaded.board.visible] == [
+        [int(card_id) for card_id in row] for row in original.board.visible
+    ]
+    assert [
+        set(int(card_id) for card_id in deck) for deck in loaded.board.decks
+    ] == [
+        set(int(card_id) for card_id in deck) for deck in original.board.decks
+    ]
