@@ -1,32 +1,27 @@
-import time
-from csplendor import Game, Action
 import random
+import time
 
-def run_performance_test(n_games=1000):
-    start_time = time.time()
+import pytest
+
+from csplendor import Game
+
+pytestmark = pytest.mark.performance
+
+
+def test_random_playout_performance_smoke():
+    rng = random.Random(42)
+    start = time.perf_counter()
     total_moves = 0
-    
-    for i in range(n_games):
-        game = Game(seed=i)
-        while not game.is_game_over():
-            legals = game.legal_actions
-            if not legals:
-                break
-            action = random.choice(legals)
-            game.apply(action)
-            total_moves += 1
-            
-    end_time = time.time()
-    duration = end_time - start_time
-    gps = n_games / duration
-    mps = total_moves / duration
-    
-    print(f"Performance Test Results:")
-    print(f"  Games played: {n_games}")
-    print(f"  Total moves: {total_moves}")
-    print(f"  Duration: {duration:.2f}s")
-    print(f"  Games per second: {gps:.2f}")
-    print(f"  Moves per second: {mps:.2f}")
 
-if __name__ == "__main__":
-    run_performance_test(10000)
+    for seed in range(100):
+        game = Game(seed=seed)
+        while not game.is_game_over() and total_moves < 3000:
+            legal_actions = game.legal_actions
+            if not legal_actions:
+                break
+            assert game.apply(rng.choice(legal_actions)) is True
+            total_moves += 1
+
+    elapsed = time.perf_counter() - start
+    assert total_moves > 0
+    assert total_moves / max(elapsed, 1e-9) > 100
