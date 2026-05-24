@@ -77,9 +77,9 @@ For detailed specifications, please refer to the `doc/` directory:
 ## Testing
 Run the verification scripts to ensure everything is working:
 ```bash
-PYTHONPATH=. python test_random.py
-PYTHONPATH=. python test_ml.py
-PYTHONPATH=. python test_api.py
+PYTHONPATH=. python tests/test_random.py
+PYTHONPATH=. python tests/test_ml.py
+PYTHONPATH=. python tests/test_api.py
 ```
 
 ---
