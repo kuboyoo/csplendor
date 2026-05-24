@@ -124,6 +124,7 @@ PYBIND11_MODULE(_csplendor, m) {
       .def_readwrite("packed_bonuses", &PlayerState::packed_bonuses)
       .def_readwrite("reserved_count", &PlayerState::reserved_count)
       .def_readwrite("reserved_is_hidden", &PlayerState::reserved_is_hidden)
+      .def_readwrite("purchased_count", &PlayerState::purchased_count)
       .def_property(
           "reserved",
           [](const PlayerState &p) {
@@ -192,31 +193,81 @@ PYBIND11_MODULE(_csplendor, m) {
             b.bank = bank;
             b.invalidate_hash();
           })
-      .def_property_readonly("visible",
-                             [](const Board &b) {
-                               std::vector<std::vector<int8_t>> v(
-                                   3, std::vector<int8_t>(4));
-                               for (int i = 0; i < 3; ++i)
-                                 for (int j = 0; j < 4; ++j)
-                                   v[i][j] = b.visible[i][j];
-                               return v;
-                             })
-      .def_property_readonly("nobles",
-                             [](const Board &b) {
-                               std::vector<uint8_t> v;
-                               for (size_t i = 0; i < b.nobles.size(); ++i)
-                                 v.push_back(b.nobles[i]);
-                               return v;
-                             })
-      .def_property_readonly("decks",
-                             [](const Board &b) {
-                               std::vector<std::vector<uint8_t>> d(3);
-                               for (int i = 0; i < 3; ++i) {
-                                 for (size_t j = 0; j < b.decks[i].size(); ++j)
-                                   d[i].push_back(b.decks[i][j]);
-                               }
-                               return d;
-                             })
+      .def_property(
+          "visible",
+          [](const Board &b) {
+            std::vector<std::vector<int8_t>> v(3, std::vector<int8_t>(4));
+            for (int i = 0; i < 3; ++i)
+              for (int j = 0; j < 4; ++j)
+                v[i][j] = b.visible[i][j];
+            return v;
+          },
+          [](Board &b, const std::vector<std::vector<int>> &visible) {
+            if (visible.size() != 3)
+              throw py::value_error("visible must have 3 levels");
+            for (int i = 0; i < 3; ++i) {
+              if (visible[i].size() != Board::CARDS_PER_LEVEL)
+                throw py::value_error("each visible level must have 4 slots");
+              for (int j = 0; j < Board::CARDS_PER_LEVEL; ++j) {
+                int card_id = visible[i][j];
+                if (card_id != -1 && !is_valid_card_id(card_id))
+                  throw py::value_error("visible contains invalid card id");
+                b.visible[i][j] = static_cast<int8_t>(card_id);
+              }
+            }
+            b.invalidate_hash();
+          })
+      .def_property(
+          "nobles",
+          [](const Board &b) {
+            std::vector<uint8_t> v;
+            for (size_t i = 0; i < b.nobles.size(); ++i)
+              v.push_back(b.nobles[i]);
+            return v;
+          },
+          [](Board &b, const std::vector<int> &nobles) {
+            if (nobles.size() > Board::MAX_NOBLES_ON_BOARD)
+              throw py::value_error("too many nobles");
+            b.nobles.clear();
+            for (int noble_id : nobles) {
+              if (!is_valid_noble_id(noble_id))
+                throw py::value_error("nobles contains invalid noble id");
+              b.nobles.push_back(static_cast<uint8_t>(noble_id));
+            }
+            b.invalidate_hash();
+          })
+      .def_property(
+          "decks",
+          [](const Board &b) {
+            std::vector<std::vector<uint8_t>> d(3);
+            for (int i = 0; i < 3; ++i) {
+              for (size_t j = 0; j < b.decks[i].size(); ++j)
+                d[i].push_back(b.decks[i][j]);
+            }
+            return d;
+          },
+          [](Board &b, const std::vector<std::vector<int>> &decks) {
+            if (decks.size() != 3)
+              throw py::value_error("decks must have 3 levels");
+            for (int i = 0; i < 3; ++i) {
+              if (decks[i].size() > Board::MAX_DECK_SIZE)
+                throw py::value_error("deck level exceeds max size");
+              b.decks[i].clear();
+              for (int card_id : decks[i]) {
+                if (!is_valid_card_id(card_id) ||
+                    get_card(card_id).level != i + 1)
+                  throw py::value_error("decks contains invalid card id");
+                b.decks[i].push_back(static_cast<uint8_t>(card_id));
+              }
+            }
+            b.invalidate_hash();
+          })
+      .def_property(
+          "final_round", [](const Board &b) { return b.final_round; },
+          [](Board &b, bool final_round) {
+            b.final_round = final_round;
+            b.invalidate_hash();
+          })
       .def_property(
           "waiting_noble", [](const Board &b) { return b.waiting_noble; },
           [](Board &b, bool waiting) {
