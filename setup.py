@@ -62,7 +62,7 @@ setup(
     install_requires=["numpy>=1.20"],
     extras_require={
         "ml": ["torch>=1.10"],
-        "web": ["fastapi>=0.100", "uvicorn>=0.20", "pydantic"],
-        "dev": ["pytest>=7.0", "pytest-cov>=4.0"],
+        "web": ["fastapi>=0.100", "uvicorn>=0.20", "pydantic", "httpx>=0.24,<0.28"],
+        "dev": ["pytest>=7.0", "pytest-cov>=4.0", "fastapi>=0.100", "httpx>=0.24,<0.28"],
     },
 )

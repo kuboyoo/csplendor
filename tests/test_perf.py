@@ -39,19 +39,6 @@ def _best_rate(work, iterations, rounds=5):
     return iterations / best_elapsed
 
 
-@pytest.mark.performance
-def test_legal_actions_generation_benchmark(record_property):
-    game = _make_midgame()
-    actions = game.legal_actions
-    assert len(actions) >= 100
-
-    iterations = 2_000
-    actions_per_sec = _best_rate(lambda: game.legal_actions, iterations)
-    record_property("legal_actions_per_sec", round(actions_per_sec, 2))
-
-    assert actions_per_sec >= MIN_LEGAL_ACTIONS_PER_SEC
-
-
 def test_compact_action_codes_roundtrip():
     game = _make_midgame()
     actions = game.legal_actions
@@ -68,6 +55,18 @@ def test_compact_action_codes_roundtrip():
     assert via_action.apply(actions[0], False)
     assert via_code.apply_action_code_trusted(codes[0], False)
     assert via_action.board_hash() == via_code.board_hash()
+
+
+@pytest.mark.performance
+def test_legal_actions_generation_benchmark(record_property):
+    game = _make_midgame()
+    actions = game.legal_actions
+    assert len(actions) >= 100
+
+    actions_per_sec = _best_rate(lambda: game.legal_actions, 2_000)
+    record_property("legal_actions_per_sec", round(actions_per_sec, 2))
+
+    assert actions_per_sec >= MIN_LEGAL_ACTIONS_PER_SEC
 
 
 @pytest.mark.performance
@@ -97,7 +96,7 @@ def test_random_playout_benchmark(record_property):
             actions = game.legal_actions
             if not actions:
                 break
-            game.apply(rng.choice(actions))
+            assert game.apply(rng.choice(actions)) is True
             total_moves += 1
 
     elapsed = time.perf_counter() - start

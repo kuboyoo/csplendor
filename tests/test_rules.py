@@ -1,60 +1,68 @@
-import pytest
-from csplendor import Game, Action, ActionType, GemType
+from csplendor import ActionType, Game, get_noble
 
-def test_max_gems_rule():
+
+def test_max_gems_rule_requires_exact_return_count():
     game = Game(seed=123)
-    # Give player 0 exactly 10 gems
-    p0 = game.board.players[0]
-    p0.gems = [2, 2, 2, 2, 2, 0]
-    game.board.set_player(0, p0)
-    
-    # Check that any action taking more gems forces a return
-    legals = game.legal_actions
-    for a in legals:
-        if a.type in [ActionType.TAKE_DIFFERENT, ActionType.TAKE_SAME]:
-            # All legal take actions in this state MUST have return_gems
-            assert sum(a.return_gems) > 0
-            # Total gems after action minus returns must be <= 10
-            total_after = sum(p0.gems) + sum(a.take) - sum(a.return_gems)
-            assert total_after <= 10
+    player = game.board.players[0]
+    player.gems = [2, 2, 2, 2, 2, 0]
+    game.board.set_player(0, player)
 
-def test_reserve_limit():
-    game = Game()
-    p0 = game.board.players[0]
-    p0.reserved = [1, 2, 3] # Max 3
-    game.board.set_player(0, p0)
-    
-    # If 3 reserved, RESERVE actions should be illegal
-    legals = game.legal_actions
-    for a in legals:
-        assert a.type not in [ActionType.RESERVE_VISIBLE, ActionType.RESERVE_DECK]
+    for action in game.legal_actions:
+        if action.type not in (ActionType.TAKE_DIFFERENT, ActionType.TAKE_SAME):
+            continue
+        total_after_take = sum(player.gems) + sum(action.take)
+        assert sum(action.return_gems) == total_after_take - 10
+        assert total_after_take - sum(action.return_gems) == 10
 
-def test_noble_visit():
-    game = Game()
-    # Setup player with enough bonuses for any noble
-    p0 = game.board.players[0]
-    from csplendor import get_noble
-    noble_id = game.board.nobles[0]
+
+def test_reserve_limit_removes_all_reserve_actions():
+    game = Game(seed=1)
+    player = game.board.players[0]
+    player.reserved = [1, 2, 3]
+    game.board.set_player(0, player)
+
+    assert game.board.players[0].reserved_count == 3
+    assert all(
+        action.type not in (ActionType.RESERVE_VISIBLE, ActionType.RESERVE_DECK)
+        for action in game.legal_actions
+    )
+
+
+def test_noble_visit_is_automatic_or_requires_explicit_choice():
+    game = Game(seed=5)
+    noble_id = int(game.board.nobles[0])
     noble = get_noble(noble_id)
-    
-    bonuses = [0]*5
-    for i in range(5):
-        bonuses[i] = noble.requirement[i]
-    p0.bonuses = bonuses
-    game.board.set_player(0, p0)
-        
-    legals = game.legal_actions
-    action = [a for a in legals if a.type == ActionType.TAKE_DIFFERENT][0]
-    game.apply(action)
-    
-    # Player 0 should have the noble points
-    # (Since current_player is now 1, we check players[0])
-    assert game.board.players[0].points >= 3
-    assert noble_id not in game.board.nobles
 
-if __name__ == "__main__":
-    test_max_gems_rule()
-    test_reserve_limit()
-    # test_purchase_with_gold() # Requires careful setup of visible
-    # test_noble_visit()
-    print("Rule tests passed!")
+    player = game.board.players[0]
+    player.bonuses = [int(v) for v in noble.requirement]
+    game.board.set_player(0, player)
+
+    regular_action = next(a for a in game.legal_actions if a.type == ActionType.TAKE_DIFFERENT)
+    assert game.apply(regular_action) is True
+
+    if game.board.waiting_noble:
+        noble_action = next(
+            a for a in game.legal_actions
+            if a.type == ActionType.VISIT_NOBLE and int(a.noble_choice) == noble_id
+        )
+        assert game.apply(noble_action) is True
+
+    player_after = game.board.players[0]
+    assert noble_id in [int(n) for n in player_after.acquired_nobles]
+    assert noble_id not in [int(n) for n in game.board.nobles]
+    assert player_after.points >= 3
+
+
+def test_final_round_winner_by_points_after_both_players_move():
+    game = Game(seed=9)
+    player0 = game.board.players[0]
+    player0.points = 15
+    game.board.set_player(0, player0)
+
+    assert game.apply(game.legal_actions[0]) is True
+    assert not game.is_game_over()
+    assert game.current_player == 1
+
+    assert game.apply(game.legal_actions[0]) is True
+    assert game.is_game_over()
+    assert game.winner == 0
