@@ -15,3 +15,8 @@ dependencies = [
 ml = ["torch>=1.10"]
 web = ["fastapi>=0.100", "uvicorn>=0.20", "pydantic"]
 dev = ["pytest>=7.0", "pytest-cov>=4.0"]
+
+[tool.pytest.ini_options]
+markers = [
+    "performance: speed regression benchmarks",
+]
