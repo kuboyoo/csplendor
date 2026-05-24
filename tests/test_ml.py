@@ -1,64 +1,54 @@
 import numpy as np
-from csplendor import Game, StateFeaturizer, ActionEncoder
 
-def test_ml_components():
+from csplendor import ActionEncoder, ActionEncoderCpp, Game, StateEncoder, StateFeaturizer
+
+
+def test_python_and_cpp_state_encoders_return_stable_feature_vectors():
     game = Game(seed=42)
     featurizer = StateFeaturizer()
+
+    py_features = featurizer.featurize(game)
+    cpp_features = np.asarray(StateEncoder.encode(game), dtype=np.float32)
+    cpp_canonical = np.asarray(StateEncoder.encode_canonical(game, 1), dtype=np.float32)
+
+    assert py_features.shape == (196,)
+    assert cpp_features.shape == (196,)
+    assert cpp_canonical.shape == (196,)
+    assert np.isfinite(py_features).all()
+    assert np.isfinite(cpp_features).all()
+    assert np.isfinite(cpp_canonical).all()
+    np.testing.assert_allclose(py_features, cpp_features, rtol=1e-6, atol=1e-6)
+
+
+def test_legacy_python_action_encoder_mask_covers_legal_base_actions():
+    game = Game(seed=42)
     encoder = ActionEncoder()
-    
-    print("Testing ML Components...")
-    
-    # 1. Test Featurization
-    features = featurizer.featurize(game)
-    print(f"Feature shape: {features.shape}")
-    assert features.shape[0] > 0
-    assert not np.isnan(features).any()
-    
-    # 2. Test Action Encoding
+
     legal_actions = game.legal_actions
-    print(f"Number of legal actions: {len(legal_actions)}")
-    
     mask = encoder.get_action_mask(game)
-    print(f"Action mask shape: {mask.shape}")
-    print(f"Number of masked legal actions: {np.sum(mask)}")
-    
-    assert mask.shape[0] == encoder.BASE_ACTION_COUNT
-    
-    # 3. Test Roundtrip (if any legal)
-    if len(legal_actions) > 0:
-        action = legal_actions[0]
-        idx = encoder.encode(action, game)
-        print(f"Encoded action index: {idx}")
-        if idx != -1:
-            decoded = encoder.decode(idx, game)
-            assert decoded is not None
-            # We can't easily compare Action objects because they are C++ objects
-            # but we can check if the type matches
-            assert decoded.type == action.type
-            print("Action roundtrip (type check) passed.")
 
-    # 4. Run a few steps in the game
-    for i in range(5):
-        legals = game.legal_actions
-        if not legals:
-            break
-        game.apply(legals[0])
-        features = featurizer.featurize(game)
-        assert features.shape == (196,) # 6(bank) + 2*36(players) + 96(visible) + 3(decks) + 18(nobles) + 1(current) = 196
-        # Bank (6)
-        # Player 0 (36): gems(6), bonuses(5), points(1), reserved(3*8=24)
-        # Player 1 (36)
-        # Visible (12*8=96)
-        # Decks (3)
-        # Nobles (3*NOBLE_FEATURE_SIZE(6)=18)
-        # Current (1)
-        # Total: 6 + 36 + 36 + 96 + 3 + 18 + 1 = 196
-        # Wait, my CARD_FEATURE_SIZE is 8.
-        # 6 + 2*(6+5+1+3*8) + 12*8 + 3 + 3*6 + 1 = 196.
-        # Let's see what the actual shape is.
-        print(f"Step {i} feature shape: {features.shape}")
+    assert mask.shape == (encoder.BASE_ACTION_COUNT,)
+    assert mask.dtype == np.bool_
+    assert mask.any()
 
-    print("ML components test completed successfully!")
+    encoded_ids = {encoder.encode(action, game) for action in legal_actions}
+    encoded_ids.discard(-1)
+    assert encoded_ids
+    assert encoded_ids == set(np.flatnonzero(mask))
 
-if __name__ == "__main__":
-    test_ml_components()
+    for action_id in encoded_ids:
+        decoded = encoder.decode(action_id, game)
+        assert decoded is not None
+        assert encoder.encode(decoded, game) == action_id
+
+
+def test_cpp_legacy_action_encoder_mask_matches_encoded_legals():
+    game = Game(seed=123)
+    mask = np.asarray(ActionEncoderCpp.get_action_mask(game), dtype=np.uint8)
+
+    assert mask.shape == (ActionEncoderCpp.BASE_ACTION_COUNT,)
+    assert mask.sum() > 0
+
+    encoded_ids = {ActionEncoderCpp.encode(action, game) for action in game.legal_actions}
+    encoded_ids.discard(-1)
+    assert encoded_ids == set(np.flatnonzero(mask))
