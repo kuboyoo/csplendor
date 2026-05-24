@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=42", "pybind11>=2.10", "cmake>=3.12"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "csplendor"
+version = "0.1.0"
+description = "A fast Splendor game engine for 2 players"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy>=1.20",
+]
+
+[project.optional-dependencies]
+ml = ["torch>=1.10"]
+web = ["fastapi>=0.100", "uvicorn>=0.20", "pydantic"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0"]
