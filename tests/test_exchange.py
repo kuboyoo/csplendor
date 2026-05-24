@@ -10,16 +10,21 @@ Verifies all 6 exchange scenarios have no duplicates and no omissions:
 6. RESERVE + gold (1 taken), return 1 (player at 10 gems)
 """
 
-import pytest
 from collections import defaultdict
+from itertools import product
+
+import pytest
+
 from csplendor import Game, Action, ActionType, ActionEncoderV2
 
 
 # ─── Helper functions ───
 
-def setup_game_with_gems(gems, seed=42):
+def setup_game_with_gems(gems, seed=42, bank=None):
     """Create a game and set player 0's gems to the given distribution."""
     game = Game(seed=seed)
+    if bank is not None:
+        game.board.bank = list(bank)
     p0 = game.board.players[0]
     p0.gems = list(gems)
     game.board.set_player(0, p0)
@@ -34,6 +39,29 @@ def return_tuple(action):
 def take_tuple(action):
     """Take gems as a hashable tuple."""
     return tuple(action.take)
+
+
+def action_base_key(action):
+    """Return the action identity without return_gems."""
+    if action.type in (ActionType.TAKE_DIFFERENT, ActionType.TAKE_SAME):
+        return action.type, tuple(action.take)
+    if action.type == ActionType.RESERVE_VISIBLE:
+        return action.type, action.card_id
+    if action.type == ActionType.RESERVE_DECK:
+        return action.type, action.deck_level
+    return action.type, action.card_id, action.from_reserved
+
+
+def gem_distributions(total=None):
+    """Enumerate plausible two-player token holdings: colors <=4, gold <=5."""
+    for colors in product(range(5), repeat=5):
+        for gold in range(6):
+            gems = colors + (gold,)
+            if total is None:
+                if sum(gems) <= 10:
+                    yield gems
+            elif sum(gems) == total:
+                yield gems
 
 
 def compute_expected_return_combos(available, excess):
@@ -70,6 +98,53 @@ def simulate_next_gems(player_gems, action, board):
         if board.bank[5] > 0:  # Gold in bank
             next_g[5] += 1
     return next_g
+
+
+def verify_all_return_groups(game, action_types=None, label=""):
+    """
+    Verify every generated gem-return group against a ground-truth return set.
+
+    Unlike verify_exchange_actions(), this does not assume one fixed excess
+    value. It is suitable for broad state enumeration where each base action
+    may require 0, 1, 2, or 3 returned tokens.
+    """
+    player_gems = list(game.board.players[game.board.current_player].gems)
+    groups = defaultdict(list)
+    for action in game.legal_actions:
+        if action_types is not None and action.type not in action_types:
+            continue
+        groups[action_base_key(action)].append(action)
+
+    checked_groups = 0
+    checked_actions = 0
+    for key, actions in groups.items():
+        next_gems = simulate_next_gems(player_gems, actions[0], game.board)
+        excess = max(0, sum(next_gems) - 10)
+        expected = compute_expected_return_combos(next_gems, excess)
+        actual = {return_tuple(action) for action in actions}
+
+        assert actual == expected, (
+            f"[{label}] key={key}: return set mismatch. "
+            f"missing={sorted(expected - actual)[:8]} "
+            f"extra={sorted(actual - expected)[:8]} "
+            f"player_gems={player_gems} next_gems={next_gems}"
+        )
+
+        assert len(actual) == len(actions), (
+            f"[{label}] key={key}: duplicate return_gems generated"
+        )
+
+        for action in actions:
+            assert sum(action.return_gems) == excess, (
+                f"[{label}] key={key}: expected return sum {excess}, "
+                f"got {sum(action.return_gems)} for {list(action.return_gems)}"
+            )
+            assert sum(next_gems) - sum(action.return_gems) <= 10
+
+        checked_groups += 1
+        checked_actions += len(actions)
+
+    return checked_groups, checked_actions
 
 
 # ─── Core verification function ───
@@ -324,6 +399,90 @@ class TestReserveExchange:
         assert result["missing"] == 0, "Missing return combos"
 
 
+# ─── Test: Exhaustive gem-return coverage ───
+
+class TestExhaustiveExchangeCoverage:
+    """Broadly enumerate token distributions and verify return-gem coverage."""
+
+    EXCHANGE_TYPES = {
+        ActionType.TAKE_DIFFERENT,
+        ActionType.TAKE_SAME,
+        ActionType.RESERVE_VISIBLE,
+        ActionType.RESERVE_DECK,
+    }
+
+    def test_full_bank_all_player_token_distributions(self):
+        """
+        With a normal full bank, every plausible player token distribution
+        must generate exactly the expected return set for every exchange group.
+        """
+        checked_states = 0
+        checked_groups = 0
+        checked_actions = 0
+
+        for gems in gem_distributions():
+            game = setup_game_with_gems(gems)
+            groups, actions = verify_all_return_groups(
+                game, self.EXCHANGE_TYPES, label=f"full_bank gems={gems}"
+            )
+            checked_states += 1
+            checked_groups += groups
+            checked_actions += actions
+
+        assert checked_states == 5498
+        assert checked_groups > 0
+        assert checked_actions > 0
+
+    def test_depleted_bank_take_different_one_or_two_colors(self):
+        """
+        If the bank has fewer than 3 normal colors, TAKE_DIFFERENT takes all
+        available colors. Cover the take-1 and take-2 return cases explicitly.
+        """
+        checked_states = 0
+        checked_groups = 0
+        checked_actions = 0
+
+        for available_count in (1, 2):
+            for mask in range(1, 1 << 5):
+                if mask.bit_count() != available_count:
+                    continue
+                bank = tuple(1 if mask & (1 << i) else 0 for i in range(5)) + (5,)
+                for gems in gem_distributions(total=10):
+                    game = setup_game_with_gems(gems, bank=bank)
+                    groups, actions = verify_all_return_groups(
+                        game,
+                        {ActionType.TAKE_DIFFERENT},
+                        label=f"depleted_bank bank={bank} gems={gems}",
+                    )
+                    checked_states += 1
+                    checked_groups += groups
+                    checked_actions += actions
+
+        assert checked_states == 15 * 1627
+        assert checked_groups > 0
+        assert checked_actions > 0
+
+    def test_depleted_bank_no_gold_reserve_has_no_return(self):
+        """
+        Reserving when the bank has no gold must not invent a return action,
+        even if the player already has 10 tokens.
+        """
+        checked_groups = 0
+        checked_actions = 0
+        for gems in gem_distributions(total=10):
+            game = setup_game_with_gems(gems, bank=(4, 4, 4, 4, 4, 0))
+            groups, actions = verify_all_return_groups(
+                game,
+                {ActionType.RESERVE_VISIBLE, ActionType.RESERVE_DECK},
+                label=f"no_gold_reserve gems={gems}",
+            )
+            checked_groups += groups
+            checked_actions += actions
+
+        assert checked_groups > 0
+        assert checked_actions > 0
+
+
 # ─── Test: ActionEncoderV2 coverage ───
 
 class TestEncoderV2Coverage:
@@ -372,32 +531,40 @@ class TestEncoderV2Coverage:
         game = setup_game_with_gems([2, 2, 2, 1, 1, 0])  # excess=1
         result = self._check_encoder(game, "enc_TD_ret1")
         print(f"Encoder TD ret1: {result}")
-        # Note: encode failures expected for redundant returns (returning taken color)
-        # We just report them, not assert
+        assert result["failures"] == 0
+        assert result["collisions"] == 0
 
     def test_encoder_take_diff_return2(self):
         """Encoder covers TAKE_DIFFERENT with return 2."""
         game = setup_game_with_gems([2, 2, 2, 2, 1, 0])  # excess=2
         result = self._check_encoder(game, "enc_TD_ret2")
         print(f"Encoder TD ret2: {result}")
+        assert result["failures"] == 0
+        assert result["collisions"] == 0
 
     def test_encoder_take_diff_return3(self):
         """Encoder covers TAKE_DIFFERENT with return 3."""
         game = setup_game_with_gems([2, 2, 2, 2, 2, 0])  # excess=3
         result = self._check_encoder(game, "enc_TD_ret3")
         print(f"Encoder TD ret3: {result}")
+        assert result["failures"] == 0
+        assert result["collisions"] == 0
 
     def test_encoder_take_same_return2(self):
         """Encoder covers TAKE_SAME with return 2."""
         game = setup_game_with_gems([2, 2, 2, 2, 2, 0])  # excess=2
         result = self._check_encoder(game, "enc_TS_ret2")
         print(f"Encoder TS ret2: {result}")
+        assert result["failures"] == 0
+        assert result["collisions"] == 0
 
     def test_encoder_reserve_return1(self):
         """Encoder covers RESERVE with return 1."""
         game = setup_game_with_gems([2, 2, 2, 2, 2, 0])  # excess=1
         result = self._check_encoder(game, "enc_RES_ret1")
         print(f"Encoder RES ret1: {result}")
+        assert result["failures"] == 0
+        assert result["collisions"] == 0
 
 
 # ─── Test: Cross-verification (V2 encode-decode round-trip) ───
@@ -436,6 +603,7 @@ class TestEncoderRoundTrip:
                 failures += 1
         print(f"Exchange round-trip: {len(exchange_actions)} actions, "
               f"{failures} return_gems mismatches")
+        assert failures == 0
 
 
 # ─── Test: Comprehensive statistics ───
@@ -457,6 +625,8 @@ class TestExchangeStatistics:
         for gems, label in configs:
             game = setup_game_with_gems(gems)
             legals = game.legal_actions
+            assert game.legal_action_count == len(legals)
+
             by_type = defaultdict(int)
             by_type_exchange = defaultdict(int)
             for a in legals:
@@ -507,6 +677,9 @@ class TestExchangeStatistics:
                     print(f"    color {color}: {n} variants "
                           f"({non_redundant} non-redundant, {redundant} return-taken)")
 
+            assert sum(by_type.values()) == len(legals)
+            assert sum(by_type_exchange.values()) > 0
+
 
 # ─── Test: Verify non-redundant subset matches V2 encoder pattern counts ───
 
@@ -529,10 +702,17 @@ class TestNonRedundantCounts:
 
         for key, actions in groups.items():
             taken = [i for i in range(5) if key[i] > 0]
-            nr = self._count_non_redundant_returns(actions, taken)
-            # With 3 returnable colors (2 non-taken + gold), return 1: 3 patterns
-            # But only if player has those gems!
-            print(f"  combo {taken}: {nr} non-redundant (of {len(actions)} total)")
+            next_gems = simulate_next_gems(list(game.board.players[0].gems),
+                                           actions[0], game.board)
+            expected = {
+                ret for ret in compute_expected_return_combos(next_gems, 1)
+                if all(ret[c] == 0 for c in taken)
+            }
+            actual = {
+                return_tuple(a) for a in actions
+                if all(a.return_gems[c] == 0 for c in taken)
+            }
+            assert actual == expected
 
     def test_take_diff_non_redundant_return2(self):
         """TD excess=2: non-redundant from 3 colors, return 2 → H(3,2)=6 patterns."""
@@ -545,8 +725,17 @@ class TestNonRedundantCounts:
 
         for key, actions in groups.items():
             taken = [i for i in range(5) if key[i] > 0]
-            nr = self._count_non_redundant_returns(actions, taken)
-            print(f"  combo {taken}: {nr} non-redundant (of {len(actions)} total)")
+            next_gems = simulate_next_gems(list(game.board.players[0].gems),
+                                           actions[0], game.board)
+            expected = {
+                ret for ret in compute_expected_return_combos(next_gems, 2)
+                if all(ret[c] == 0 for c in taken)
+            }
+            actual = {
+                return_tuple(a) for a in actions
+                if all(a.return_gems[c] == 0 for c in taken)
+            }
+            assert actual == expected
 
     def test_take_diff_non_redundant_return3(self):
         """TD excess=3: non-redundant from 3 colors, return 3 → H(3,3)=10 patterns max."""
@@ -559,11 +748,17 @@ class TestNonRedundantCounts:
 
         for key, actions in groups.items():
             taken = [i for i in range(5) if key[i] > 0]
-            nr = self._count_non_redundant_returns(actions, taken)
-            # returnable colors depend on which were taken
-            returnable = [i for i in range(6) if i not in taken]
-            print(f"  combo {taken} (returnable={returnable}): "
-                  f"{nr} non-redundant (of {len(actions)} total)")
+            next_gems = simulate_next_gems(list(game.board.players[0].gems),
+                                           actions[0], game.board)
+            expected = {
+                ret for ret in compute_expected_return_combos(next_gems, 3)
+                if all(ret[c] == 0 for c in taken)
+            }
+            actual = {
+                return_tuple(a) for a in actions
+                if all(a.return_gems[c] == 0 for c in taken)
+            }
+            assert actual == expected
 
     def test_encoder_v2_pattern_coverage_return3(self):
         """
@@ -607,6 +802,9 @@ class TestNonRedundantCounts:
         if encode_fail > 0:
             print(f"\n  *** GAP DETECTED: {encode_fail} non-redundant return-3 actions "
                   f"cannot be encoded by ActionEncoderV2! ***")
+
+        assert encode_fail == 0
+        assert encode_collision == 0
 
 
 if __name__ == "__main__":

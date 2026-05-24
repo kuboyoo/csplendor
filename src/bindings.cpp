@@ -186,7 +186,12 @@ PYBIND11_MODULE(_csplendor, m) {
             b.current_player = static_cast<uint8_t>(player);
             b.invalidate_hash();
           })
-      .def_property_readonly("bank", [](const Board &b) { return b.bank; })
+      .def_property(
+          "bank", [](const Board &b) { return b.bank; },
+          [](Board &b, std::array<uint8_t, 6> bank) {
+            b.bank = bank;
+            b.invalidate_hash();
+          })
       .def_property_readonly("visible",
                              [](const Board &b) {
                                std::vector<std::vector<int8_t>> v(
