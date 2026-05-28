@@ -13,6 +13,17 @@ from scripts.mate_solver import (
 )
 
 
+BENCH_POSITION = (
+    "position bank:W1U3G3R3K0D4 | "
+    "visible:L1[35,33,20,24]L2[46,61,51,66]L3[80,86,87,88] | "
+    "decks:36,23,15 | nobles:[1,10,6] | "
+    "P0:name:Player0;gems:W3U1G1R1K2D0;bonuses:W2U2G1R3K3;points:5;"
+    "nobles:[-,-,-];reserved:[68];bought:[_,_,_,_,_,_,_,_,_,_,_] | "
+    "P1:name:Player1;gems:W0U0G0R0K2D1;bonuses:W3U1G0R0K3;points:8;"
+    "nobles:[-,-,-];reserved:[85,44,43];bought:[_,_,_,_,_,_,_] | 0"
+)
+
+
 def _fast_options(**overrides):
     values = {
         "max_nodes": 10000,
@@ -228,15 +239,7 @@ def test_dfpn_lazy_defender_actions_refine_before_proof():
 
 
 def test_dfpn_collapses_take_actions_by_net_token_delta():
-    game = load_game_from_usi_text(
-        "position bank:W1U3G3R3K0D4 | "
-        "visible:L1[35,33,20,24]L2[46,61,51,66]L3[80,86,87,88] | "
-        "decks:36,23,15 | nobles:[1,10,6] | "
-        "P0:name:Player0;gems:W3U1G1R1K2D0;bonuses:W2U2G1R3K3;points:5;"
-        "nobles:[-,-,-];reserved:[68];bought:[_,_,_,_,_,_,_,_,_,_,_] | "
-        "P1:name:Player1;gems:W0U0G0R0K2D1;bonuses:W3U1G0R0K3;points:8;"
-        "nobles:[-,-,-];reserved:[85,44,43];bought:[_,_,_,_,_,_,_] | 0"
-    )
+    game = load_game_from_usi_text(BENCH_POSITION)
     state = SolverState.from_game(game)
     solver = DFPNMateSolver(attacker=0, max_depth=4, options=_fast_options())
     actions = [
@@ -267,6 +270,21 @@ def test_dfpn_collapses_take_actions_by_net_token_delta():
     assert len(action_shapes) > 1
     assert len(child_keys) == 1
     assert len(collapsed) < len(actions)
+
+
+def test_dfpn_limits_dependency_target_candidates():
+    game = load_game_from_usi_text(BENCH_POSITION)
+    state = SolverState.from_game(game)
+    solver = DFPNMateSolver(attacker=0, max_depth=4, options=_fast_options())
+    solver.target_candidate_limit = 5
+    limited = solver._candidate_target_cards(state, 0)
+
+    solver.target_candidate_limit = 0
+    unlimited = solver._candidate_target_cards(state, 0)
+
+    assert len(limited) == 5
+    assert set(limited).issubset(set(unlimited))
+    assert len(unlimited) > len(limited)
 
 
 def test_dfpn_move_ordering_prioritizes_high_value_purchase():

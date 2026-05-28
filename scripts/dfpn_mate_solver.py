@@ -50,6 +50,7 @@ _DFPN_DEFAULT_PRUNING = {
     "immediate_terminal": True,
     "defender_threat_filter": False,
     "max_actions_per_node": 0,
+    "target_candidate_limit": 5,
 }
 
 _WORKER_STATE: Optional[SolverState] = None
@@ -199,6 +200,7 @@ class DFPNMateSolver:
         self.use_immediate_terminal_pruning = bool(_DFPN_DEFAULT_PRUNING["immediate_terminal"])
         self.use_defender_threat_filter = bool(_DFPN_DEFAULT_PRUNING["defender_threat_filter"])
         self.max_actions_per_node = int(_DFPN_DEFAULT_PRUNING["max_actions_per_node"])
+        self.target_candidate_limit = int(_DFPN_DEFAULT_PRUNING["target_candidate_limit"])
         self.max_tt_entries: Optional[int] = None
         self.parallel_tt_limit = 10000
         self.progress = ProgressReporter(False, 1.0)
@@ -539,6 +541,7 @@ class DFPNMateSolver:
         payload["_dfpn_immediate_terminal_pruning"] = self.use_immediate_terminal_pruning
         payload["_dfpn_defender_threat_filter"] = self.use_defender_threat_filter
         payload["_dfpn_max_actions_per_node"] = self.max_actions_per_node
+        payload["_dfpn_target_candidate_limit"] = self.target_candidate_limit
         payload["_dfpn_max_tt_entries"] = max(0, int(self.parallel_tt_limit))
         return payload
 
@@ -1843,15 +1846,50 @@ class DFPNMateSolver:
 
     def _candidate_target_cards(self, state: SolverState, player_idx: int) -> List[int]:
         board = state.game.board
-        cards = {
+        player = board.get_player(player_idx)
+        reserved = {
             int(card_id)
+            for card_id in player.reserved
+            if int(card_id) >= 0
+        }
+        cards = {
+            int(card_id): int(card_id) in reserved
             for row in board.visible
             for card_id in row
             if int(card_id) >= 0
         }
-        player = board.get_player(player_idx)
-        cards.update(int(card_id) for card_id in player.reserved if int(card_id) >= 0)
-        return sorted(cards)
+        for card_id in reserved:
+            cards[card_id] = True
+
+        limit = max(0, int(self.target_candidate_limit))
+        if limit <= 0 or len(cards) <= limit:
+            return sorted(cards)
+
+        gems = self._fixed_ints(player.gems, 6)
+        bonuses = self._fixed_ints(player.bonuses, 5)
+        ranked: List[Tuple[int, int, int, int]] = []
+        for card_id, is_reserved in cards.items():
+            _, points, bonus, cost = self._card_info(card_id)
+            missing = 0
+            missing_colors = 0
+            for color in range(5):
+                lack = max(0, cost[color] - bonuses[color] - gems[color])
+                missing += lack
+                if lack > 0:
+                    missing_colors += 1
+            gap = max(0, missing - gems[5])
+            # This only steers dependency pruning and token ordering. Prefer
+            # scoring cards and reserved cards, then near-term bonus progress.
+            score = (
+                points * 1000
+                + (200 if is_reserved else 0)
+                + (100 if 0 <= bonus < 5 else 0)
+                - gap * 80
+                - missing_colors * 10
+            )
+            ranked.append((score, -gap, points, card_id))
+        ranked.sort(reverse=True)
+        return sorted(card_id for _, _, _, card_id in ranked[:limit])
 
     def _card_expected_score(
         self,
@@ -2199,6 +2237,7 @@ def _parallel_root_worker(task: Dict[str, Any]) -> Dict[str, Any]:
     use_immediate_terminal_pruning = bool(option_payload.pop("_dfpn_immediate_terminal_pruning", True))
     use_defender_threat_filter = bool(option_payload.pop("_dfpn_defender_threat_filter", False))
     max_actions_per_node = int(option_payload.pop("_dfpn_max_actions_per_node", 0))
+    target_candidate_limit = int(option_payload.pop("_dfpn_target_candidate_limit", 5))
     max_tt_entries = int(option_payload.pop("_dfpn_max_tt_entries", 0))
     options = SolverOptions(**option_payload)
     solver = DFPNMateSolver(_WORKER_ATTACKER, _WORKER_MAX_DEPTH, options)
@@ -2217,12 +2256,8 @@ def _parallel_root_worker(task: Dict[str, Any]) -> Dict[str, Any]:
     solver.use_upper_bound_pruning = use_upper_bound_pruning
     solver.use_immediate_terminal_pruning = use_immediate_terminal_pruning
     solver.use_defender_threat_filter = use_defender_threat_filter
-    solver.max_actions_per_node = max_actions_per_node
-    solver.use_return_pattern_pruning = use_return_pattern_pruning
-    solver.use_upper_bound_pruning = use_upper_bound_pruning
-    solver.use_immediate_terminal_pruning = use_immediate_terminal_pruning
-    solver.use_defender_threat_filter = use_defender_threat_filter
-    solver.max_actions_per_node = max_actions_per_node
+    solver.max_actions_per_node = max(0, max_actions_per_node)
+    solver.target_candidate_limit = max(0, target_candidate_limit)
     solver.max_tt_entries = max_tt_entries if max_tt_entries > 0 else None
     solver._last_worker_progress = 0.0
 
@@ -2336,6 +2371,7 @@ def solve_game_dfpn(
     use_immediate_terminal_pruning: bool = True,
     use_defender_threat_filter: bool = False,
     max_actions_per_node: int = 0,
+    target_candidate_limit: int = 5,
     parallel_tt_limit: int = 10000,
     show_progress: bool = False,
     progress_interval: float = 1.0,
@@ -2347,6 +2383,12 @@ def solve_game_dfpn(
     solver.use_defender_relevance_pruning = use_defender_relevance_pruning
     solver.use_threat_reveal_pruning = use_threat_reveal_pruning
     solver.use_equivalence_hash = use_equivalence_hash
+    solver.use_return_pattern_pruning = use_return_pattern_pruning
+    solver.use_upper_bound_pruning = use_upper_bound_pruning
+    solver.use_immediate_terminal_pruning = use_immediate_terminal_pruning
+    solver.use_defender_threat_filter = use_defender_threat_filter
+    solver.max_actions_per_node = max(0, int(max_actions_per_node))
+    solver.target_candidate_limit = max(0, int(target_candidate_limit))
     solver.parallel_tt_limit = max(0, int(parallel_tt_limit))
     solver.progress = ProgressReporter(show_progress, progress_interval)
     solver.parallel_start_method = parallel_start_method
@@ -2381,6 +2423,9 @@ def solve_game_dfpn(*args: Any, **kwargs: Any) -> SearchResult:
     max_actions_per_node = kwargs.pop(
         "max_actions_per_node", _DFPN_DEFAULT_PRUNING["max_actions_per_node"]
     )
+    target_candidate_limit = kwargs.pop(
+        "target_candidate_limit", _DFPN_DEFAULT_PRUNING["target_candidate_limit"]
+    )
     _DFPN_DEFAULT_PRUNING.update(
         {
             "lazy_reveal": bool(use_lazy_reveal_pruning),
@@ -2391,6 +2436,7 @@ def solve_game_dfpn(*args: Any, **kwargs: Any) -> SearchResult:
             "immediate_terminal": bool(use_immediate_terminal_pruning),
             "defender_threat_filter": bool(use_defender_threat_filter),
             "max_actions_per_node": max(0, int(max_actions_per_node)),
+            "target_candidate_limit": max(0, int(target_candidate_limit)),
         }
     )
     return _solve_game_dfpn_impl(
@@ -2398,6 +2444,12 @@ def solve_game_dfpn(*args: Any, **kwargs: Any) -> SearchResult:
         use_lazy_reveal_pruning=bool(use_lazy_reveal_pruning),
         use_attacker_dependency_pruning=bool(use_attacker_dependency_pruning),
         use_defender_relevance_pruning=bool(use_defender_relevance_pruning),
+        use_return_pattern_pruning=bool(use_return_pattern_pruning),
+        use_upper_bound_pruning=bool(use_upper_bound_pruning),
+        use_immediate_terminal_pruning=bool(use_immediate_terminal_pruning),
+        use_defender_threat_filter=bool(use_defender_threat_filter),
+        max_actions_per_node=max(0, int(max_actions_per_node)),
+        target_candidate_limit=max(0, int(target_candidate_limit)),
         **kwargs,
     )
 
@@ -2480,6 +2532,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="Optional cap after move ordering and pruning; 0 means no cap.",
     )
     parser.add_argument(
+        "--target-candidate-limit",
+        type=int,
+        default=int(_DFPN_DEFAULT_PRUNING["target_candidate_limit"]),
+        help="Limit scored target cards for dependency pruning; 0 disables the limit.",
+    )
+    parser.add_argument(
         "--parallel-tt-limit",
         type=int,
         default=10000,
@@ -2528,6 +2586,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "immediate_terminal": not args.no_immediate_terminal_pruning,
                 "defender_threat_filter": args.defender_threat_filter,
                 "max_actions_per_node": max(0, int(args.max_actions_per_node)),
+                "target_candidate_limit": max(0, int(args.target_candidate_limit)),
             }
         )
         result = solve_game_dfpn(
@@ -2545,6 +2604,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             use_immediate_terminal_pruning=not args.no_immediate_terminal_pruning,
             use_defender_threat_filter=args.defender_threat_filter,
             max_actions_per_node=max(0, int(args.max_actions_per_node)),
+            target_candidate_limit=max(0, int(args.target_candidate_limit)),
             parallel_tt_limit=args.parallel_tt_limit,
             show_progress=args.progress,
             progress_interval=args.progress_interval,
