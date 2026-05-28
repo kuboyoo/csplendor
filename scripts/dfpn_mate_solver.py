@@ -1632,7 +1632,7 @@ class DFPNMateSolver:
             )
             representatives.append(best)
             self.stats.return_pattern_pruned += len(grouped) - 1
-        return representatives
+        return self._collapse_equivalent_take_actions(representatives)
 
     def _representative_action_key(self, action: cs.Action) -> Tuple[Any, ...]:
         action_type = int(action.type)
@@ -1647,6 +1647,42 @@ class DFPNMateSolver:
         if action_type == int(cs.ActionType.VISIT_NOBLE):
             return ("noble", int(action.noble_choice))
         return ("other", action_type, int(action.pack()))
+
+    def _collapse_equivalent_take_actions(self, actions: Sequence[cs.Action]) -> List[cs.Action]:
+        groups: Dict[Tuple[int, ...], List[cs.Action]] = {}
+        passthrough: List[cs.Action] = []
+        take_types = {
+            int(cs.ActionType.TAKE_DIFFERENT),
+            int(cs.ActionType.TAKE_SAME),
+        }
+        for action in actions:
+            if int(action.type) in take_types:
+                groups.setdefault(self._take_net_delta(action), []).append(action)
+            else:
+                passthrough.append(action)
+
+        collapsed = list(passthrough)
+        for grouped in groups.values():
+            if len(grouped) == 1:
+                collapsed.append(grouped[0])
+                continue
+            best = max(grouped, key=self._take_equivalence_score)
+            collapsed.append(best)
+            self.stats.return_pattern_pruned += len(grouped) - 1
+        return collapsed
+
+    def _take_net_delta(self, action: cs.Action) -> Tuple[int, ...]:
+        take = self._fixed_ints(action.take, 6)
+        returns = self._fixed_ints(action.return_gems, 6)
+        return tuple(take[color] - returns[color] for color in range(6))
+
+    def _take_equivalence_score(self, action: cs.Action) -> Tuple[int, int, int]:
+        returns = self._fixed_ints(action.return_gems, 6)
+        return (
+            -returns[5],
+            -sum(returns[:5]),
+            -int(self._helper._action_order_key(action)[0]),
+        )
 
     def _representative_action_score(
         self,

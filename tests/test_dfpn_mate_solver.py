@@ -227,6 +227,48 @@ def test_dfpn_lazy_defender_actions_refine_before_proof():
     assert len(root.children) == before + omitted
 
 
+def test_dfpn_collapses_take_actions_by_net_token_delta():
+    game = load_game_from_usi_text(
+        "position bank:W1U3G3R3K0D4 | "
+        "visible:L1[35,33,20,24]L2[46,61,51,66]L3[80,86,87,88] | "
+        "decks:36,23,15 | nobles:[1,10,6] | "
+        "P0:name:Player0;gems:W3U1G1R1K2D0;bonuses:W2U2G1R3K3;points:5;"
+        "nobles:[-,-,-];reserved:[68];bought:[_,_,_,_,_,_,_,_,_,_,_] | "
+        "P1:name:Player1;gems:W0U0G0R0K2D1;bonuses:W3U1G0R0K3;points:8;"
+        "nobles:[-,-,-];reserved:[85,44,43];bought:[_,_,_,_,_,_,_] | 0"
+    )
+    state = SolverState.from_game(game)
+    solver = DFPNMateSolver(attacker=0, max_depth=4, options=_fast_options())
+    actions = [
+        action
+        for action in solver._helper._legal_actions(state)
+        if int(action.type) in (int(cs.ActionType.TAKE_DIFFERENT), int(cs.ActionType.TAKE_SAME))
+    ]
+    groups = {}
+    for action in actions:
+        groups.setdefault(solver._take_net_delta(action), []).append(action)
+    equivalent = next(group for group in groups.values() if len(group) > 1)
+    collapsed = solver._collapse_equivalent_take_actions(actions)
+
+    action_shapes = {
+        (
+            int(action.type),
+            tuple(solver._fixed_ints(action.take, 6)),
+            tuple(solver._fixed_ints(action.return_gems, 6)),
+        )
+        for action in equivalent
+    }
+    child_keys = set()
+    for action in equivalent:
+        child = game.clone_light()
+        assert child.apply(action, False)
+        child_keys.add(solver._helper._canonical_key(SolverState.from_game(child)))
+
+    assert len(action_shapes) > 1
+    assert len(child_keys) == 1
+    assert len(collapsed) < len(actions)
+
+
 def test_dfpn_move_ordering_prioritizes_high_value_purchase():
     game = cs.Game(seed=0)
     player = game.board.get_player(0)
