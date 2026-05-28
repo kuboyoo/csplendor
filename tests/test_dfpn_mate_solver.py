@@ -182,6 +182,51 @@ def test_dfpn_root_parallel_keeps_lazy_reveal_inside_action_task():
     assert tasks[0]["kind"] == "action"
 
 
+def test_dfpn_lazy_attacker_actions_refine_before_disproof():
+    game = cs.Game(seed=4)
+    state = SolverState.from_game(game)
+    solver = DFPNMateSolver(attacker=0, max_depth=4, options=_fast_options())
+    root = solver._state_node(state, 4)
+    solver._expand(root)
+
+    assert root.node_type == "OR"
+    assert root.omitted_actions
+
+    for child in root.children:
+        child.proof = dfpn_mate_solver.INF
+        child.disproof = 0
+    before = len(root.children)
+    omitted = len(root.omitted_actions)
+    solver._update(root)
+
+    assert root.lazy_actions_materialized
+    assert solver.stats.lazy_action_refinements == 1
+    assert len(root.children) == before + omitted
+
+
+def test_dfpn_lazy_defender_actions_refine_before_proof():
+    game = cs.Game(seed=0)
+    game.board.current_player = 1
+    state = SolverState.from_game(game)
+    solver = DFPNMateSolver(attacker=0, max_depth=4, options=_fast_options())
+    root = solver._state_node(state, 4)
+    solver._expand(root)
+
+    assert root.node_type == "AND"
+    assert root.omitted_actions
+
+    for child in root.children:
+        child.proof = 0
+        child.disproof = dfpn_mate_solver.INF
+    before = len(root.children)
+    omitted = len(root.omitted_actions)
+    solver._update(root)
+
+    assert root.lazy_actions_materialized
+    assert solver.stats.lazy_action_refinements == 1
+    assert len(root.children) == before + omitted
+
+
 def test_dfpn_move_ordering_prioritizes_high_value_purchase():
     game = cs.Game(seed=0)
     player = game.board.get_player(0)
