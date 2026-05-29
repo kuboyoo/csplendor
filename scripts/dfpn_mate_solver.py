@@ -2094,6 +2094,8 @@ class DFPNMateSolver:
     def _lazy_reveal_needs_refinement(self, node: _DFPNNode) -> bool:
         if node.kind != "lazy_reveal" or node.lazy_reveal_materialized:
             return False
+        if node.reason == "defender_action" and node.depth <= 0:
+            return False
         if not node.children:
             return False
         return any(child.proof == 0 or child.disproof == 0 for child in node.children)

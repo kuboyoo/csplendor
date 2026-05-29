@@ -196,6 +196,31 @@ def test_dfpn_lazy_reveal_starts_with_blank_then_refines():
     assert all(child.outcome.reveal_card is not None for child in lazy.children)
 
 
+def test_dfpn_skips_defender_depth_zero_lazy_reveal_refinement():
+    game = cs.Game(seed=1)
+    game.board.current_player = 1
+    state = SolverState.from_game(game)
+    solver = DFPNMateSolver(attacker=0, max_depth=1, options=_fast_options())
+    action = next(
+        action for action in solver._helper._legal_actions(state)
+        if int(action.type) == int(cs.ActionType.RESERVE_VISIBLE)
+    )
+    action_node = solver._action_node(state, 0, action, actor_is_attacker=False)
+
+    solver._expand(action_node)
+    lazy = action_node.children[0]
+    solver._expand(lazy)
+
+    lazy.children[0].proof = 0
+    lazy.children[0].disproof = dfpn_mate_solver.INF
+    solver._update(lazy)
+
+    assert not lazy.lazy_reveal_materialized
+    assert solver.stats.lazy_reveal_refinements == 0
+    assert len(lazy.children) == 1
+    assert lazy.children[0].outcome.reveal_card is None
+
+
 def test_dfpn_root_parallel_keeps_lazy_reveal_inside_action_task():
     game = cs.Game(seed=1)
     state = SolverState.from_game(game)
