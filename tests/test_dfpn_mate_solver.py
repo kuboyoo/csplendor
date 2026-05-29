@@ -430,6 +430,20 @@ def test_visible_only_winner_ignores_depth_and_decks():
     assert result.proof_tree["mode"] == "visible_only_winner"
     assert result.proof_tree["assumptions"]["hidden_decks_ignored"] is True
     assert result.proof_tree["assumptions"]["max_depth_ignored"] is True
+    assert result.proof_tree["assumptions"]["policy"] == "full_legal_minimax_with_cycle_score_adjudication"
+    assert result.proof_tree["assumptions"]["all_visible_only_responses_read"] is True
+    assert result.proof_tree["line"]
+
+
+def test_visible_only_winner_reports_unknown_on_search_limit():
+    result = solve_visible_only_winner(
+        cs.Game(seed=1),
+        options=_fast_options(max_nodes=1, time_limit=1.0, include_proof=True),
+    )
+
+    assert result.status == dfpn_mate_solver.UNKNOWN
+    assert result.stats.unknown_reason == "node limit exceeded"
+    assert result.proof_tree["unknown_reason"] == "node limit exceeded"
 
 
 def test_dfpn_cli_visible_only_winner_does_not_require_max_depth(monkeypatch, capsys):
@@ -447,7 +461,7 @@ def test_dfpn_cli_visible_only_winner_does_not_require_max_depth(monkeypatch, ca
     code = dfpn_mate_solver.main([
         "--position",
         "position startpos 2",
-        "--visible-only-winner",
+        "--visible-only",
     ])
 
     assert code == 0

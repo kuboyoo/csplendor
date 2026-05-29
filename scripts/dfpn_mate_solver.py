@@ -2406,97 +2406,150 @@ def _parallel_root_worker(task: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
+@dataclass
+class _VisibleOnlyEntry:
+    winner: int
+    reason: str
+    action_code: Optional[int] = None
+    action_count: int = 0
+
+
 class VisibleOnlyWinnerSolver:
-    """Deterministic race playout using only currently visible/reserved cards."""
+    """Full-response minimax using only currently visible/reserved cards."""
 
     def __init__(self, options: Optional[SolverOptions] = None):
         self.options = options or SolverOptions()
         self.stats = SearchStats()
         self._start_time = 0.0
         self._helper = MateSolver(attacker=0, max_depth=0, options=self.options)
-        self._scorer = DFPNMateSolver(attacker=0, max_depth=1, options=self.options)
+        self._memo: Dict[Tuple[Any, ...], _VisibleOnlyEntry] = {}
+        self._root_game: Optional[cs.Game] = None
 
     def solve(self, game: cs.Game) -> SearchResult:
         self.stats = SearchStats()
+        self._memo = {}
         self._start_time = time.monotonic()
         working = self._visible_only_game(game)
-        seen = set()
-        line: List[Dict[str, Any]] = []
-        reason = "unknown"
+        self._root_game = working.clone_light()
 
         try:
-            while True:
-                self._check_limits()
-                self.stats.nodes += 1
-
-                if working.is_game_over():
-                    winner = int(working.winner)
-                    reason = "game_over"
-                    self.stats.terminal_nodes += 1
-                    break
-
-                state_key = self._state_key(working)
-                if state_key in seen:
-                    winner = self._adjudicate_by_score(working)
-                    reason = "cycle_adjudicated_by_visible_score"
-                    self.stats.terminal_nodes += 1
-                    break
-                seen.add(state_key)
-
-                if self._known_card_count(working) == 0:
-                    winner = self._adjudicate_by_score(working)
-                    reason = "visible_cards_exhausted_adjudicated_by_score"
-                    self.stats.terminal_nodes += 1
-                    break
-
-                action = self._choose_action(working)
-                if action is None:
-                    winner = self._adjudicate_by_score(working)
-                    reason = "no_visible_only_action_adjudicated_by_score"
-                    self.stats.terminal_nodes += 1
-                    break
-
-                before_player = int(working.board.current_player)
-                before_scores = [int(v) for v in working.scores]
-                action_summary = self._helper._action_summary(action, working)
-                if not working.apply(action, False):
-                    winner = self._adjudicate_by_score(working)
-                    reason = "selected_action_rejected_adjudicated_by_score"
-                    self.stats.terminal_nodes += 1
-                    break
-                after_scores = [int(v) for v in working.scores]
-                line.append(
-                    {
-                        "ply": len(line),
-                        "player": before_player,
-                        "action": action_summary,
-                        "scores_before": before_scores,
-                        "scores_after": after_scores,
-                    }
-                )
-                self.stats.legal_moves += 1
+            winner = self._minimax(working, set())
+            root_key = self._hash(working)
+            root_entry = self._memo.get(root_key)
+            reason = root_entry.reason if root_entry is not None else self._terminal_reason(working)
+            unknown_reason = None
         except SearchLimitExceeded as exc:
-            winner = self._adjudicate_by_score(working)
-            reason = f"{exc}; adjudicated_by_visible_score"
+            winner = -1
+            reason = str(exc)
+            unknown_reason = str(exc)
+            self.stats.unknown_reason = unknown_reason
 
         self.stats.elapsed_ms = (time.monotonic() - self._start_time) * 1000.0
         status = self._winner_status(winner)
+        line = self._principal_line() if self.options.include_proof else None
+        final_scores = line[-1]["scores_after"] if line else [int(v) for v in working.scores]
         payload = {
             "mode": "visible_only_winner",
             "winner": winner,
             "winner_reason": reason,
+            "unknown_reason": unknown_reason,
             "assumptions": {
                 "hidden_decks_ignored": True,
-                "visible_refill": "blank",
+                "visible_refill": "none",
+                "reserve_deck": "disabled",
                 "max_depth_ignored": True,
                 "mate_proof": False,
-                "policy": "deterministic_visible_race_playout",
+                "policy": "full_legal_minimax_with_cycle_score_adjudication",
+                "all_visible_only_responses_read": True,
+                "equivalent_child_states_collapsed": True,
             },
-            "final_scores": [int(v) for v in working.scores],
-            "plies": len(line),
-            "line": line if self.options.include_proof else None,
+            "final_scores": final_scores,
+            "memoized_states": len(self._memo),
+            "line": line,
         }
         return SearchResult(status, None, payload if self.options.include_proof else None, None, self.stats)
+
+    def _minimax(self, game: cs.Game, path: set) -> int:
+        self._check_limits()
+        self.stats.nodes += 1
+
+        if game.is_game_over():
+            self.stats.terminal_nodes += 1
+            return int(game.winner)
+
+        if self._known_card_count(game) == 0:
+            self.stats.terminal_nodes += 1
+            return self._adjudicate_by_score(game)
+
+        state_hash = self._hash(game)
+        entry = self._memo.get(state_hash)
+        if entry is not None:
+            self.stats.memo_hits += 1
+            return entry.winner
+
+        if state_hash in path:
+            self.stats.terminal_nodes += 1
+            return self._adjudicate_by_score(game)
+
+        action_codes = self._ordered_representative_action_codes(game)
+        self.stats.legal_moves += len(action_codes)
+        if not action_codes:
+            self.stats.terminal_nodes += 1
+            winner = self._adjudicate_by_score(game)
+            self._memo[state_hash] = _VisibleOnlyEntry(
+                winner=winner,
+                reason="no_visible_only_action_adjudicated_by_score",
+                action_count=0,
+            )
+            return winner
+
+        current_player = int(game.board.current_player)
+        path.add(state_hash)
+        draw_action: Optional[int] = None
+        losing_action: Optional[int] = None
+        losing_winner: Optional[int] = None
+
+        try:
+            for action_code in action_codes:
+                if not game.apply_action_code(int(action_code), True):
+                    continue
+                try:
+                    child_winner = self._minimax(game, path)
+                finally:
+                    game.undo()
+
+                if child_winner == current_player:
+                    self._memo[state_hash] = _VisibleOnlyEntry(
+                        winner=child_winner,
+                        reason="current_player_can_force_visible_only_win",
+                        action_code=int(action_code),
+                        action_count=len(action_codes),
+                    )
+                    return child_winner
+                if child_winner == -2 and draw_action is None:
+                    draw_action = int(action_code)
+                elif child_winner in (0, 1) and losing_action is None:
+                    losing_action = int(action_code)
+                    losing_winner = int(child_winner)
+        finally:
+            path.remove(state_hash)
+
+        if draw_action is not None:
+            entry = _VisibleOnlyEntry(
+                winner=-2,
+                reason="current_player_can_force_visible_only_draw",
+                action_code=draw_action,
+                action_count=len(action_codes),
+            )
+        else:
+            entry = _VisibleOnlyEntry(
+                winner=losing_winner if losing_winner is not None else -2,
+                reason="all_visible_only_responses_lose_for_current_player",
+                action_code=losing_action,
+                action_count=len(action_codes),
+            )
+        self._memo[state_hash] = entry
+        return entry.winner
 
     def _check_limits(self) -> None:
         if self.options.max_nodes and self.stats.nodes >= self.options.max_nodes:
@@ -2510,7 +2563,7 @@ class VisibleOnlyWinnerSolver:
 
     @staticmethod
     def _visible_only_game(game: cs.Game) -> cs.Game:
-        visible_only = game.clone_light()
+        visible_only = game.clone()
         visible_only.blank_refill_mode = True
         visible_only.simple_payment_mode = True
         visible_only.board.decks = [[], [], []]
@@ -2551,63 +2604,100 @@ class VisibleOnlyWinnerSolver:
         return -2
 
     @staticmethod
-    def _state_key(game: cs.Game) -> Tuple[Any, ...]:
+    def _hash(game: cs.Game) -> Tuple[Any, ...]:
         board = game.board
-        players = []
-        for player_idx in range(2):
-            player = board.get_player(player_idx)
-            players.append(
-                (
-                    int(player.points),
-                    tuple(int(v) for v in player.gems),
-                    tuple(int(v) for v in player.bonuses),
-                    tuple(int(v) for v in player.reserved),
-                    tuple(bool(v) for v in player.reserved_is_hidden),
-                    int(player.reserved_count),
-                    int(player.purchased_count),
-                    tuple(int(v) for v in player.purchased_cards),
-                    tuple(int(v) for v in player.acquired_nobles),
-                )
-            )
         return (
-            int(board.current_player),
+            int(board.hash()),
             bool(board.final_round),
-            bool(board.waiting_noble),
             int(board.winner),
-            tuple(int(v) for v in board.bank),
-            tuple(tuple(int(card_id) for card_id in row) for row in board.visible),
-            tuple(int(noble_id) for noble_id in board.nobles),
-            tuple(players),
+            tuple(
+                (
+                    int(board.get_player(player_idx).points),
+                    int(board.get_player(player_idx).purchased_count),
+                )
+                for player_idx in range(2)
+            ),
         )
 
-    def _choose_action(self, game: cs.Game) -> Optional[cs.Action]:
-        actions = [
-            action
-            for action in game.legal_actions
-            if int(action.type) != int(cs.ActionType.RESERVE_DECK)
+    @staticmethod
+    def _terminal_reason(game: cs.Game) -> str:
+        if game.is_game_over():
+            return "game_over"
+        if VisibleOnlyWinnerSolver._known_card_count(game) == 0:
+            return "visible_cards_exhausted_adjudicated_by_score"
+        return "unknown"
+
+    def _ordered_representative_action_codes(self, game: cs.Game) -> List[int]:
+        representatives: Dict[Tuple[Any, ...], Tuple[Tuple[int, int, int], int]] = {}
+        for raw_code in game.legal_action_codes:
+            action_code = int(raw_code)
+            action = cs.Action.unpack(action_code)
+            if int(action.type) == int(cs.ActionType.RESERVE_DECK):
+                continue
+            if not game.apply_action_code(action_code, True):
+                continue
+            child_hash = self._hash(game)
+            game.undo()
+            order_key = self._action_order_key(action)
+            current = representatives.get(child_hash)
+            if current is None or order_key < current[0]:
+                representatives[child_hash] = (order_key, action_code)
+        return [
+            action_code
+            for _, action_code in sorted(representatives.values(), key=lambda item: (item[0], item[1]))
         ]
-        if not actions:
-            return None
-        state = SolverState.from_game(game)
-        player_idx = int(game.board.current_player)
-        targets = self._scorer._target_card_scores(state, player_idx, remaining_turns=10)
-        actions = self._scorer._collapse_equivalent_take_actions(actions)
 
-        def score(action: cs.Action) -> Tuple[int, int, int]:
-            action_type = int(action.type)
-            base = self._scorer._move_order_score(state, action, player_idx, 10, targets)
-            if action_type in (int(cs.ActionType.TAKE_DIFFERENT), int(cs.ActionType.TAKE_SAME)):
-                base -= 100000 if self._known_card_count(game) > 0 else 0
-            rank = {
-                int(cs.ActionType.PURCHASE): 0,
-                int(cs.ActionType.VISIT_NOBLE): 0,
-                int(cs.ActionType.RESERVE_VISIBLE): 1,
-                int(cs.ActionType.TAKE_DIFFERENT): 2,
-                int(cs.ActionType.TAKE_SAME): 2,
-            }.get(action_type, 9)
-            return (base, -rank, -int(action.pack()))
+    @staticmethod
+    def _action_order_key(action: cs.Action) -> Tuple[int, int, int]:
+        action_type = int(action.type)
+        rank = {
+            int(cs.ActionType.PURCHASE): 0,
+            int(cs.ActionType.VISIT_NOBLE): 0,
+            int(cs.ActionType.RESERVE_VISIBLE): 1,
+            int(cs.ActionType.TAKE_DIFFERENT): 2,
+            int(cs.ActionType.TAKE_SAME): 2,
+        }.get(action_type, 9)
+        points = 0
+        card_id = int(action.card_id)
+        if card_id >= 0:
+            points = DFPNMateSolver._card_info(card_id)[1]
+        return (rank, -points, int(action.pack()))
 
-        return max(actions, key=score)
+    def _principal_line(self, max_plies: int = 200) -> List[Dict[str, Any]]:
+        if self._root_game is None:
+            return []
+        game = self._root_game.clone()
+        line: List[Dict[str, Any]] = []
+        seen = set()
+        for ply in range(max_plies):
+            if game.is_game_over() or self._known_card_count(game) == 0:
+                break
+            state_hash = self._hash(game)
+            if state_hash in seen:
+                break
+            seen.add(state_hash)
+            entry = self._memo.get(state_hash)
+            if entry is None or entry.action_code is None:
+                break
+            action = cs.Action.unpack(entry.action_code)
+            before_player = int(game.board.current_player)
+            before_scores = [int(v) for v in game.scores]
+            action_summary = self._helper._action_summary(action, game)
+            if not game.apply_action_code(entry.action_code, False):
+                break
+            line.append(
+                {
+                    "ply": ply,
+                    "player": before_player,
+                    "action": action_summary,
+                    "scores_before": before_scores,
+                    "scores_after": [int(v) for v in game.scores],
+                    "node_winner": entry.winner,
+                    "node_reason": entry.reason,
+                    "legal_response_count": entry.action_count,
+                }
+            )
+        return line
 
 
 def solve_visible_only_winner(
@@ -2736,8 +2826,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     parser.add_argument(
         "--visible-only-winner",
+        "--visible-only",
+        dest="visible_only_winner",
         action="store_true",
-        help="ignore hidden deck reveals and run a deterministic visible-card race playout; not a mate proof",
+        help="ignore hidden deck reveals and solve the visible-card game with full-response minimax; not a mate proof",
     )
     parser.add_argument(
         "--jobs",
