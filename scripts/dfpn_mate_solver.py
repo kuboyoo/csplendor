@@ -1133,11 +1133,12 @@ class DFPNMateSolver:
             else:
                 safe.append(card_id)
 
+        dangerous_representatives = self._dangerous_reveal_representatives(state, dangerous)
         outcomes = [
             self._helper._apply_with_reveal(state, action, level, card_id)
-            for card_id in self._helper._ordered_reveals(dangerous)
+            for card_id in self._helper._ordered_reveals(dangerous_representatives)
         ]
-        self.stats.dangerous_reveals += len(dangerous)
+        self.stats.dangerous_reveals += len(dangerous_representatives)
 
         if safe:
             representative = self._safe_reveal_representative(state, safe)
@@ -1169,6 +1170,34 @@ class DFPNMateSolver:
             if int(player.points) + points + noble_points >= 15:
                 return True
         return False
+
+    def _dangerous_reveal_representatives(self, state: SolverState, card_ids: Sequence[int]) -> List[int]:
+        groups: Dict[Tuple[Any, ...], Tuple[int, Tuple[int, int, int, int, int]]] = {}
+        for card_id in card_ids:
+            card_id = int(card_id)
+            key = self._reveal_threat_key(state, card_id)
+            score = self._safe_reveal_score(state, card_id)
+            current = groups.get(key)
+            if current is None or score > current[1]:
+                groups[key] = (card_id, score)
+
+        representatives = [card_id for card_id, _ in groups.values()]
+        self.stats.dangerous_reveal_collapses += max(0, len(card_ids) - len(representatives))
+        return representatives
+
+    def _reveal_threat_key(self, state: SolverState, card_id: int) -> Tuple[Any, ...]:
+        _, points, bonus, cost = self._card_info(card_id)
+        player_terms = []
+        for player_idx in range(2):
+            player = state.game.board.get_player(player_idx)
+            can_afford = self._can_afford_card_cost(player, cost)
+            bonuses_after = self._fixed_ints(player.bonuses, 5)
+            if 0 <= bonus < 5:
+                bonuses_after[bonus] += 1
+            noble_gain = self._can_visit_noble_after_purchase(state, player_idx, bonuses_after)
+            immediate_win = can_afford and int(player.points) + points + (3 if noble_gain else 0) >= 15
+            player_terms.append((int(immediate_win), int(can_afford), int(noble_gain)))
+        return (points, bonus, tuple(player_terms))
 
     def _safe_reveal_representative(self, state: SolverState, card_ids: Sequence[int]) -> int:
         return max(card_ids, key=lambda card_id: self._safe_reveal_score(state, int(card_id)))

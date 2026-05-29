@@ -129,6 +129,27 @@ def test_dfpn_collapses_non_dangerous_reveal_cards():
     assert solver.stats.threat_pruned_reveals > 0
 
 
+def test_dfpn_collapses_dangerous_reveals_by_threat_shape():
+    game = cs.Game(seed=1)
+    player = game.board.get_player(0)
+    player.points = 14
+    player.bonuses = [10, 10, 10, 10, 10]
+    game.board.set_player(0, player)
+    state = SolverState.from_game(game)
+    solver = DFPNMateSolver(attacker=0, max_depth=1, options=_fast_options())
+    action = next(
+        action for action in solver._helper._legal_actions(state)
+        if int(action.type) == int(cs.ActionType.RESERVE_VISIBLE)
+        and int(cs.get_card(int(action.card_id)).level) == 1
+    )
+
+    outcomes = solver._transition_outcomes(state, action)
+
+    assert solver.stats.dangerous_reveal_collapses > 0
+    assert len(outcomes) == solver.stats.dangerous_reveals
+    assert len(outcomes) < len(state.unseen_by_level[0])
+
+
 def test_dfpn_splits_root_action_tasks_by_reveal_outcome():
     game = cs.Game(seed=1)
     state = SolverState.from_game(game)
