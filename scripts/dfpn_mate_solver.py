@@ -1438,11 +1438,27 @@ class DFPNMateSolver:
         if action_type == int(cs.ActionType.RESERVE_VISIBLE):
             return int(action.card_id) in attacker_target_ids
         if action_type in (int(cs.ActionType.TAKE_DIFFERENT), int(cs.ActionType.TAKE_SAME)):
-            take = self._fixed_ints(action.take, 6)
-            return any(take[color] > 0 and color in attacker_target_colors for color in range(5))
+            return self._defender_take_exhausts_attacker_target_color(
+                state,
+                action,
+                attacker_target_colors,
+            )
         if action_type == int(cs.ActionType.RESERVE_DECK):
             return False
         return True
+
+    def _defender_take_exhausts_attacker_target_color(
+        self,
+        state: SolverState,
+        action: cs.Action,
+        attacker_target_colors: set,
+    ) -> bool:
+        take = self._fixed_ints(action.take, 6)
+        bank = self._fixed_ints(state.game.board.bank, 6)
+        for color in range(5):
+            if color in attacker_target_colors and take[color] > 0 and bank[color] <= take[color]:
+                return True
+        return False
 
     def _target_dependency_colors(
         self,

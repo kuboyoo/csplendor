@@ -287,6 +287,33 @@ def test_dfpn_limits_dependency_target_candidates():
     assert len(unlimited) > len(limited)
 
 
+def test_dfpn_defender_take_relevance_requires_exhausting_target_color():
+    game = load_game_from_usi_text(BENCH_POSITION)
+    game.board.current_player = 1
+    state = SolverState.from_game(game)
+    solver = DFPNMateSolver(attacker=0, max_depth=4, options=_fast_options())
+    targets = solver._target_card_scores(state, 0, solver._remaining_player_turns(0, 4))
+    target_colors = solver._target_dependency_colors(state, 0, targets)
+    take_actions = [
+        action
+        for action in solver._helper._legal_actions(state)
+        if int(action.type) == int(cs.ActionType.TAKE_DIFFERENT)
+    ]
+    exhausts_white = next(
+        action
+        for action in take_actions
+        if tuple(solver._fixed_ints(action.take, 6)[:4]) == (1, 1, 1, 0)
+    )
+    does_not_exhaust = next(
+        action
+        for action in take_actions
+        if tuple(solver._fixed_ints(action.take, 6)[:4]) == (0, 1, 1, 1)
+    )
+
+    assert solver._defender_take_exhausts_attacker_target_color(state, exhausts_white, target_colors)
+    assert not solver._defender_take_exhausts_attacker_target_color(state, does_not_exhaust, target_colors)
+
+
 def test_dfpn_move_ordering_prioritizes_high_value_purchase():
     game = cs.Game(seed=0)
     player = game.board.get_player(0)
