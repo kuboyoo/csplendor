@@ -1,7 +1,7 @@
 import csplendor as cs
 from csplendor.api.usi_kifu import game_to_spn
 
-from scripts.dfpn_mate_solver import DFPNMateSolver, solve_game_dfpn
+from scripts.dfpn_mate_solver import DFPNMateSolver, solve_game_dfpn, solve_visible_only_winner
 from scripts import dfpn_mate_solver
 from scripts.mate_solver import (
     MATE,
@@ -408,6 +408,50 @@ def test_dfpn_cli_accepts_simple_payment(monkeypatch, capsys):
     assert code == 2
     assert captured["simple_payment_mode"] is True
     assert '"status": "Unknown"' in capsys.readouterr().out
+
+
+def test_visible_only_winner_ignores_depth_and_decks():
+    game = cs.Game(seed=0)
+    game.board.visible = [[7, -1, -1, -1], [-1, -1, -1, -1], [-1, -1, -1, -1]]
+    game.board.decks = [[15], [], []]
+    game.board.bank = [0, 0, 0, 0, 0, 0]
+    player = game.board.get_player(0)
+    player.points = 14
+    player.bonuses = [10, 10, 10, 10, 10]
+    game.board.set_player(0, player)
+
+    result = solve_visible_only_winner(
+        game,
+        options=_fast_options(max_nodes=100, time_limit=1.0, include_proof=True),
+    )
+
+    assert result.status == dfpn_mate_solver.PLAYER0_WIN
+    assert result.depth is None
+    assert result.proof_tree["mode"] == "visible_only_winner"
+    assert result.proof_tree["assumptions"]["hidden_decks_ignored"] is True
+    assert result.proof_tree["assumptions"]["max_depth_ignored"] is True
+
+
+def test_dfpn_cli_visible_only_winner_does_not_require_max_depth(monkeypatch, capsys):
+    def fake_visible_only(game, options=None):
+        return dfpn_mate_solver.SearchResult(
+            dfpn_mate_solver.PLAYER0_WIN,
+            None,
+            {"mode": "visible_only_winner", "winner": 0},
+            None,
+            dfpn_mate_solver.SearchStats(),
+        )
+
+    monkeypatch.setattr(dfpn_mate_solver, "solve_visible_only_winner", fake_visible_only)
+
+    code = dfpn_mate_solver.main([
+        "--position",
+        "position startpos 2",
+        "--visible-only-winner",
+    ])
+
+    assert code == 0
+    assert '"status": "Player0Win"' in capsys.readouterr().out
 
 
 def test_dfpn_uses_threat_equivalence_key_when_enabled():

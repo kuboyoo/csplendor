@@ -41,6 +41,9 @@ from scripts.mate_solver import (
 
 
 INF = 10**12
+PLAYER0_WIN = "Player0Win"
+PLAYER1_WIN = "Player1Win"
+DRAW = "Draw"
 _DFPN_DEFAULT_PRUNING = {
     "lazy_reveal": True,
     "attacker_dependency": True,
@@ -2403,6 +2406,217 @@ def _parallel_root_worker(task: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
+class VisibleOnlyWinnerSolver:
+    """Deterministic race playout using only currently visible/reserved cards."""
+
+    def __init__(self, options: Optional[SolverOptions] = None):
+        self.options = options or SolverOptions()
+        self.stats = SearchStats()
+        self._start_time = 0.0
+        self._helper = MateSolver(attacker=0, max_depth=0, options=self.options)
+        self._scorer = DFPNMateSolver(attacker=0, max_depth=1, options=self.options)
+
+    def solve(self, game: cs.Game) -> SearchResult:
+        self.stats = SearchStats()
+        self._start_time = time.monotonic()
+        working = self._visible_only_game(game)
+        seen = set()
+        line: List[Dict[str, Any]] = []
+        reason = "unknown"
+
+        try:
+            while True:
+                self._check_limits()
+                self.stats.nodes += 1
+
+                if working.is_game_over():
+                    winner = int(working.winner)
+                    reason = "game_over"
+                    self.stats.terminal_nodes += 1
+                    break
+
+                state_key = self._state_key(working)
+                if state_key in seen:
+                    winner = self._adjudicate_by_score(working)
+                    reason = "cycle_adjudicated_by_visible_score"
+                    self.stats.terminal_nodes += 1
+                    break
+                seen.add(state_key)
+
+                if self._known_card_count(working) == 0:
+                    winner = self._adjudicate_by_score(working)
+                    reason = "visible_cards_exhausted_adjudicated_by_score"
+                    self.stats.terminal_nodes += 1
+                    break
+
+                action = self._choose_action(working)
+                if action is None:
+                    winner = self._adjudicate_by_score(working)
+                    reason = "no_visible_only_action_adjudicated_by_score"
+                    self.stats.terminal_nodes += 1
+                    break
+
+                before_player = int(working.board.current_player)
+                before_scores = [int(v) for v in working.scores]
+                action_summary = self._helper._action_summary(action, working)
+                if not working.apply(action, False):
+                    winner = self._adjudicate_by_score(working)
+                    reason = "selected_action_rejected_adjudicated_by_score"
+                    self.stats.terminal_nodes += 1
+                    break
+                after_scores = [int(v) for v in working.scores]
+                line.append(
+                    {
+                        "ply": len(line),
+                        "player": before_player,
+                        "action": action_summary,
+                        "scores_before": before_scores,
+                        "scores_after": after_scores,
+                    }
+                )
+                self.stats.legal_moves += 1
+        except SearchLimitExceeded as exc:
+            winner = self._adjudicate_by_score(working)
+            reason = f"{exc}; adjudicated_by_visible_score"
+
+        self.stats.elapsed_ms = (time.monotonic() - self._start_time) * 1000.0
+        status = self._winner_status(winner)
+        payload = {
+            "mode": "visible_only_winner",
+            "winner": winner,
+            "winner_reason": reason,
+            "assumptions": {
+                "hidden_decks_ignored": True,
+                "visible_refill": "blank",
+                "max_depth_ignored": True,
+                "mate_proof": False,
+                "policy": "deterministic_visible_race_playout",
+            },
+            "final_scores": [int(v) for v in working.scores],
+            "plies": len(line),
+            "line": line if self.options.include_proof else None,
+        }
+        return SearchResult(status, None, payload if self.options.include_proof else None, None, self.stats)
+
+    def _check_limits(self) -> None:
+        if self.options.max_nodes and self.stats.nodes >= self.options.max_nodes:
+            raise SearchLimitExceeded("node limit exceeded")
+        if (
+            self.options.time_limit
+            and self._start_time
+            and (time.monotonic() - self._start_time) >= self.options.time_limit
+        ):
+            raise SearchLimitExceeded("time limit exceeded")
+
+    @staticmethod
+    def _visible_only_game(game: cs.Game) -> cs.Game:
+        visible_only = game.clone_light()
+        visible_only.blank_refill_mode = True
+        visible_only.simple_payment_mode = True
+        visible_only.board.decks = [[], [], []]
+        return visible_only
+
+    @staticmethod
+    def _winner_status(winner: int) -> str:
+        if winner == 0:
+            return PLAYER0_WIN
+        if winner == 1:
+            return PLAYER1_WIN
+        if winner == -2:
+            return DRAW
+        return UNKNOWN
+
+    @staticmethod
+    def _known_card_count(game: cs.Game) -> int:
+        board = game.board
+        count = sum(1 for row in board.visible for card_id in row if int(card_id) >= 0)
+        for player_idx in range(2):
+            player = board.get_player(player_idx)
+            count += sum(1 for card_id in player.reserved if int(card_id) >= 0)
+        return count
+
+    @staticmethod
+    def _adjudicate_by_score(game: cs.Game) -> int:
+        board = game.board
+        player0 = board.get_player(0)
+        player1 = board.get_player(1)
+        if int(player0.points) > int(player1.points):
+            return 0
+        if int(player1.points) > int(player0.points):
+            return 1
+        if int(player0.purchased_count) < int(player1.purchased_count):
+            return 0
+        if int(player1.purchased_count) < int(player0.purchased_count):
+            return 1
+        return -2
+
+    @staticmethod
+    def _state_key(game: cs.Game) -> Tuple[Any, ...]:
+        board = game.board
+        players = []
+        for player_idx in range(2):
+            player = board.get_player(player_idx)
+            players.append(
+                (
+                    int(player.points),
+                    tuple(int(v) for v in player.gems),
+                    tuple(int(v) for v in player.bonuses),
+                    tuple(int(v) for v in player.reserved),
+                    tuple(bool(v) for v in player.reserved_is_hidden),
+                    int(player.reserved_count),
+                    int(player.purchased_count),
+                    tuple(int(v) for v in player.purchased_cards),
+                    tuple(int(v) for v in player.acquired_nobles),
+                )
+            )
+        return (
+            int(board.current_player),
+            bool(board.final_round),
+            bool(board.waiting_noble),
+            int(board.winner),
+            tuple(int(v) for v in board.bank),
+            tuple(tuple(int(card_id) for card_id in row) for row in board.visible),
+            tuple(int(noble_id) for noble_id in board.nobles),
+            tuple(players),
+        )
+
+    def _choose_action(self, game: cs.Game) -> Optional[cs.Action]:
+        actions = [
+            action
+            for action in game.legal_actions
+            if int(action.type) != int(cs.ActionType.RESERVE_DECK)
+        ]
+        if not actions:
+            return None
+        state = SolverState.from_game(game)
+        player_idx = int(game.board.current_player)
+        targets = self._scorer._target_card_scores(state, player_idx, remaining_turns=10)
+        actions = self._scorer._collapse_equivalent_take_actions(actions)
+
+        def score(action: cs.Action) -> Tuple[int, int, int]:
+            action_type = int(action.type)
+            base = self._scorer._move_order_score(state, action, player_idx, 10, targets)
+            if action_type in (int(cs.ActionType.TAKE_DIFFERENT), int(cs.ActionType.TAKE_SAME)):
+                base -= 100000 if self._known_card_count(game) > 0 else 0
+            rank = {
+                int(cs.ActionType.PURCHASE): 0,
+                int(cs.ActionType.VISIT_NOBLE): 0,
+                int(cs.ActionType.RESERVE_VISIBLE): 1,
+                int(cs.ActionType.TAKE_DIFFERENT): 2,
+                int(cs.ActionType.TAKE_SAME): 2,
+            }.get(action_type, 9)
+            return (base, -rank, -int(action.pack()))
+
+        return max(actions, key=score)
+
+
+def solve_visible_only_winner(
+    game: cs.Game,
+    options: Optional[SolverOptions] = None,
+) -> SearchResult:
+    return VisibleOnlyWinnerSolver(options).solve(game)
+
+
 def solve_game_dfpn(
     game: cs.Game,
     attacker: int,
@@ -2512,13 +2726,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--seed", type=int, default=0, help="initial game seed when state-json is omitted")
     parser.add_argument("--moves", action="append", default=[], help="USI move list, comma-separated or repeated")
     parser.add_argument("--attacker", type=int, default=0, choices=(0, 1))
-    parser.add_argument("--max-depth", type=int, required=True)
+    parser.add_argument("--max-depth", type=int, default=4, help="attacker turn depth for DFPN; ignored by --visible-only-winner")
     parser.add_argument("--node-limit", type=int, default=200000)
     parser.add_argument("--time-limit", type=float, default=10.0)
     parser.add_argument(
         "--simple-payment",
         action="store_true",
         help="generate only canonical purchase payments that preserve gold when possible",
+    )
+    parser.add_argument(
+        "--visible-only-winner",
+        action="store_true",
+        help="ignore hidden deck reveals and run a deterministic visible-card race playout; not a mate proof",
     )
     parser.add_argument(
         "--jobs",
@@ -2623,6 +2842,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             use_memo=not args.no_memo,
             jobs=args.jobs,
         )
+        if args.visible_only_winner:
+            result = solve_visible_only_winner(game, options=options)
+            print(json.dumps(result.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
+            return 0 if result.status in (PLAYER0_WIN, PLAYER1_WIN, DRAW) else 2
         _DFPN_DEFAULT_PRUNING.update(
             {
                 "lazy_reveal": not args.no_lazy_reveal_pruning,
