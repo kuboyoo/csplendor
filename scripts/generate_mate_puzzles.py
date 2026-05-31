@@ -398,19 +398,7 @@ def try_save_candidate(
     game: cs.Game,
     game_seed: int,
     attempt: int,
-) -> None:
-    if not is_suspicious_position(
-        game,
-        min_attacker_points=args.min_attacker_points,
-        max_attacker_points=args.max_attacker_points,
-        min_defender_points=args.min_defender_points,
-        max_score_gap=args.max_score_gap,
-        allow_final_round=args.allow_final_round,
-    ):
-        stats.filtered += 1
-        report_rejected_position(progress, game, attempt=attempt, reason="balance_filter")
-        return
-
+) -> bool:
     stats.candidates += 1
     progress.emit("mate_search", force=True, attempt=attempt, candidates=stats.candidates)
     result = solve_reveal_verified_mate(
@@ -435,19 +423,31 @@ def try_save_candidate(
             reason="no_mate",
             status=result.status,
         )
-        return
+        return False
 
     stats.mates += 1
+    if not is_suspicious_position(
+        game,
+        min_attacker_points=args.min_attacker_points,
+        max_attacker_points=args.max_attacker_points,
+        min_defender_points=args.min_defender_points,
+        max_score_gap=args.max_score_gap,
+        allow_final_round=args.allow_final_round,
+    ):
+        stats.filtered += 1
+        report_rejected_position(progress, game, attempt=attempt, reason="balance_filter")
+        return True
+
     depth = int(result.proof_tree["forced_win_depth"])
     if depth < args.min_depth or (args.max_depth and depth > args.max_depth):
         stats.filtered += 1
         report_rejected_position(progress, game, attempt=attempt, reason="depth_filter", depth=depth)
-        return
+        return True
     dag = result.proof_tree["verification"].get("proof_dag", {})
     if not bool(dag.get("complete")):
         stats.incomplete_dags += 1
         report_rejected_position(progress, game, attempt=attempt, reason="incomplete_dag")
-        return
+        return True
 
     blunders, checks = find_countermate_blunders(
         game,
@@ -471,7 +471,7 @@ def try_save_candidate(
             found=len(blunders),
             required=args.min_losing_alternatives,
         )
-        return
+        return True
 
     scores = [int(score) for score in game.scores]
     puzzle_dir = save_puzzle(
@@ -488,10 +488,11 @@ def try_save_candidate(
     if puzzle_dir is None:
         stats.duplicates += 1
         report_rejected_position(progress, game, attempt=attempt, reason="duplicate")
-        return
+        return True
 
     stats.saved += 1
     print(f"[saved {stats.saved}/{args.count}] {puzzle_dir}", flush=True)
+    return True
 
 
 def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
@@ -530,7 +531,7 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
                 attempt=stats.attempts,
             )
             for game in positions:
-                try_save_candidate(
+                mate_found = try_save_candidate(
                     args,
                     output_dir=output_dir,
                     stats=stats,
@@ -539,7 +540,7 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
                     game_seed=game_seed,
                     attempt=stats.attempts,
                 )
-                if stats.saved >= args.count:
+                if mate_found or stats.saved >= args.count:
                     break
         except Exception as exc:
             stats.errors += 1

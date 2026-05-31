@@ -1,5 +1,6 @@
 import json
 from itertools import islice
+from types import SimpleNamespace
 
 import csplendor as cs
 from csplendor.api.usi_kifu import action_to_usi, parse_kifu_text
@@ -7,12 +8,14 @@ from csplendor.api.usi_kifu import action_to_usi, parse_kifu_text
 import scripts.generate_mate_puzzles as generate_mate_puzzles
 from scripts.generate_mate_puzzles import (
     ProgressReporter,
+    GenerationStats,
     find_countermate_blunders,
     generate_candidate_position,
     generate_candidate_positions,
     is_suspicious_position,
     report_rejected_position,
     save_puzzle,
+    try_save_candidate,
 )
 from scripts.mate_solver import MATE, SearchResult, SearchStats
 
@@ -75,6 +78,42 @@ def test_candidate_positions_continue_until_endgame_after_first_candidate():
     assert [int(game.board.current_player) for game in games] == [0, 1, 0]
     assert [bool(game.simple_payment_mode) for game in games] == [False, False, False]
     assert [player.calls for player in players] == [2, 2]
+
+
+def test_candidate_search_stops_at_mate_before_applying_balance_filter(monkeypatch, tmp_path):
+    game = cs.Game(seed=0)
+    result = SearchResult(MATE, 1, {}, None, SearchStats())
+    stats = GenerationStats()
+
+    monkeypatch.setattr(
+        generate_mate_puzzles,
+        "solve_reveal_verified_mate",
+        lambda *args, **kwargs: result,
+    )
+
+    mate_found = try_save_candidate(
+        SimpleNamespace(
+            node_limit=0,
+            time_limit=1.0,
+            proof_dag_node_limit=100,
+            proof_dag_edge_limit=100,
+            min_attacker_points=8,
+            max_attacker_points=14,
+            min_defender_points=8,
+            max_score_gap=3,
+            allow_final_round=False,
+        ),
+        output_dir=tmp_path,
+        stats=stats,
+        progress=ProgressReporter(0),
+        game=game,
+        game_seed=0,
+        attempt=1,
+    )
+
+    assert mate_found is True
+    assert stats.mates == 1
+    assert stats.filtered == 1
 
 
 def test_save_puzzle_writes_depth_grouped_answer_and_complete_strategy(tmp_path):
