@@ -104,7 +104,7 @@ python scripts/dfpn_mate_solver.py \
 
 ### 詰め問題集の生成
 
-`scripts/generate_mate_puzzles.py` は、合法なランダム対局から終盤局面を生成し、めくれまで検証済みの詰みだけを問題集として保存します。購入時の全支払いパターン、局面入力後の山札予約、めくれを検証します。
+`scripts/generate_mate_puzzles.py` は、合法なランダム対局から点差の小さい終盤局面を生成し、めくれまで検証済みの詰みだけを問題集として保存します。さらに正解手以外を選ぶと相手側の検証済み詰みが成立する局面だけを採用します。購入時の全支払いパターン、局面入力後の山札予約、めくれを検証します。
 
 ```bash
 python scripts/generate_mate_puzzles.py \
@@ -114,7 +114,7 @@ python scripts/generate_mate_puzzles.py \
   --time-limit 30
 ```
 
-生成物は `depth_XX/<問題ID>/` に分類されます。`XX` はソルバー上の攻撃側手数深さです。各問題には局面情報 `problem.json`、代表手順 `answer.kifu`、完全応手DAG `strategy.json` が含まれます。DAGは攻撃側の証明手、守備側の全合法応手、山札予約を含む全めくれ結果を保持し、同一局面をノードIDで共有します。既定上限に収まらず完全DAGを保存できない局面は採用されません。
+生成物は `depth_XX/<問題ID>/` に分類されます。`XX` はソルバー上の攻撃側手数深さです。各問題には局面情報 `problem.json`、代表手順 `answer.kifu`、完全応手DAG `strategy.json` が含まれます。`problem.json` の `quality.countermate_blunders` には相手側の詰みを許す誤答例が入ります。DAGは攻撃側の証明手、守備側の全合法応手、山札予約を含む全めくれ結果を保持し、同一局面をノードIDで共有します。既定上限に収まらず完全DAGを保存できない局面は採用されません。
 
 ## ドキュメント
 詳細な仕様は `doc/` ディレクトリを参照してください。

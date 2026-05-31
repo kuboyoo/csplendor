@@ -3,7 +3,12 @@ import json
 import csplendor as cs
 from csplendor.api.usi_kifu import action_to_usi, parse_kifu_text
 
-from scripts.generate_mate_puzzles import save_puzzle
+import scripts.generate_mate_puzzles as generate_mate_puzzles
+from scripts.generate_mate_puzzles import (
+    find_countermate_blunders,
+    is_suspicious_position,
+    save_puzzle,
+)
 from scripts.mate_solver import MATE, SearchResult, SearchStats
 
 
@@ -61,3 +66,62 @@ def test_save_puzzle_writes_depth_grouped_answer_and_complete_strategy(tmp_path)
     }]
 
     assert save_puzzle(tmp_path, game, result, game_seed=42, attempt=8) is None
+
+
+def test_suspicious_position_requires_close_scores():
+    game = cs.Game(seed=0)
+    player0 = game.board.get_player(0)
+    player0.points = 12
+    game.board.set_player(0, player0)
+    player1 = game.board.get_player(1)
+    player1.points = 10
+    game.board.set_player(1, player1)
+
+    assert is_suspicious_position(
+        game,
+        min_attacker_points=8,
+        max_attacker_points=14,
+        min_defender_points=8,
+        max_score_gap=3,
+        allow_final_round=False,
+    )
+    assert not is_suspicious_position(
+        game,
+        min_attacker_points=8,
+        max_attacker_points=14,
+        min_defender_points=8,
+        max_score_gap=1,
+        allow_final_round=False,
+    )
+
+
+def test_countermate_filter_accepts_wrong_move_that_allows_opponent_mate(monkeypatch):
+    game = cs.Game(seed=0)
+    correct = game.legal_actions[0]
+    result = SearchResult(
+        MATE,
+        1,
+        {"line": [{"player": 0, "action": {"pack": int(correct.pack())}}]},
+        None,
+        SearchStats(),
+    )
+
+    def fake_solve(child, attacker, options):
+        assert int(child.board.current_player) == attacker == 1
+        return SearchResult(MATE, 2, {}, None, SearchStats())
+
+    monkeypatch.setattr(generate_mate_puzzles, "solve_reveal_verified_mate", fake_solve)
+
+    blunders, checks = find_countermate_blunders(
+        game,
+        result,
+        min_losing_alternatives=1,
+        action_limit=1,
+        node_limit=0,
+        time_limit=1.0,
+    )
+
+    assert checks == 1
+    assert len(blunders) == 1
+    assert blunders[0]["opponent"] == 1
+    assert blunders[0]["forced_win_depth"] == 2
