@@ -413,13 +413,18 @@ PYBIND11_MODULE(_csplendor, m) {
       "solve_reveal_verified_mate_cpp",
       [](const Game &game, int attacker, int depth, uint64_t max_nodes,
          double time_limit_seconds,
-         const std::vector<uint64_t> &preferred_attacker_actions) {
+         const std::vector<uint64_t> &preferred_attacker_actions,
+         bool include_proof_dag, size_t proof_dag_node_limit,
+         size_t proof_dag_edge_limit) {
         RevealVerifiedSearchResult result;
         {
           py::gil_scoped_release release;
           result = RevealVerifiedSolver(attacker, depth, max_nodes,
                                         time_limit_seconds,
-                                        preferred_attacker_actions)
+                                        preferred_attacker_actions,
+                                        include_proof_dag,
+                                        proof_dag_node_limit,
+                                        proof_dag_edge_limit)
                        .solve(game);
         }
 
@@ -465,11 +470,55 @@ PYBIND11_MODULE(_csplendor, m) {
         payload["memoized_states"] = result.memoized_states;
         payload["stats"] = stats;
         payload["line"] = line;
+        py::dict proof_dag;
+        proof_dag["requested"] = result.proof_dag.requested;
+        proof_dag["complete"] = result.proof_dag.complete;
+        proof_dag["omitted_reason"] =
+            result.proof_dag.omitted_reason.empty()
+                ? py::none()
+                : py::cast(result.proof_dag.omitted_reason);
+        proof_dag["root"] =
+            result.proof_dag.complete ? py::cast(result.proof_dag.root)
+                                      : py::none();
+        py::list proof_nodes;
+        for (const RevealVerifiedProofNode &node : result.proof_dag.nodes) {
+          py::dict item;
+          item["id"] = node.id;
+          item["player"] = node.player;
+          item["depth"] = node.depth;
+          item["kind"] = node.kind;
+          item["resolution"] =
+              node.resolution.empty() ? py::none() : py::cast(node.resolution);
+          py::list children;
+          for (const RevealVerifiedProofEdge &edge : node.children) {
+            py::dict child;
+            child["action_code"] = edge.action_code;
+            child["reveal_card"] =
+                edge.reveal_card < 0 ? py::none() : py::cast(edge.reveal_card);
+            child["oracle_card"] =
+                edge.oracle_card < 0 ? py::none() : py::cast(edge.oracle_card);
+            child["oracle_reserve"] = edge.oracle_reserve;
+            child["oracle_return_color"] =
+                edge.oracle_return_color < 0
+                    ? py::none()
+                    : py::cast(edge.oracle_return_color);
+            child["oracle_gold_as"] = edge.oracle_gold_as;
+            child["child"] = edge.child;
+            children.append(child);
+          }
+          item["children"] = children;
+          proof_nodes.append(item);
+        }
+        proof_dag["nodes"] = proof_nodes;
+        payload["proof_dag"] = proof_dag;
         return payload;
       },
       py::arg("game"), py::arg("attacker"), py::arg("depth"),
       py::arg("max_nodes") = 0, py::arg("time_limit_seconds") = 0.0,
-      py::arg("preferred_attacker_actions") = std::vector<uint64_t>{});
+      py::arg("preferred_attacker_actions") = std::vector<uint64_t>{},
+      py::arg("include_proof_dag") = false,
+      py::arg("proof_dag_node_limit") = 100000,
+      py::arg("proof_dag_edge_limit") = 500000);
 
   m.def("get_card", &get_card, py::arg("id"));
   m.def("get_noble", &get_noble, py::arg("id"));

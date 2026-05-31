@@ -36,6 +36,33 @@ struct RevealVerifiedLineEntry {
   size_t action_count = 0;
 };
 
+struct RevealVerifiedProofEdge {
+  uint64_t action_code = 0;
+  int reveal_card = -1;
+  int oracle_card = -1;
+  bool oracle_reserve = false;
+  int oracle_return_color = -1;
+  std::array<uint8_t, 5> oracle_gold_as = {0};
+  size_t child = 0;
+};
+
+struct RevealVerifiedProofNode {
+  size_t id = 0;
+  int player = -1;
+  int depth = 0;
+  std::string kind = "state";
+  std::string resolution;
+  std::vector<RevealVerifiedProofEdge> children;
+};
+
+struct RevealVerifiedProofDag {
+  bool requested = false;
+  bool complete = false;
+  std::string omitted_reason;
+  size_t root = 0;
+  std::vector<RevealVerifiedProofNode> nodes;
+};
+
 struct RevealVerifiedSearchResult {
   bool proven = false;
   int attacker = -1;
@@ -45,16 +72,23 @@ struct RevealVerifiedSearchResult {
   size_t memoized_states = 0;
   RevealVerifiedSearchStats stats;
   std::vector<RevealVerifiedLineEntry> line;
+  RevealVerifiedProofDag proof_dag;
 };
 
 class RevealVerifiedSolver {
 public:
   RevealVerifiedSolver(int attacker, int depth, uint64_t max_nodes,
                        double time_limit_seconds,
-                       std::vector<uint64_t> preferred_attacker_actions = {})
+                       std::vector<uint64_t> preferred_attacker_actions = {},
+                       bool include_proof_dag = false,
+                       size_t proof_dag_node_limit = 100000,
+                       size_t proof_dag_edge_limit = 500000)
       : attacker_(attacker), depth_(depth), max_nodes_(max_nodes),
         time_limit_seconds_(time_limit_seconds),
-        preferred_attacker_actions_(std::move(preferred_attacker_actions)) {}
+        preferred_attacker_actions_(std::move(preferred_attacker_actions)),
+        include_proof_dag_(include_proof_dag),
+        proof_dag_node_limit_(proof_dag_node_limit),
+        proof_dag_edge_limit_(proof_dag_edge_limit) {}
 
   RevealVerifiedSearchResult solve(const Game &input) {
     memo_.clear();
@@ -80,6 +114,8 @@ public:
       result.reason = result.proven ? "all_reveals_verified"
                                     : "candidate_mate_not_verified";
       result.line = principal_line();
+      if (result.proven && include_proof_dag_)
+        result.proof_dag = build_proof_dag();
     } catch (const SearchLimitExceeded &exc) {
       result.reason = exc.what();
       result.unknown_reason = exc.what();
@@ -95,6 +131,10 @@ private:
   using Clock = std::chrono::steady_clock;
 
   struct SearchLimitExceeded : public std::runtime_error {
+    using std::runtime_error::runtime_error;
+  };
+
+  struct ProofDagBuildAborted : public std::runtime_error {
     using std::runtime_error::runtime_error;
   };
 
@@ -207,6 +247,12 @@ private:
   uint64_t initial_hidden_low_ = 0;
   uint64_t initial_hidden_high_ = 0;
   std::vector<uint64_t> preferred_attacker_actions_;
+  bool include_proof_dag_ = false;
+  size_t proof_dag_node_limit_ = 100000;
+  size_t proof_dag_edge_limit_ = 500000;
+  size_t proof_dag_edges_ = 0;
+  std::unordered_map<DepthStateKey, size_t, DepthStateKeyHash> proof_node_ids_;
+  std::vector<RevealVerifiedProofNode> proof_nodes_;
   static constexpr size_t ATTACKER_TAKE_LIMIT = 6;
   static constexpr size_t ATTACKER_RESERVE_LIMIT = 3;
 
@@ -1093,6 +1139,87 @@ private:
                     board.players[1].purchased_count,
                     board.final_round,
                     board.winner};
+  }
+
+  RevealVerifiedProofDag build_proof_dag() {
+    RevealVerifiedProofDag dag;
+    dag.requested = true;
+    proof_node_ids_.clear();
+    proof_nodes_.clear();
+    proof_dag_edges_ = 0;
+    const RevealVerifiedSearchStats search_stats = stats_;
+    try {
+      Game game = root_.clone_light();
+      dag.root = build_proof_node(game, depth_);
+      dag.complete = true;
+      dag.nodes = std::move(proof_nodes_);
+    } catch (const ProofDagBuildAborted &exc) {
+      dag.omitted_reason = exc.what();
+      proof_nodes_.clear();
+      proof_node_ids_.clear();
+    }
+    stats_ = search_stats;
+    return dag;
+  }
+
+  size_t build_proof_node(Game &game, int depth) {
+    const DepthStateKey key{state_key(game), depth};
+    auto known = proof_node_ids_.find(key);
+    if (known != proof_node_ids_.end())
+      return known->second;
+    if (proof_dag_node_limit_ && proof_nodes_.size() >= proof_dag_node_limit_)
+      throw ProofDagBuildAborted("proof DAG node limit exceeded");
+
+    const size_t id = proof_nodes_.size();
+    proof_node_ids_[key] = id;
+    proof_nodes_.push_back(
+        RevealVerifiedProofNode{id, game.current_player(), depth});
+    if (game.is_game_over()) {
+      proof_nodes_[id].kind = "terminal";
+      proof_nodes_[id].resolution =
+          game.winner() == attacker_ ? "attacker_win" : "non_attacker_win";
+      return id;
+    }
+
+    auto memo_it = memo_.find(key);
+    if (memo_it == memo_.end() || memo_it->second.status != ForceStatus::PROVEN) {
+      throw ProofDagBuildAborted("proof DAG references unmaterialized subtree");
+    }
+    const Entry &entry = memo_it->second;
+    if (!entry.has_action) {
+      proof_nodes_[id].kind = "resolved";
+      proof_nodes_[id].resolution = "final_round_proof_summary";
+      return id;
+    }
+
+    std::vector<OrderedAction> actions = ordered_actions(game);
+    if (game.current_player() == attacker_) {
+      actions = forced_attacker_actions(game, actions, depth);
+      actions.erase(
+          std::remove_if(actions.begin(), actions.end(),
+                         [&](const OrderedAction &ordered) {
+                           return ordered.code != entry.action_code;
+                         }),
+          actions.end());
+    }
+    const int current_player = game.current_player();
+    for (const OrderedAction &ordered : actions) {
+      for_each_outcome(game, ordered, [&](int reveal_card) {
+        const int next_depth =
+            depth - static_cast<int>(current_player == attacker_ &&
+                                     game.current_player() != current_player);
+        const size_t child = build_proof_node(game, next_depth);
+        if (proof_dag_edge_limit_ && proof_dag_edges_ >= proof_dag_edge_limit_)
+          throw ProofDagBuildAborted("proof DAG edge limit exceeded");
+        proof_nodes_[id].children.push_back(RevealVerifiedProofEdge{
+            ordered.code, reveal_card, ordered.oracle_card,
+            ordered.oracle_reserve, ordered.oracle_return_color,
+            ordered.oracle_gold_as, child});
+        ++proof_dag_edges_;
+        return true;
+      });
+    }
+    return id;
   }
 
   std::vector<RevealVerifiedLineEntry> principal_line() const {

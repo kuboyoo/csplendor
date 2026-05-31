@@ -2880,6 +2880,10 @@ def solve_reveal_verified_mate(
     game: cs.Game,
     attacker: int,
     options: Optional[SolverOptions] = None,
+    *,
+    include_proof_dag: bool = False,
+    proof_dag_node_limit: int = 100000,
+    proof_dag_edge_limit: int = 500000,
 ) -> SearchResult:
     options = options or SolverOptions()
     if attacker != int(game.board.current_player):
@@ -2939,6 +2943,9 @@ def solve_reveal_verified_mate(
         max_nodes=remaining_nodes,
         time_limit_seconds=remaining_time,
         preferred_attacker_actions=preferred_attacker_actions,
+        include_proof_dag=bool(include_proof_dag),
+        proof_dag_node_limit=max(0, int(proof_dag_node_limit)),
+        proof_dag_edge_limit=max(0, int(proof_dag_edge_limit)),
     )
     verification_stats = raw["stats"]
     unknown_reason = raw["unknown_reason"]
@@ -2971,6 +2978,16 @@ def solve_reveal_verified_mate(
         "memoized_states": int(raw["memoized_states"]),
         "stats": dict(verification_stats),
     }
+    if include_proof_dag:
+        proof_dag = dict(raw["proof_dag"])
+        proof_dag["format"] = "strategy_dag_v1"
+        proof_dag["semantics"] = {
+            "attacker_nodes": "one_proven_action_with_all_nondeterministic_outcomes",
+            "defender_nodes": "all_legal_actions_with_all_nondeterministic_outcomes",
+            "shared_states": "referenced_by_node_id",
+            "resolved_leaves": "sound_final_round_proof_summaries",
+        }
+        verification["proof_dag"] = proof_dag
     proof = {
         "mode": "reveal_verified_mate",
         "attacker": int(attacker),
@@ -3190,6 +3207,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="find a visible-only candidate mate, then verify all defender responses and hidden reveal shapes",
     )
     parser.add_argument(
+        "--reveal-proof-dag",
+        action="store_true",
+        help="with --reveal-verified, emit the proven strategy DAG after search",
+    )
+    parser.add_argument(
+        "--proof-dag-node-limit",
+        type=int,
+        default=100000,
+        help="maximum nodes emitted by --reveal-proof-dag; 0 disables the limit",
+    )
+    parser.add_argument(
+        "--proof-dag-edge-limit",
+        type=int,
+        default=500000,
+        help="maximum edges emitted by --reveal-proof-dag; 0 disables the limit",
+    )
+    parser.add_argument(
         "--jobs",
         type=int,
         default=1,
@@ -3273,6 +3307,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        if args.reveal_proof_dag and not args.reveal_verified:
+            raise ValueError("--reveal-proof-dag requires --reveal-verified")
+        if args.reveal_proof_dag and args.no_proof:
+            raise ValueError("--reveal-proof-dag cannot be combined with --no-proof")
         if args.state_json:
             game = load_game_from_json(args.state_json)
         elif args.position:
@@ -3298,7 +3336,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(json.dumps(result.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
             return 0 if result.status in (PLAYER0_WIN, PLAYER1_WIN, DRAW) else 2
         if args.reveal_verified:
-            result = solve_reveal_verified_mate(game, attacker=args.attacker, options=options)
+            result = solve_reveal_verified_mate(
+                game,
+                attacker=args.attacker,
+                options=options,
+                include_proof_dag=args.reveal_proof_dag,
+                proof_dag_node_limit=args.proof_dag_node_limit,
+                proof_dag_edge_limit=args.proof_dag_edge_limit,
+            )
             print(json.dumps(result.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
             return 0 if result.status == MATE else 2
         _DFPN_DEFAULT_PRUNING.update(

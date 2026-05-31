@@ -1,4 +1,5 @@
 import csplendor as cs
+import pytest
 from csplendor.api.usi_kifu import game_to_spn
 
 from scripts.dfpn_mate_solver import (
@@ -513,6 +514,56 @@ def test_reveal_verified_mate_finds_bench_forced_line():
     assert result.stats.oracle_purchase_actions > 0
     assert result.stats.deck_reserve_branches > 0
     assert result.stats.verification_elapsed_ms < 30000
+
+
+def test_reveal_verified_mate_emits_bounded_proof_dag():
+    result = solve_reveal_verified_mate(
+        load_game_from_usi_text(BENCH_POSITION),
+        attacker=0,
+        options=_fast_options(max_nodes=0, time_limit=30.0, include_proof=True),
+        include_proof_dag=True,
+        proof_dag_node_limit=10000,
+    )
+
+    dag = result.proof_tree["verification"]["proof_dag"]
+    assert result.status == MATE
+    assert dag["format"] == "strategy_dag_v1"
+    assert dag["complete"] is True
+    assert dag["root"] == 0
+    assert 1 < len(dag["nodes"]) <= 10000
+    assert any(node["children"] for node in dag["nodes"])
+    assert any(
+        node["resolution"] == "final_round_proof_summary"
+        for node in dag["nodes"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("node_limit", "edge_limit", "reason"),
+    [
+        (1, 500000, "proof DAG node limit exceeded"),
+        (10000, 1, "proof DAG edge limit exceeded"),
+    ],
+)
+def test_reveal_verified_mate_omits_proof_dag_over_limit(
+    node_limit,
+    edge_limit,
+    reason,
+):
+    result = solve_reveal_verified_mate(
+        load_game_from_usi_text(BENCH_POSITION),
+        attacker=0,
+        options=_fast_options(max_nodes=0, time_limit=30.0, include_proof=True),
+        include_proof_dag=True,
+        proof_dag_node_limit=node_limit,
+        proof_dag_edge_limit=edge_limit,
+    )
+
+    dag = result.proof_tree["verification"]["proof_dag"]
+    assert result.status == MATE
+    assert dag["complete"] is False
+    assert dag["nodes"] == []
+    assert dag["omitted_reason"] == reason
 
 
 def test_dfpn_cli_visible_only_winner_does_not_require_max_depth(monkeypatch, capsys):
