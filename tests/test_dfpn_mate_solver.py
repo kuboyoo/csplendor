@@ -83,6 +83,28 @@ def test_solver_line_serializes_kifu_moves():
     assert parsed["moves"] == [{"player": 0, "usi": usi}]
 
 
+def test_dfpn_cli_kifu_output_defaults_to_reveal_verified(tmp_path, capsys):
+    output = tmp_path / "mate.kifu"
+
+    code = dfpn_mate_solver.main([
+        "--position",
+        BENCH_POSITION,
+        "--attacker",
+        "0",
+        "--kifu-output",
+        str(output),
+    ])
+
+    parsed = parse_kifu_text(output.read_text(encoding="utf-8"))
+    assert code == 0
+    assert '"status": "Mate"' in capsys.readouterr().out
+    assert [move["usi"] for move in parsed["moves"][:3]] == [
+        "take:WGR/return:K",
+        "buy:C44/pay:W0U0G0R0K1D1",
+        "buy:C46/pay:W0U0G0R0K0D0",
+    ]
+
+
 def test_dfpn_terminal_winner_is_used_for_mate_status():
     game = cs.Game(seed=0)
     game.board.winner = 0

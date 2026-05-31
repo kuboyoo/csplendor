@@ -3406,6 +3406,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "--kifu-output",
         help="write one replayable principal line from a mate proof as Splendor KIFU",
     )
+    parser.add_argument(
+        "--kifu-dfpn",
+        action="store_true",
+        help="with --kifu-output, use the regular depth-limited DFPN proof instead of reveal-verified mate",
+    )
     parser.add_argument("--pretty", action="store_true")
     args = parser.parse_args(argv)
 
@@ -3416,6 +3421,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             raise ValueError("--reveal-proof-dag cannot be combined with --no-proof")
         if args.kifu_output and args.no_proof:
             raise ValueError("--kifu-output cannot be combined with --no-proof")
+        if args.kifu_dfpn and not args.kifu_output:
+            raise ValueError("--kifu-dfpn requires --kifu-output")
+        if args.kifu_dfpn and args.reveal_verified:
+            raise ValueError("--kifu-dfpn cannot be combined with --reveal-verified")
+        if args.kifu_output and not args.kifu_dfpn:
+            args.reveal_verified = True
         if args.state_json:
             game = load_game_from_json(args.state_json)
         elif args.position:
