@@ -1,9 +1,11 @@
 import csplendor as cs
 import pytest
-from csplendor.api.usi_kifu import game_to_spn
+from csplendor.api.usi_kifu import action_to_usi, game_to_spn, parse_kifu_text
 
 from scripts.dfpn_mate_solver import (
     DFPNMateSolver,
+    principal_line_to_kifu_text,
+    proof_tree_to_kifu_text,
     solve_game_dfpn,
     solve_reveal_verified_mate,
     solve_visible_only_winner,
@@ -38,6 +40,47 @@ def _fast_options(**overrides):
     }
     values.update(overrides)
     return SolverOptions(**values)
+
+
+def test_dfpn_proof_tree_serializes_replayable_principal_line_kifu():
+    game = cs.Game(seed=0)
+    action = game.legal_actions[0]
+    usi = action_to_usi(action, game=game)
+    proof = {
+        "kind": "state",
+        "children": [{
+            "kind": "action",
+            "current_player": 0,
+            "action": {"usi": usi},
+            "children": [{
+                "kind": "outcome",
+                "reveal_card": 12,
+            }],
+        }],
+    }
+
+    parsed = parse_kifu_text(proof_tree_to_kifu_text(game, proof, attacker=0))
+
+    assert parsed["position"] == game_to_spn(game)
+    assert parsed["moves"] == [{
+        "player": 0,
+        "usi": usi,
+        "comment": "reveal:C12",
+    }]
+    assert parsed["result"] == "P0_WIN"
+
+
+def test_solver_line_serializes_kifu_moves():
+    game = cs.Game(seed=0)
+    usi = action_to_usi(game.legal_actions[0], game=game)
+
+    parsed = parse_kifu_text(principal_line_to_kifu_text(
+        game,
+        [{"player": 0, "action": {"usi": usi}}],
+        attacker=0,
+    ))
+
+    assert parsed["moves"] == [{"player": 0, "usi": usi}]
 
 
 def test_dfpn_terminal_winner_is_used_for_mate_status():

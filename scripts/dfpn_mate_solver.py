@@ -18,6 +18,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import csplendor as cs
+from csplendor.api.usi_kifu import build_kifu_text, game_to_spn, now_iso
 
 from scripts.mate_solver import (
     INVALID_INPUT,
@@ -44,6 +45,7 @@ INF = 10**12
 PLAYER0_WIN = "Player0Win"
 PLAYER1_WIN = "Player1Win"
 DRAW = "Draw"
+MATE_KIFU_REVEAL_COMMENT_PREFIX = "reveal:C"
 _DFPN_DEFAULT_PRUNING = {
     "lazy_reveal": True,
     "attacker_dependency": True,
@@ -185,6 +187,103 @@ class _DFPNNode:
 
 class SearchLimitExceeded(Exception):
     pass
+
+
+def proof_tree_to_kifu_text(
+    game: cs.Game,
+    proof_tree: Dict[str, Any],
+    *,
+    attacker: int,
+) -> str:
+    """Serialize one replayable principal line from a DFPN proof tree."""
+    moves: List[Dict[str, object]] = []
+
+    def walk(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+
+        if node.get("kind") in {"action", "noble"}:
+            action = node.get("action")
+            usi = action.get("usi") if isinstance(action, dict) else None
+            if usi:
+                moves.append({
+                    "player": int(node.get("current_player", 0)),
+                    "usi": str(usi),
+                })
+
+        reveal_card = node.get("reveal_card")
+        if reveal_card is not None and moves:
+            moves[-1]["comment"] = f"{MATE_KIFU_REVEAL_COMMENT_PREFIX}{int(reveal_card)}"
+
+        children = node.get("children")
+        if isinstance(children, list) and children:
+            walk(children[0])
+
+    walk(proof_tree)
+    return _build_mate_kifu_text(game, moves, attacker=attacker)
+
+
+def principal_line_to_kifu_text(
+    game: cs.Game,
+    line: Sequence[Dict[str, Any]],
+    *,
+    attacker: int,
+) -> str:
+    """Serialize a solver principal-line array as replayable KIFU."""
+    moves = []
+    for entry in line:
+        action = entry.get("action")
+        usi = action.get("usi") if isinstance(action, dict) else None
+        if usi:
+            moves.append({
+                "player": int(entry.get("player", 0)),
+                "usi": str(usi),
+            })
+    return _build_mate_kifu_text(game, moves, attacker=attacker)
+
+
+def _build_mate_kifu_text(
+    game: cs.Game,
+    moves: Sequence[Dict[str, object]],
+    *,
+    attacker: int,
+) -> str:
+    return build_kifu_text(
+        headers={
+            "Format": "Splendor KIFU v1.0",
+            "Players": "2",
+            "Player0": "DFPN Attacker" if attacker == 0 else "Defender",
+            "Player1": "DFPN Attacker" if attacker == 1 else "Defender",
+            "Date": now_iso(),
+            "Event": "DFPN Mate Principal Line",
+            "MateAttacker": f"P{attacker}",
+            "MateLine": "principal variation",
+        },
+        position=game_to_spn(game),
+        moves=moves,
+        result=f"P{attacker}_WIN",
+        total_turns=len(moves),
+    )
+
+
+def write_mate_kifu(path: str, game: cs.Game, proof_tree: Dict[str, Any], *, attacker: int) -> None:
+    Path(path).write_text(
+        proof_tree_to_kifu_text(game, proof_tree, attacker=attacker),
+        encoding="utf-8",
+    )
+
+
+def write_principal_line_kifu(
+    path: str,
+    game: cs.Game,
+    line: Sequence[Dict[str, Any]],
+    *,
+    attacker: int,
+) -> None:
+    Path(path).write_text(
+        principal_line_to_kifu_text(game, line, attacker=attacker),
+        encoding="utf-8",
+    )
 
 
 class DFPNMateSolver:
@@ -3303,6 +3402,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--progress-interval", type=float, default=1.0, help="progress output interval in seconds")
     parser.add_argument("--no-memo", action="store_true")
     parser.add_argument("--no-proof", action="store_true")
+    parser.add_argument(
+        "--kifu-output",
+        help="write one replayable principal line from a mate proof as Splendor KIFU",
+    )
     parser.add_argument("--pretty", action="store_true")
     args = parser.parse_args(argv)
 
@@ -3311,6 +3414,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             raise ValueError("--reveal-proof-dag requires --reveal-verified")
         if args.reveal_proof_dag and args.no_proof:
             raise ValueError("--reveal-proof-dag cannot be combined with --no-proof")
+        if args.kifu_output and args.no_proof:
+            raise ValueError("--kifu-output cannot be combined with --no-proof")
         if args.state_json:
             game = load_game_from_json(args.state_json)
         elif args.position:
@@ -3344,6 +3449,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 proof_dag_node_limit=args.proof_dag_node_limit,
                 proof_dag_edge_limit=args.proof_dag_edge_limit,
             )
+            if args.kifu_output:
+                if result.status != MATE or result.proof_tree is None:
+                    raise ValueError("--kifu-output requires a mate proof")
+                candidate = result.proof_tree.get("candidate", {})
+                line = candidate.get("line") if isinstance(candidate, dict) else None
+                if not isinstance(line, list):
+                    raise ValueError("--kifu-output is not supported for this reveal-verified proof")
+                write_principal_line_kifu(args.kifu_output, game, line, attacker=args.attacker)
             print(json.dumps(result.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
             return 0 if result.status == MATE else 2
         _DFPN_DEFAULT_PRUNING.update(
@@ -3380,6 +3493,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             progress_interval=args.progress_interval,
             parallel_start_method=args.parallel_start_method,
         )
+        if args.kifu_output:
+            if result.status != MATE or result.proof_tree is None:
+                raise ValueError("--kifu-output requires a mate proof")
+            write_mate_kifu(args.kifu_output, game, result.proof_tree, attacker=args.attacker)
         print(json.dumps(result.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
         return 0 if result.status in (MATE, NO_MATE) else 2
     except Exception as exc:
