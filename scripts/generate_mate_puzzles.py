@@ -10,6 +10,7 @@ import random
 import shutil
 import sys
 import tempfile
+import time
 from typing import Optional, Protocol, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +40,20 @@ class GenerationStats:
     countermate_checks: int = 0
     countermates: int = 0
     errors: int = 0
+
+
+class ProgressReporter:
+    def __init__(self, interval: float):
+        self.interval = max(0.0, float(interval))
+        self._last_emit = 0.0
+
+    def emit(self, stage: str, *, force: bool = False, **fields: object) -> None:
+        now = time.monotonic()
+        if not force and (self.interval <= 0 or now - self._last_emit < self.interval):
+            return
+        self._last_emit = now
+        details = " ".join(f"{key}={value}" for key, value in fields.items())
+        print(f"[progress] stage={stage}" + (f" {details}" if details else ""), file=sys.stderr, flush=True)
 
 
 def _json_text(value: object) -> str:
@@ -105,15 +120,19 @@ def generate_candidate_position(
     game_seed: int,
     min_playout_plies: int,
     max_playout_plies: int,
+    progress: Optional[ProgressReporter] = None,
+    attempt: Optional[int] = None,
 ) -> Optional[cs.Game]:
     if len(players) != 2:
         raise ValueError("exactly two puzzle players are required")
     game = cs.Game(seed=game_seed)
     game.simple_payment_mode = True
     plies = rng.randint(min_playout_plies, max_playout_plies)
-    for _ in range(plies):
+    for ply in range(plies):
         if game.is_game_over() or not game.legal_actions:
             return None
+        if progress is not None:
+            progress.emit("genbu_playout", attempt=attempt, ply=ply, target_plies=plies)
         player = players[int(game.board.current_player)]
         if not game.apply(player.select_action(game), False):
             raise RuntimeError("engine rejected a generated legal action")
@@ -171,6 +190,8 @@ def find_countermate_blunders(
     action_limit: int,
     node_limit: int,
     time_limit: float,
+    progress: Optional[ProgressReporter] = None,
+    attempt: Optional[int] = None,
 ) -> tuple[list[dict[str, object]], int]:
     proof = result.proof_tree or {}
     verification = proof.get("verification")
@@ -195,11 +216,19 @@ def find_countermate_blunders(
 
     blunders = []
     checks = 0
-    for action in alternatives:
+    for alternative_index, action in enumerate(alternatives, start=1):
         for child in _completed_turn_children(game, action):
             if child.is_game_over() or int(child.board.current_player) != defender:
                 continue
             checks += 1
+            if progress is not None:
+                progress.emit(
+                    "countermate_search",
+                    force=True,
+                    attempt=attempt,
+                    alternative=f"{alternative_index}/{len(alternatives)}",
+                    check=checks,
+                )
             countermate = solve_reveal_verified_mate(
                 child,
                 attacker=defender,
@@ -319,6 +348,15 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     stats = GenerationStats()
+    progress = ProgressReporter(args.progress_seconds)
+    progress.emit(
+        "startup",
+        force=True,
+        count=args.count,
+        max_attempts=args.max_attempts,
+        genbu_simulations=args.genbu_simulations,
+        genbu_time_limit=args.genbu_time_limit,
+    )
     players = create_genbu_players(
         Path(args.genbu_weights),
         time_limit=args.genbu_time_limit,
@@ -328,6 +366,7 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
     while stats.saved < args.count and stats.attempts < args.max_attempts:
         stats.attempts += 1
         game_seed = rng.getrandbits(32)
+        progress.emit("attempt_start", force=True, attempt=stats.attempts, saved=stats.saved, game_seed=game_seed)
         try:
             game = generate_candidate_position(
                 rng,
@@ -335,6 +374,8 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
                 game_seed=game_seed,
                 min_playout_plies=args.min_playout_plies,
                 max_playout_plies=args.max_playout_plies,
+                progress=progress,
+                attempt=stats.attempts,
             )
             if game is None or not is_suspicious_position(
                 game,
@@ -348,6 +389,7 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
                 continue
 
             stats.candidates += 1
+            progress.emit("mate_search", force=True, attempt=stats.attempts, candidates=stats.candidates)
             result = solve_reveal_verified_mate(
                 game,
                 attacker=int(game.board.current_player),
@@ -382,6 +424,8 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
                 action_limit=args.countermate_action_limit,
                 node_limit=args.countermate_node_limit,
                 time_limit=args.countermate_time_limit,
+                progress=progress,
+                attempt=stats.attempts,
             )
             stats.countermate_checks += checks
             stats.countermates += len(blunders)
@@ -406,7 +450,7 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
                 stats.duplicates += 1
             else:
                 stats.saved += 1
-                print(f"[saved {stats.saved}/{args.count}] {puzzle_dir}")
+                print(f"[saved {stats.saved}/{args.count}] {puzzle_dir}", flush=True)
         except Exception as exc:
             stats.errors += 1
             print(f"[attempt {stats.attempts}] {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -445,6 +489,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--countermate-node-limit", type=int, default=0, help="0 disables the search node limit")
     parser.add_argument("--countermate-time-limit", type=float, default=5.0, help="seconds per wrong move")
     parser.add_argument("--progress-interval", type=int, default=100)
+    parser.add_argument("--progress-seconds", type=float, default=10.0, help="seconds between in-attempt progress messages; 0 disables periodic messages")
     return parser
 
 
@@ -456,6 +501,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise ValueError("invalid playout ply range")
     if args.genbu_time_limit < 0 or args.genbu_simulations <= 0:
         raise ValueError("invalid Genbu search limits")
+    if args.progress_seconds < 0:
+        raise ValueError("progress-seconds must be non-negative")
     if args.min_attacker_points < 0 or args.min_attacker_points > args.max_attacker_points:
         raise ValueError("invalid attacker point range")
     if args.min_defender_points < 0 or args.max_score_gap < 0:
