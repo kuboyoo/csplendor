@@ -13,6 +13,7 @@
 #include "player.h"
 #include "state_encoder.h"
 #include "types.h"
+#include "visible_only_solver.h"
 #include <pybind11/functional.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -362,6 +363,49 @@ PYBIND11_MODULE(_csplendor, m) {
       .def("print_legal_actions", [](const Game &g) {
         cli::print_legal_actions(g.board, g.legal_actions());
       });
+
+  m.def(
+      "solve_visible_only_winner_cpp",
+      [](const Game &game, uint64_t max_nodes, double time_limit_seconds) {
+        VisibleOnlySearchResult result;
+        {
+          py::gil_scoped_release release;
+          result = VisibleOnlySolver(max_nodes, time_limit_seconds).solve(game);
+        }
+
+        py::dict stats;
+        stats["nodes"] = result.stats.nodes;
+        stats["memo_hits"] = result.stats.memo_hits;
+        stats["terminal_nodes"] = result.stats.terminal_nodes;
+        stats["legal_moves"] = result.stats.legal_moves;
+        stats["elapsed_ms"] = result.stats.elapsed_ms;
+
+        py::list line;
+        for (const VisibleOnlyLineEntry &entry : result.line) {
+          py::dict item;
+          item["action_code"] = entry.action_code;
+          item["winner"] = entry.winner;
+          item["reason"] = entry.reason;
+          item["action_count"] = entry.action_count;
+          line.append(item);
+        }
+
+        py::dict payload;
+        payload["winner"] = result.winner;
+        payload["forced_win_depth"] =
+            result.forced_win_depth < 0 ? py::none()
+                                        : py::cast(result.forced_win_depth);
+        payload["winner_reason"] = result.winner_reason;
+        payload["unknown_reason"] =
+            result.unknown_reason.empty() ? py::none()
+                                          : py::cast(result.unknown_reason);
+        payload["memoized_states"] = result.memoized_states;
+        payload["stats"] = stats;
+        payload["line"] = line;
+        return payload;
+      },
+      py::arg("game"), py::arg("max_nodes") = 0,
+      py::arg("time_limit_seconds") = 0.0);
 
   m.def("get_card", &get_card, py::arg("id"));
   m.def("get_noble", &get_noble, py::arg("id"));

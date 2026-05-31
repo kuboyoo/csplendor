@@ -446,6 +446,21 @@ def test_visible_only_winner_reports_unknown_on_search_limit():
     assert result.proof_tree["unknown_reason"] == "node limit exceeded"
 
 
+def test_visible_only_winner_finds_bench_forced_line():
+    result = solve_visible_only_winner(
+        load_game_from_usi_text(BENCH_POSITION),
+        options=_fast_options(max_nodes=0, time_limit=30.0, include_proof=True),
+    )
+
+    assert result.status == dfpn_mate_solver.PLAYER0_WIN
+    assert result.proof_tree["assumptions"]["mate_proof"] is True
+    assert result.proof_tree["assumptions"]["all_visible_only_responses_read"] is True
+    assert result.proof_tree["forced_win_depth"] <= 5
+    assert result.proof_tree["line"]
+    assert result.proof_tree["line"][-1]["scores_after"][0] >= 15
+    assert result.stats.elapsed_ms < 30000
+
+
 def test_dfpn_cli_visible_only_winner_does_not_require_max_depth(monkeypatch, capsys):
     def fake_visible_only(game, options=None):
         return dfpn_mate_solver.SearchResult(
@@ -491,3 +506,23 @@ def test_dfpn_keeps_proof_and_disproof_numbers_in_stats():
     assert result.stats.root_proof_number >= 0
     assert result.stats.root_disproof_number >= 0
     assert solver_state.game.board.current_player == game.board.current_player
+
+
+def test_dfpn_resolves_forced_final_round_response_without_expanding():
+    game = cs.Game(seed=0)
+    game.board.final_round = True
+    game.board.current_player = 1
+    player0 = game.board.get_player(0)
+    player0.points = 15
+    game.board.set_player(0, player0)
+    player1 = game.board.get_player(1)
+    player1.points = 0
+    game.board.set_player(1, player1)
+    solver = DFPNMateSolver(attacker=0, max_depth=1, options=_fast_options())
+
+    node = solver._state_node(SolverState.from_game(game), depth=1)
+
+    assert node.terminal
+    assert node.terminal_winner == 0
+    assert node.reason == "forced_final_round_resolution"
+    assert solver.stats.final_round_prunes == 1

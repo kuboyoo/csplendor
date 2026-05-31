@@ -87,6 +87,7 @@ class DFPNStats(SearchStats):
     return_pattern_pruned: int = 0
     upper_bound_prunes: int = 0
     immediate_terminal_prunes: int = 0
+    final_round_prunes: int = 0
 
 
 class ProgressReporter:
@@ -665,6 +666,7 @@ class DFPNMateSolver:
         self.stats.return_pattern_pruned += int(stats.get("return_pattern_pruned", 0))
         self.stats.upper_bound_prunes += int(stats.get("upper_bound_prunes", 0))
         self.stats.immediate_terminal_prunes += int(stats.get("immediate_terminal_prunes", 0))
+        self.stats.final_round_prunes += int(stats.get("final_round_prunes", 0))
         self.stats.max_depth_reached = max(
             self.stats.max_depth_reached,
             int(stats.get("max_depth_reached", 0)),
@@ -879,6 +881,18 @@ class DFPNMateSolver:
         if game.is_game_over():
             terminal = True
             terminal_winner = int(game.winner)
+            if terminal_winner == self.attacker:
+                proof, disproof = 0, INF
+            else:
+                proof, disproof = INF, 0
+        elif (
+            self.use_immediate_terminal_pruning
+            and (final_round_winner := self._resolved_final_round_winner(state)) is not None
+        ):
+            terminal = True
+            terminal_winner = final_round_winner
+            reason = "forced_final_round_resolution"
+            self.stats.final_round_prunes += 1
             if terminal_winner == self.attacker:
                 proof, disproof = 0, INF
             else:
@@ -1588,6 +1602,37 @@ class DFPNMateSolver:
                     if int(noble_game.winner) == player_idx:
                         return True
         return False
+
+    def _resolved_final_round_winner(self, state: SolverState) -> Optional[int]:
+        game = state.game
+        board = game.board
+        if (
+            not bool(board.final_round)
+            or bool(board.waiting_noble)
+            or int(board.current_player) != 1
+        ):
+            return None
+
+        winners: List[int] = []
+        for action in game.legal_actions:
+            next_game = game.clone_light()
+            if not next_game.apply(action, False):
+                continue
+            if bool(next_game.board.waiting_noble):
+                for noble_action in next_game.legal_actions:
+                    noble_game = next_game.clone_light()
+                    if noble_game.apply(noble_action, False) and noble_game.is_game_over():
+                        winners.append(int(noble_game.winner))
+                continue
+            if not next_game.is_game_over():
+                return None
+            winners.append(int(next_game.winner))
+
+        if not winners:
+            return None
+        if int(board.current_player) == self.attacker:
+            return self.attacker if self.attacker in winners else winners[0]
+        return next((winner for winner in winners if winner != self.attacker), self.attacker)
 
     def _attacker_score_upper_bound(self, state: SolverState, depth: int) -> int:
         board = state.game.board
@@ -2415,7 +2460,7 @@ class _VisibleOnlyEntry:
 
 
 class VisibleOnlyWinnerSolver:
-    """Full-response minimax using only currently visible/reserved cards."""
+    """Visible-card mate proof with full-response minimax fallback."""
 
     def __init__(self, options: Optional[SolverOptions] = None):
         self.options = options or SolverOptions()
@@ -2432,8 +2477,11 @@ class VisibleOnlyWinnerSolver:
         working = self._visible_only_game(game)
         self._root_game = working.clone_light()
 
+        if hasattr(cs, "solve_visible_only_winner_cpp"):
+            return self._solve_cpp(working)
+
         try:
-            winner = self._minimax(working, set())
+            winner = self._minimax(working, set(), self._known_card_count(working))
             root_key = self._hash(working)
             root_entry = self._memo.get(root_key)
             reason = root_entry.reason if root_entry is not None else self._terminal_reason(working)
@@ -2469,7 +2517,64 @@ class VisibleOnlyWinnerSolver:
         }
         return SearchResult(status, None, payload if self.options.include_proof else None, None, self.stats)
 
-    def _minimax(self, game: cs.Game, path: set) -> int:
+    def _solve_cpp(self, game: cs.Game) -> SearchResult:
+        raw = cs.solve_visible_only_winner_cpp(
+            game,
+            max_nodes=max(0, int(self.options.max_nodes)),
+            time_limit_seconds=max(0.0, float(self.options.time_limit)),
+        )
+        stats = raw["stats"]
+        self.stats = SearchStats(
+            nodes=int(stats["nodes"]),
+            memo_hits=int(stats["memo_hits"]),
+            terminal_nodes=int(stats["terminal_nodes"]),
+            legal_moves=int(stats["legal_moves"]),
+            elapsed_ms=float(stats["elapsed_ms"]),
+            unknown_reason=raw["unknown_reason"],
+        )
+        winner = int(raw["winner"])
+        forced_win_depth = raw["forced_win_depth"]
+        policy = (
+            "bounded_forced_win_with_all_defender_responses"
+            if forced_win_depth is not None
+            else "full_legal_minimax_with_cycle_score_adjudication"
+        )
+        line = self._cpp_principal_line(raw["line"]) if self.options.include_proof else None
+        final_scores = line[-1]["scores_after"] if line else [int(v) for v in game.scores]
+        payload = {
+            "mode": "visible_only_winner",
+            "winner": winner,
+            "winner_reason": str(raw["winner_reason"]),
+            "unknown_reason": raw["unknown_reason"],
+            "assumptions": {
+                "hidden_decks_ignored": True,
+                "visible_refill": "none",
+                "reserve_deck": "disabled",
+                "max_depth_ignored": True,
+                "mate_proof": forced_win_depth is not None,
+                "policy": policy,
+                "attacker_candidate_policy": (
+                    "heuristic_subset_for_bounded_proof"
+                    if forced_win_depth is not None
+                    else "all_legal_actions"
+                ),
+                "all_visible_only_responses_read": True,
+                "equivalent_child_states_collapsed": True,
+            },
+            "final_scores": final_scores,
+            "forced_win_depth": forced_win_depth,
+            "memoized_states": int(raw["memoized_states"]),
+            "line": line,
+        }
+        return SearchResult(
+            self._winner_status(winner),
+            None,
+            payload if self.options.include_proof else None,
+            None,
+            self.stats,
+        )
+
+    def _minimax(self, game: cs.Game, path: set, known_card_count: int) -> int:
         self._check_limits()
         self.stats.nodes += 1
 
@@ -2477,7 +2582,7 @@ class VisibleOnlyWinnerSolver:
             self.stats.terminal_nodes += 1
             return int(game.winner)
 
-        if self._known_card_count(game) == 0:
+        if known_card_count == 0:
             self.stats.terminal_nodes += 1
             return self._adjudicate_by_score(game)
 
@@ -2511,10 +2616,15 @@ class VisibleOnlyWinnerSolver:
 
         try:
             for action_code in action_codes:
-                if not game.apply_action_code(int(action_code), True):
+                action_type = int(cs.Action.unpack(int(action_code)).type)
+                if not game.apply_action_code_trusted(int(action_code), True):
                     continue
                 try:
-                    child_winner = self._minimax(game, path)
+                    child_winner = self._minimax(
+                        game,
+                        path,
+                        known_card_count - int(action_type == int(cs.ActionType.PURCHASE)),
+                    )
                 finally:
                     game.undo()
 
@@ -2634,7 +2744,7 @@ class VisibleOnlyWinnerSolver:
             action = cs.Action.unpack(action_code)
             if int(action.type) == int(cs.ActionType.RESERVE_DECK):
                 continue
-            if not game.apply_action_code(action_code, True):
+            if not game.apply_action_code_trusted(action_code, True):
                 continue
             child_hash = self._hash(game)
             game.undo()
@@ -2695,6 +2805,33 @@ class VisibleOnlyWinnerSolver:
                     "node_winner": entry.winner,
                     "node_reason": entry.reason,
                     "legal_response_count": entry.action_count,
+                }
+            )
+        return line
+
+    def _cpp_principal_line(self, raw_line: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if self._root_game is None:
+            return []
+        game = self._root_game.clone()
+        line: List[Dict[str, Any]] = []
+        for ply, raw_entry in enumerate(raw_line):
+            action_code = int(raw_entry["action_code"])
+            action = cs.Action.unpack(action_code)
+            before_player = int(game.board.current_player)
+            before_scores = [int(v) for v in game.scores]
+            action_summary = self._helper._action_summary(action, game)
+            if not game.apply_action_code(action_code, False):
+                break
+            line.append(
+                {
+                    "ply": ply,
+                    "player": before_player,
+                    "action": action_summary,
+                    "scores_before": before_scores,
+                    "scores_after": [int(v) for v in game.scores],
+                    "node_winner": int(raw_entry["winner"]),
+                    "node_reason": str(raw_entry["reason"]),
+                    "legal_response_count": int(raw_entry["action_count"]),
                 }
             )
         return line

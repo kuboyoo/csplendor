@@ -8,6 +8,7 @@ from ._csplendor import (
     ActionEncoderCpp,
     ActionEncoderV2,
     ActionEncoderV3,
+    solve_visible_only_winner_cpp,
 )
 from .features import StateFeaturizer
 from .action_space import ActionEncoder
@@ -20,6 +21,7 @@ __all__ = [
     "StateFeaturizer", "ActionEncoder", "ActionEncoderCpp", "ActionEncoderV2", "ActionEncoderV3", "StateEncoder",
     "MCTSConfig", "MCTSNode", "MCTS",
     "LeafRequest", "InferenceResult",
+    "solve_visible_only_winner_cpp",
 ]
 
 GEM_NAMES = ["Emerald", "Sapphire", "Ruby", "Diamond", "Onyx", "Gold"]
