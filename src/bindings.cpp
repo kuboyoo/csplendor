@@ -438,6 +438,9 @@ PYBIND11_MODULE(_csplendor, m) {
             result.stats.oracle_purchase_actions;
         stats["oracle_reserve_actions"] =
             result.stats.oracle_reserve_actions;
+        stats["deck_reserve_candidates"] =
+            result.stats.deck_reserve_candidates;
+        stats["deck_reserve_branches"] = result.stats.deck_reserve_branches;
         stats["elapsed_ms"] = result.stats.elapsed_ms;
 
         py::list line;

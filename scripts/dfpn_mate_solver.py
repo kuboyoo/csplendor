@@ -101,6 +101,8 @@ class RevealVerifiedStats(SearchStats):
     final_round_direct_resolutions: int = 0
     oracle_purchase_actions: int = 0
     oracle_reserve_actions: int = 0
+    deck_reserve_candidates: int = 0
+    deck_reserve_branches: int = 0
 
 
 class ProgressReporter:
@@ -2943,6 +2945,8 @@ def solve_reveal_verified_mate(
         final_round_direct_resolutions=int(verification_stats["final_round_direct_resolutions"]),
         oracle_purchase_actions=int(verification_stats["oracle_purchase_actions"]),
         oracle_reserve_actions=int(verification_stats["oracle_reserve_actions"]),
+        deck_reserve_candidates=int(verification_stats["deck_reserve_candidates"]),
+        deck_reserve_branches=int(verification_stats["deck_reserve_branches"]),
     )
     verification = {
         "all_reveals_verified": bool(raw["proven"]),
@@ -2960,7 +2964,7 @@ def solve_reveal_verified_mate(
             "all_reveal_shapes_verified": True,
             "hidden_reveal_verification": "defender_dominating_reveal_oracle",
             "reveal_identity_abstraction": "level_and_reveal_timing_preserved",
-            "reserve_deck": "disabled",
+            "reserve_deck": "all_post_root_draws_verified",
             "attacker_candidate_policy": "heuristic_subset_for_bounded_proof",
         },
         "candidate": {
@@ -3003,9 +3007,15 @@ def _reveal_verified_line(
         before_scores = [int(v) for v in game.scores]
         action_summary = helper._action_summary(action, game)
         if reveal_card is not None:
-            level = DFPNMateSolver._card_info(int(action.card_id))[0] - 1
+            if int(action.type) == int(cs.ActionType.RESERVE_DECK):
+                level = int(action.deck_level)
+            else:
+                level = DFPNMateSolver._card_info(int(action.card_id))[0] - 1
             decks = [[int(card_id) for card_id in deck] for deck in game.board.decks]
-            decks[level].remove(int(reveal_card))
+            if int(reveal_card) in decks[level]:
+                decks[level].remove(int(reveal_card))
+            elif decks[level]:
+                decks[level].pop()
             decks[level].append(int(reveal_card))
             game.board.decks = decks
         if not game.apply_action_code(action_code, False):

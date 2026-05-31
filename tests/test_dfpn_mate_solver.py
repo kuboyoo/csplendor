@@ -480,8 +480,13 @@ def test_reveal_verified_mate_finds_bench_forced_line():
         result.proof_tree["assumptions"]["hidden_reveal_verification"]
         == "defender_dominating_reveal_oracle"
     )
+    assert (
+        result.proof_tree["assumptions"]["reserve_deck"]
+        == "all_post_root_draws_verified"
+    )
     assert result.proof_tree["candidate"]["line"]
     assert result.stats.oracle_purchase_actions > 0
+    assert result.stats.deck_reserve_branches > 0
     assert result.stats.verification_elapsed_ms < 30000
 
 

@@ -25,6 +25,8 @@ struct RevealVerifiedSearchStats {
   uint64_t final_round_direct_resolutions = 0;
   uint64_t oracle_purchase_actions = 0;
   uint64_t oracle_reserve_actions = 0;
+  uint64_t deck_reserve_candidates = 0;
+  uint64_t deck_reserve_branches = 0;
   double elapsed_ms = 0.0;
 };
 
@@ -325,12 +327,85 @@ private:
     }
 
     const Action action = Action::unpack(ordered.code);
+    if (action.type == RESERVE_DECK)
+      return for_each_deck_reserve_outcome(game, action, visitor);
+
     const Board previous = game.board;
     if (!game.apply_trusted(action, false))
       return false;
     const bool keep_going = visitor(-1);
     game.board = previous;
     return keep_going;
+  }
+
+  template <typename Visitor>
+  bool for_each_deck_reserve_outcome(Game &game, const Action &action,
+                                     Visitor visitor) {
+    const std::vector<int> cards = deck_reserve_cards(game, action.deck_level);
+    stats_.deck_reserve_candidates += cards.size();
+    if (cards.empty())
+      return false;
+    const Board previous = game.board;
+    for (int card_id : cards) {
+      game.board = previous;
+      if (!apply_deck_reserve_outcome(game, action, card_id))
+        continue;
+      ++stats_.deck_reserve_branches;
+      if (!visitor(card_id)) {
+        game.board = previous;
+        return false;
+      }
+    }
+    game.board = previous;
+    return true;
+  }
+
+  std::vector<int> deck_reserve_cards(const Game &game, int level) const {
+    std::vector<int> cards;
+    if (level < 0 || level >= 3 || game.board.decks[level].empty())
+      return cards;
+    // Blank refills erase card identity, so conservatively branch over every
+    // unclaimed initial hidden card of the requested level.
+    for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
+      const Card &card = get_card(card_id);
+      if (card.level - 1 == level && is_initial_hidden_card(card_id) &&
+          !has_hidden_card_claimed(game.board, card_id))
+        cards.push_back(card_id);
+    }
+    return cards;
+  }
+
+  static bool apply_deck_reserve_outcome(Game &game, const Action &action,
+                                         int card_id) {
+    Board &board = game.board;
+    if (board.is_game_over() || board.waiting_noble ||
+        board.current_player >= Board::NUM_PLAYERS ||
+        action.type != RESERVE_DECK ||
+        action.deck_level < 0 || action.deck_level >= 3 ||
+        board.decks[action.deck_level].empty())
+      return false;
+    PlayerState &player = board.players[board.current_player];
+    if (!player.can_reserve() || !is_valid_card_id(card_id) ||
+        get_card(card_id).level - 1 != action.deck_level)
+      return false;
+
+    board.invalidate_hash();
+    board.decks[action.deck_level].pop_back();
+    player.reserved_is_hidden[player.reserved_count] = true;
+    player.reserved[player.reserved_count++] = card_id;
+    if (board.bank[GOLD] > 0) {
+      --board.bank[GOLD];
+      ++player.gems[GOLD];
+    }
+    for (int color = 0; color < 6; ++color) {
+      if (action.return_gems[color] > player.gems[color])
+        return false;
+      player.gems[color] -= action.return_gems[color];
+      board.bank[color] += action.return_gems[color];
+    }
+    player.sync_packed();
+    end_oracle_turn(board);
+    return true;
   }
 
   static int visible_refill_level(const Action &action) {
@@ -482,7 +557,7 @@ private:
     if (allow_oracle) {
       for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
         if (is_initial_hidden_card(card_id) &&
-            !has_hidden_card_acquired(board, card_id) &&
+            !has_hidden_card_claimed(board, card_id) &&
             has_blank_slot_at_level(board, get_card(card_id).level - 1))
           consider_purchase(board, player, card_id, consider);
       }
@@ -599,8 +674,6 @@ private:
     std::vector<OrderedAction> actions;
     for (uint64_t code : game.legal_action_codes()) {
       const Action action = Action::unpack(code);
-      if (action.type == RESERVE_DECK)
-        continue;
       actions.push_back(ordered_action(action, code));
     }
     std::sort(actions.begin(), actions.end());
@@ -612,7 +685,7 @@ private:
     const PlayerState &player = game.board.players[game.current_player()];
     for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
       if (!is_initial_hidden_card(card_id) ||
-          has_hidden_card_acquired(game.board, card_id) ||
+          has_hidden_card_claimed(game.board, card_id) ||
           !has_blank_slot_at_level(game.board, get_card(card_id).level - 1))
         continue;
       const Card &card = get_card(card_id);
@@ -777,6 +850,18 @@ private:
     for (int player = 0; player < Board::NUM_PLAYERS; ++player) {
       if (has_player_purchased_card(board.players[player], card_id))
         return true;
+    }
+    return false;
+  }
+
+  static bool has_hidden_card_claimed(const Board &board, int card_id) {
+    if (has_hidden_card_acquired(board, card_id))
+      return true;
+    for (int player = 0; player < Board::NUM_PLAYERS; ++player) {
+      for (int slot = 0; slot < Board::MAX_RESERVED; ++slot) {
+        if (board.players[player].reserved[slot] == card_id)
+          return true;
+      }
     }
     return false;
   }
@@ -1026,10 +1111,16 @@ private:
       if (it == memo_.end() || !it->second.has_action)
         break;
       const int current_player = game.current_player();
-      if (!game.apply_action_code_trusted(it->second.action_code, false))
+      const Action action = Action::unpack(it->second.action_code);
+      const int reveal_card = it->second.reveal_card;
+      const bool applied =
+          action.type == RESERVE_DECK && reveal_card >= 0
+              ? apply_deck_reserve_outcome(game, action, reveal_card)
+              : game.apply_action_code_trusted(it->second.action_code, false);
+      if (!applied)
         break;
       line.push_back(RevealVerifiedLineEntry{
-          it->second.action_code, -1, it->second.action_count});
+          it->second.action_code, reveal_card, it->second.action_count});
       depth -= static_cast<int>(current_player == attacker_ &&
                                 game.current_player() != current_player);
     }
