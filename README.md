@@ -104,13 +104,15 @@ python scripts/dfpn_mate_solver.py \
 
 ### 詰め問題集の生成
 
-`scripts/generate_mate_puzzles.py` は、合法なランダム対局から点差の小さい終盤局面を生成し、めくれまで検証済みの詰みだけを問題集として保存します。さらに正解手以外を選ぶと相手側の検証済み詰みが成立する局面だけを採用します。購入時の全支払いパターン、局面入力後の山札予約、めくれを検証します。
+`scripts/generate_mate_puzzles.py` は、`dlsplendor.search.genbu_adapter.GenbuAdapter` を使った Genbu AI 同士の対局から点差の小さい終盤局面を生成し、めくれまで検証済みの詰みだけを問題集として保存します。AI 対局中だけ簡易支払いモードを有効にします。さらに正解手以外を選ぶと相手側の検証済み詰みが成立する局面だけを採用します。詰み検証では通常支払いモードに戻し、購入時の全支払いパターン、局面入力後の山札予約、めくれを検証します。
 
 ```bash
 python scripts/generate_mate_puzzles.py \
   --output-dir generated/mate_puzzles \
   --count 100 \
   --max-attempts 10000 \
+  --genbu-weights scripts/weights/genbu.pt \
+  --genbu-simulations 100 \
   --time-limit 30
 ```
 

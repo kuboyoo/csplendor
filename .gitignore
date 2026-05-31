@@ -15,3 +15,4 @@ backend_repro.log
 hoge
 .DS_Store
 generated/
+scripts/weights/

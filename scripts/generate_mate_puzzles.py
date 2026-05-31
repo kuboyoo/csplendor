@@ -10,7 +10,7 @@ import random
 import shutil
 import sys
 import tempfile
-from typing import Optional, Sequence
+from typing import Optional, Protocol, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -21,6 +21,9 @@ from csplendor.api.usi_kifu import action_to_usi, game_to_spn, now_iso
 
 from scripts.dfpn_mate_solver import principal_line_to_kifu_text, solve_reveal_verified_mate
 from scripts.mate_solver import MATE, SearchResult, SolverOptions
+
+DEFAULT_GENBU_WEIGHTS = REPO_ROOT / "scripts" / "weights" / "genbu.pt"
+DLSPLENDOR_ROOT = REPO_ROOT.parent / "dlsplendor"
 
 
 @dataclass
@@ -46,43 +49,75 @@ def _position_id(position: str) -> str:
     return hashlib.sha256(position.encode("utf-8")).hexdigest()[:16]
 
 
-def _weighted_random_action(game: cs.Game, rng: random.Random) -> cs.Action:
-    actions = list(game.legal_actions)
-    nobles = [
-        action for action in actions
-        if int(action.type) == int(cs.ActionType.VISIT_NOBLE)
-    ]
-    if nobles:
-        return rng.choice(nobles)
+class PuzzlePlayer(Protocol):
+    def select_action(self, game: cs.Game) -> cs.Action:
+        ...
 
-    weights = []
-    for action in actions:
-        action_type = int(action.type)
-        if action_type == int(cs.ActionType.PURCHASE):
-            weights.append(14 + 10 * int(cs.get_card(int(action.card_id)).points))
-        elif action_type == int(cs.ActionType.RESERVE_VISIBLE):
-            weights.append(4)
-        elif action_type == int(cs.ActionType.RESERVE_DECK):
-            weights.append(2)
-        else:
-            weights.append(8)
-    return rng.choices(actions, weights=weights, k=1)[0]
+
+class GenbuPuzzlePlayer:
+    def __init__(self, weights_path: Path, *, time_limit: float, num_simulations: int):
+        if str(DLSPLENDOR_ROOT) not in sys.path:
+            sys.path.insert(0, str(DLSPLENDOR_ROOT))
+        from dlsplendor.search.genbu_adapter import GenbuAdapter
+
+        self.adapter = GenbuAdapter(weights_path=str(weights_path))
+        self.time_limit = time_limit
+        self.num_simulations = num_simulations
+
+    def select_action(self, game: cs.Game) -> cs.Action:
+        actions = list(game.legal_actions)
+        if not actions:
+            raise ValueError("cannot select an action without legal actions")
+        nobles = [
+            action for action in actions
+            if int(action.type) == int(cs.ActionType.VISIT_NOBLE)
+        ]
+        if nobles:
+            return nobles[0]
+        action_index = self.adapter.select_action_with_search(
+            game,
+            time_limit=self.time_limit,
+            num_simulations=self.num_simulations,
+        )
+        if not 0 <= action_index < len(actions):
+            raise RuntimeError(f"Genbu returned invalid legal action index: {action_index}")
+        return actions[action_index]
+
+
+def create_genbu_players(
+    weights_path: Path,
+    *,
+    time_limit: float,
+    num_simulations: int,
+) -> tuple[PuzzlePlayer, PuzzlePlayer]:
+    if not weights_path.is_file():
+        raise FileNotFoundError(f"Genbu weights not found: {weights_path}")
+    return (
+        GenbuPuzzlePlayer(weights_path, time_limit=time_limit, num_simulations=num_simulations),
+        GenbuPuzzlePlayer(weights_path, time_limit=time_limit, num_simulations=num_simulations),
+    )
 
 
 def generate_candidate_position(
     rng: random.Random,
     *,
+    players: Sequence[PuzzlePlayer],
     game_seed: int,
     min_playout_plies: int,
     max_playout_plies: int,
 ) -> Optional[cs.Game]:
+    if len(players) != 2:
+        raise ValueError("exactly two puzzle players are required")
     game = cs.Game(seed=game_seed)
+    game.simple_payment_mode = True
     plies = rng.randint(min_playout_plies, max_playout_plies)
     for _ in range(plies):
         if game.is_game_over() or not game.legal_actions:
             return None
-        if not game.apply(_weighted_random_action(game, rng), False):
+        player = players[int(game.board.current_player)]
+        if not game.apply(player.select_action(game), False):
             raise RuntimeError("engine rejected a generated legal action")
+    game.simple_payment_mode = False
     return game
 
 
@@ -284,6 +319,11 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     stats = GenerationStats()
+    players = create_genbu_players(
+        Path(args.genbu_weights),
+        time_limit=args.genbu_time_limit,
+        num_simulations=args.genbu_simulations,
+    )
 
     while stats.saved < args.count and stats.attempts < args.max_attempts:
         stats.attempts += 1
@@ -291,6 +331,7 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
         try:
             game = generate_candidate_position(
                 rng,
+                players=players,
                 game_seed=game_seed,
                 min_playout_plies=args.min_playout_plies,
                 max_playout_plies=args.max_playout_plies,
@@ -383,6 +424,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--count", type=int, default=100, help="number of puzzles to save")
     parser.add_argument("--max-attempts", type=int, default=10000)
     parser.add_argument("--seed", type=int, default=0, help="generator RNG seed")
+    parser.add_argument("--genbu-weights", default=str(DEFAULT_GENBU_WEIGHTS))
+    parser.add_argument("--genbu-time-limit", type=float, default=0.25, help="seconds per Genbu move")
+    parser.add_argument("--genbu-simulations", type=int, default=100, help="maximum MCTS simulations per Genbu move")
     parser.add_argument("--min-playout-plies", type=int, default=18)
     parser.add_argument("--max-playout-plies", type=int, default=48)
     parser.add_argument("--min-attacker-points", type=int, default=8)
@@ -410,6 +454,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise ValueError("count and max-attempts must be non-negative")
     if args.min_playout_plies < 0 or args.min_playout_plies > args.max_playout_plies:
         raise ValueError("invalid playout ply range")
+    if args.genbu_time_limit < 0 or args.genbu_simulations <= 0:
+        raise ValueError("invalid Genbu search limits")
     if args.min_attacker_points < 0 or args.min_attacker_points > args.max_attacker_points:
         raise ValueError("invalid attacker point range")
     if args.min_defender_points < 0 or args.max_score_gap < 0:

@@ -6,10 +6,39 @@ from csplendor.api.usi_kifu import action_to_usi, parse_kifu_text
 import scripts.generate_mate_puzzles as generate_mate_puzzles
 from scripts.generate_mate_puzzles import (
     find_countermate_blunders,
+    generate_candidate_position,
     is_suspicious_position,
     save_puzzle,
 )
 from scripts.mate_solver import MATE, SearchResult, SearchStats
+
+
+class FirstActionPlayer:
+    def __init__(self):
+        self.calls = 0
+        self.simple_payment_modes = []
+
+    def select_action(self, game):
+        self.calls += 1
+        self.simple_payment_modes.append(bool(game.simple_payment_mode))
+        return game.legal_actions[0]
+
+
+def test_candidate_position_uses_two_players_and_simple_payment_mode():
+    players = [FirstActionPlayer(), FirstActionPlayer()]
+
+    game = generate_candidate_position(
+        generate_mate_puzzles.random.Random(0),
+        players=players,
+        game_seed=0,
+        min_playout_plies=2,
+        max_playout_plies=2,
+    )
+
+    assert game is not None
+    assert game.simple_payment_mode is False
+    assert [player.calls for player in players] == [1, 1]
+    assert [player.simple_payment_modes for player in players] == [[True], [True]]
 
 
 def test_save_puzzle_writes_depth_grouped_answer_and_complete_strategy(tmp_path):
