@@ -18,7 +18,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import csplendor as cs
-from csplendor.api.usi_kifu import build_kifu_text, game_to_spn, now_iso
+from csplendor.api.usi_kifu import (
+    build_kifu_text,
+    find_legal_action_index_by_usi,
+    game_to_spn,
+    now_iso,
+)
 
 from scripts.mate_solver import (
     INVALID_INPUT,
@@ -248,6 +253,7 @@ def _build_mate_kifu_text(
     *,
     attacker: int,
 ) -> str:
+    replay_moves = _with_implicit_noble_visits(game, moves)
     return build_kifu_text(
         headers={
             "Format": "Splendor KIFU v1.0",
@@ -260,10 +266,81 @@ def _build_mate_kifu_text(
             "MateLine": "principal variation",
         },
         position=game_to_spn(game),
-        moves=moves,
+        moves=replay_moves,
         result=f"P{attacker}_WIN",
-        total_turns=len(moves),
+        total_turns=len(replay_moves),
     )
+
+
+def _with_implicit_noble_visits(
+    root_game: cs.Game,
+    moves: Sequence[Dict[str, object]],
+) -> List[Dict[str, object]]:
+    """Add KIFU rows for noble visits that the engine applies automatically."""
+    game = root_game.clone()
+    replay_moves: List[Dict[str, object]] = []
+    for move in moves:
+        replay_move = dict(move)
+        usi = str(replay_move.get("usi", "pass"))
+        player = int(replay_move.get("player", game.board.current_player))
+        if player != int(game.board.current_player):
+            raise ValueError(f"KIFU move player does not match engine turn: P{player} {usi}")
+
+        action_index = find_legal_action_index_by_usi(game, usi)
+        if action_index < 0:
+            raise ValueError(f"no legal action matches KIFU move: {usi}")
+        action = game.legal_actions[action_index]
+        _set_reveal_card_for_kifu_move(game, action, replay_move.get("comment"))
+
+        before_nobles = {
+            int(noble_id)
+            for noble_id in game.board.get_player(player).acquired_nobles
+        }
+        if not game.apply(action, False):
+            raise RuntimeError(f"engine rejected KIFU move: {usi}")
+        replay_moves.append(replay_move)
+
+        if usi.startswith("noble:"):
+            continue
+        after_nobles = [
+            int(noble_id)
+            for noble_id in game.board.get_player(player).acquired_nobles
+        ]
+        for noble_id in after_nobles:
+            if noble_id not in before_nobles:
+                replay_moves.append({
+                    "player": player,
+                    "usi": f"noble:N{noble_id}",
+                    "time_ms": 0,
+                    "comment": "auto",
+                })
+    return replay_moves
+
+
+def _set_reveal_card_for_kifu_move(
+    game: cs.Game,
+    action: cs.Action,
+    comment: object,
+) -> None:
+    if not isinstance(comment, str) or not comment.startswith(MATE_KIFU_REVEAL_COMMENT_PREFIX):
+        return
+    reveal_card = int(comment[len(MATE_KIFU_REVEAL_COMMENT_PREFIX):])
+    if int(action.type) == int(cs.ActionType.RESERVE_DECK):
+        level = int(action.deck_level)
+    elif int(action.type) in (
+        int(cs.ActionType.PURCHASE),
+        int(cs.ActionType.RESERVE_VISIBLE),
+    ):
+        level = DFPNMateSolver._card_info(int(action.card_id))[0] - 1
+    else:
+        return
+    decks = [[int(card_id) for card_id in deck] for deck in game.board.decks]
+    if reveal_card in decks[level]:
+        decks[level].remove(reveal_card)
+    elif decks[level]:
+        decks[level].pop()
+    decks[level].append(reveal_card)
+    game.board.decks = decks
 
 
 def write_mate_kifu(path: str, game: cs.Game, proof_tree: Dict[str, Any], *, attacker: int) -> None:

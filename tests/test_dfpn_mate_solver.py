@@ -98,11 +98,20 @@ def test_dfpn_cli_kifu_output_defaults_to_reveal_verified(tmp_path, capsys):
     parsed = parse_kifu_text(output.read_text(encoding="utf-8"))
     assert code == 0
     assert '"status": "Mate"' in capsys.readouterr().out
-    assert [move["usi"] for move in parsed["moves"][:3]] == [
+    assert [move["usi"] for move in parsed["moves"]] == [
         "take:WGR/return:K",
         "buy:C44/pay:W0U0G0R0K1D1",
         "buy:C46/pay:W0U0G0R0K0D0",
+        "buy:C33/pay:W0U0G0R0K0D0",
+        "buy:C80/pay:W0U0G2R2K0D0",
+        "noble:N1",
+        "reserve:C87",
+        "buy:C86/pay:W3U1G0R0K0D0",
+        "buy:C24/pay:W0U0G0R0K0D1",
     ]
+    assert parsed["moves"][5]["time_ms"] == 0
+    assert parsed["moves"][5]["comment"] == "auto"
+    assert parsed["total_turns"] == 9
 
 
 def test_dfpn_terminal_winner_is_used_for_mate_status():
