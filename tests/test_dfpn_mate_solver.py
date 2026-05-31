@@ -576,6 +576,9 @@ def test_reveal_verified_mate_finds_bench_forced_line():
         == "all_legal_patterns"
     )
     assert result.proof_tree["candidate"]["line"]
+    assert result.proof_tree["line"][-2]["action"]["usi"] == "buy:C86/pay:W3U1G0R0K0D0"
+    assert result.proof_tree["line"][-1]["action"]["usi"] == "buy:C24/pay:W0U0G0R0K0D1"
+    assert len(result.proof_tree["verification"]["line"]) < len(result.proof_tree["line"])
     assert result.stats.oracle_purchase_actions > 0
     assert result.stats.deck_reserve_branches > 0
     assert result.stats.verification_elapsed_ms < 30000

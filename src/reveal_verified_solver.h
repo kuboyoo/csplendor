@@ -206,6 +206,7 @@ private:
     int reveal_card = -1;
     bool has_action = false;
     size_t action_count = 0;
+    bool replayable = true;
   };
 
   struct OrderedAction {
@@ -332,18 +333,21 @@ private:
 
       if (!representative.has_action) {
         representative = Entry{ForceStatus::UNKNOWN, ordered.code,
-                               representative_reveal, true, actions.size()};
+                               representative_reveal, true, actions.size(),
+                               is_replayable(ordered)};
       }
       if (current_player == attacker_ && !action_refuted && !action_unknown) {
         path.erase(key);
         memo_[key] = Entry{ForceStatus::PROVEN, ordered.code,
-                           representative_reveal, true, actions.size()};
+                           representative_reveal, true, actions.size(),
+                           is_replayable(ordered)};
         return ForceStatus::PROVEN;
       }
       if (current_player != attacker_ && action_refuted) {
         path.erase(key);
         memo_[key] = Entry{ForceStatus::REFUTED, ordered.code,
-                           representative_reveal, true, actions.size()};
+                           representative_reveal, true, actions.size(),
+                           is_replayable(ordered)};
         return ForceStatus::REFUTED;
       }
       has_unknown = has_unknown || action_unknown;
@@ -382,6 +386,10 @@ private:
     const bool keep_going = visitor(-1);
     game.board = previous;
     return keep_going;
+  }
+
+  static bool is_replayable(const OrderedAction &ordered) {
+    return ordered.oracle_card < 0 && !ordered.oracle_reserve;
   }
 
   template <typename Visitor>
@@ -510,14 +518,15 @@ private:
 
       if (!representative.has_action) {
         representative =
-            Entry{child, ordered.code, reveal_card, true, actions.size()};
+            Entry{child, ordered.code, reveal_card, true, actions.size(),
+                  is_replayable(ordered)};
       }
       if (current_player == attacker_ && child == ForceStatus::PROVEN)
         return Entry{ForceStatus::PROVEN, ordered.code, reveal_card, true,
-                     actions.size()};
+                     actions.size(), is_replayable(ordered)};
       if (current_player != attacker_ && child == ForceStatus::REFUTED)
         return Entry{ForceStatus::REFUTED, ordered.code, reveal_card, true,
-                     actions.size()};
+                     actions.size(), is_replayable(ordered)};
       has_unknown = has_unknown || child == ForceStatus::UNKNOWN;
     }
 
@@ -1235,7 +1244,8 @@ private:
         break;
       seen.insert(key);
       auto it = memo_.find(key);
-      if (it == memo_.end() || !it->second.has_action)
+      if (it == memo_.end() || !it->second.has_action ||
+          !it->second.replayable)
         break;
       const int current_player = game.current_player();
       const Action action = Action::unpack(it->second.action_code);

@@ -3076,6 +3076,7 @@ def solve_reveal_verified_mate(
         "reason": str(raw["reason"]),
         "memoized_states": int(raw["memoized_states"]),
         "stats": dict(verification_stats),
+        "line": _reveal_verified_line(game, raw["line"]),
     }
     if include_proof_dag:
         proof_dag = dict(raw["proof_dag"])
@@ -3116,7 +3117,7 @@ def solve_reveal_verified_mate(
             "line": candidate_tree.get("line"),
         },
         "verification": verification,
-        "line": _reveal_verified_line(game, raw["line"]),
+        "line": candidate_tree.get("line"),
     }
     if raw["proven"]:
         return SearchResult(
@@ -3463,8 +3464,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if args.kifu_output:
                 if result.status != MATE or result.proof_tree is None:
                     raise ValueError("--kifu-output requires a mate proof")
-                candidate = result.proof_tree.get("candidate", {})
-                line = candidate.get("line") if isinstance(candidate, dict) else None
+                line = result.proof_tree.get("line")
                 if not isinstance(line, list):
                     raise ValueError("--kifu-output is not supported for this reveal-verified proof")
                 write_principal_line_kifu(args.kifu_output, game, line, attacker=args.attacker)
