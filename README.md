@@ -68,6 +68,38 @@ GUI と連携する FastAPI サーバーを起動するには、次を実行し�
 uvicorn csplendor.api:app --reload
 ```
 
+## 詰み探索
+
+`scripts/dfpn_mate_solver.py` は、任意局面から player0 または player1 の強制勝利を探索します。
+
+実用上は、公開カードだけで候補手順を高速探索し、その後に未公開カードのめくれ、相手の全応手、全支払いパターン、局面入力後の山札予約結果を検証する `--reveal-verified` モードを推奨します。
+
+```bash
+python scripts/dfpn_mate_solver.py \
+  --position 'bank:... | visible:... | decks:... | nobles:... | P0:... | P1:... | 0' \
+  --attacker 0 \
+  --reveal-verified \
+  --time-limit 30 \
+  --pretty
+```
+
+完全な詰み応手を確認する場合は、証明に関係する局面だけを DAG 形式で出力できます。同一局面はノード ID で共有されるため、木を単純展開するよりメモリ使用量を抑えられます。
+
+```bash
+python scripts/dfpn_mate_solver.py \
+  --position '...' \
+  --attacker 0 \
+  --reveal-verified \
+  --reveal-proof-dag \
+  --proof-dag-node-limit 100000 \
+  --proof-dag-edge-limit 500000 \
+  --time-limit 30
+```
+
+証明 DAG は `proof_tree.verification.proof_dag` に返ります。攻撃側は証明に採用した手、守備側は全合法応手、山札予約は全ドロー結果を保持します。上限超過時も詰み判定結果は維持し、DAG のみ破棄して理由を返します。
+
+`--simple-payment` を指定すると、購入時の支払いをゴールド温存パターンに限定できます。完全検証が必要な場合は指定しないでください。
+
 ## ドキュメント
 詳細な仕様は `doc/` ディレクトリを参照してください。
 - [技術概要](doc/overview.md)
