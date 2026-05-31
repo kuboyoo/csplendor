@@ -11,6 +11,7 @@
 #include "move_generator.h"
 #include "noble_data.h"
 #include "player.h"
+#include "reveal_verified_solver.h"
 #include "state_encoder.h"
 #include "types.h"
 #include "visible_only_solver.h"
@@ -406,6 +407,65 @@ PYBIND11_MODULE(_csplendor, m) {
       },
       py::arg("game"), py::arg("max_nodes") = 0,
       py::arg("time_limit_seconds") = 0.0);
+
+  m.def(
+      "solve_reveal_verified_mate_cpp",
+      [](const Game &game, int attacker, int depth, uint64_t max_nodes,
+         double time_limit_seconds,
+         const std::vector<uint64_t> &preferred_attacker_actions) {
+        RevealVerifiedSearchResult result;
+        {
+          py::gil_scoped_release release;
+          result = RevealVerifiedSolver(attacker, depth, max_nodes,
+                                        time_limit_seconds,
+                                        preferred_attacker_actions)
+                       .solve(game);
+        }
+
+        py::dict stats;
+        stats["nodes"] = result.stats.nodes;
+        stats["memo_hits"] = result.stats.memo_hits;
+        stats["terminal_nodes"] = result.stats.terminal_nodes;
+        stats["legal_moves"] = result.stats.legal_moves;
+        stats["reveal_branches"] = result.stats.reveal_branches;
+        stats["final_round_reveal_collapses"] =
+            result.stats.final_round_reveal_collapses;
+        stats["final_round_score_prunes"] =
+            result.stats.final_round_score_prunes;
+        stats["final_round_direct_resolutions"] =
+            result.stats.final_round_direct_resolutions;
+        stats["oracle_purchase_actions"] =
+            result.stats.oracle_purchase_actions;
+        stats["oracle_reserve_actions"] =
+            result.stats.oracle_reserve_actions;
+        stats["elapsed_ms"] = result.stats.elapsed_ms;
+
+        py::list line;
+        for (const RevealVerifiedLineEntry &entry : result.line) {
+          py::dict item;
+          item["action_code"] = entry.action_code;
+          item["reveal_card"] =
+              entry.reveal_card < 0 ? py::none() : py::cast(entry.reveal_card);
+          item["action_count"] = entry.action_count;
+          line.append(item);
+        }
+
+        py::dict payload;
+        payload["proven"] = result.proven;
+        payload["attacker"] = result.attacker;
+        payload["depth"] = result.depth;
+        payload["reason"] = result.reason;
+        payload["unknown_reason"] =
+            result.unknown_reason.empty() ? py::none()
+                                          : py::cast(result.unknown_reason);
+        payload["memoized_states"] = result.memoized_states;
+        payload["stats"] = stats;
+        payload["line"] = line;
+        return payload;
+      },
+      py::arg("game"), py::arg("attacker"), py::arg("depth"),
+      py::arg("max_nodes") = 0, py::arg("time_limit_seconds") = 0.0,
+      py::arg("preferred_attacker_actions") = std::vector<uint64_t>{});
 
   m.def("get_card", &get_card, py::arg("id"));
   m.def("get_noble", &get_noble, py::arg("id"));

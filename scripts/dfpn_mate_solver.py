@@ -90,6 +90,19 @@ class DFPNStats(SearchStats):
     final_round_prunes: int = 0
 
 
+@dataclass
+class RevealVerifiedStats(SearchStats):
+    candidate_nodes: int = 0
+    candidate_elapsed_ms: float = 0.0
+    verification_nodes: int = 0
+    verification_elapsed_ms: float = 0.0
+    final_round_reveal_collapses: int = 0
+    final_round_score_prunes: int = 0
+    final_round_direct_resolutions: int = 0
+    oracle_purchase_actions: int = 0
+    oracle_reserve_actions: int = 0
+
+
 class ProgressReporter:
     def __init__(self, enabled: bool, interval: float, stream=None):
         self.enabled = bool(enabled)
@@ -2844,6 +2857,173 @@ def solve_visible_only_winner(
     return VisibleOnlyWinnerSolver(options).solve(game)
 
 
+def solve_reveal_verified_mate(
+    game: cs.Game,
+    attacker: int,
+    options: Optional[SolverOptions] = None,
+) -> SearchResult:
+    options = options or SolverOptions()
+    if attacker != int(game.board.current_player):
+        raise ValueError("reveal-verified mate requires attacker to be the current player")
+    if not hasattr(cs, "solve_reveal_verified_mate_cpp"):
+        raise RuntimeError("reveal-verified mate requires the C++ solver extension")
+
+    start_time = time.monotonic()
+    candidate = solve_visible_only_winner(
+        game,
+        options=SolverOptions(
+            max_nodes=options.max_nodes,
+            time_limit=options.time_limit,
+            include_proof=True,
+            allow_deck_reserve=options.allow_deck_reserve,
+            use_memo=options.use_memo,
+            jobs=1,
+        ),
+    )
+    expected_status = PLAYER0_WIN if attacker == 0 else PLAYER1_WIN
+    candidate_tree = candidate.proof_tree or {}
+    candidate_depth = candidate_tree.get("forced_win_depth")
+    if candidate.status != expected_status or candidate_depth is None:
+        stats = RevealVerifiedStats(
+            nodes=int(candidate.stats.nodes),
+            memo_hits=int(candidate.stats.memo_hits),
+            terminal_nodes=int(candidate.stats.terminal_nodes),
+            legal_moves=int(candidate.stats.legal_moves),
+            elapsed_ms=(time.monotonic() - start_time) * 1000.0,
+            unknown_reason="visible-only candidate mate was not found",
+            candidate_nodes=int(candidate.stats.nodes),
+            candidate_elapsed_ms=float(candidate.stats.elapsed_ms),
+        )
+        refutation = {
+            "mode": "reveal_verified_mate",
+            "reason": "visible_only_candidate_mate_not_found",
+            "candidate": candidate.to_dict(),
+        }
+        return SearchResult(UNKNOWN, None, None, refutation, stats)
+
+    elapsed = time.monotonic() - start_time
+    remaining_time = max(0.001, float(options.time_limit) - elapsed) if options.time_limit else 0.0
+    remaining_nodes = (
+        max(1, int(options.max_nodes) - int(candidate.stats.nodes))
+        if options.max_nodes
+        else 0
+    )
+    preferred_attacker_actions = [
+        int(entry["action"]["pack"])
+        for entry in candidate_tree.get("line", [])
+        if int(entry["player"]) == attacker
+    ]
+    raw = cs.solve_reveal_verified_mate_cpp(
+        game,
+        attacker=int(attacker),
+        depth=int(candidate_depth),
+        max_nodes=remaining_nodes,
+        time_limit_seconds=remaining_time,
+        preferred_attacker_actions=preferred_attacker_actions,
+    )
+    verification_stats = raw["stats"]
+    unknown_reason = raw["unknown_reason"]
+    if not raw["proven"] and unknown_reason is None:
+        unknown_reason = "visible-only candidate mate has a reveal counterexample"
+    stats = RevealVerifiedStats(
+        nodes=int(candidate.stats.nodes) + int(verification_stats["nodes"]),
+        memo_hits=int(candidate.stats.memo_hits) + int(verification_stats["memo_hits"]),
+        terminal_nodes=int(candidate.stats.terminal_nodes) + int(verification_stats["terminal_nodes"]),
+        reveal_branches=int(verification_stats["reveal_branches"]),
+        legal_moves=int(candidate.stats.legal_moves) + int(verification_stats["legal_moves"]),
+        elapsed_ms=(time.monotonic() - start_time) * 1000.0,
+        max_depth_reached=int(candidate_depth),
+        unknown_reason=unknown_reason,
+        candidate_nodes=int(candidate.stats.nodes),
+        candidate_elapsed_ms=float(candidate.stats.elapsed_ms),
+        verification_nodes=int(verification_stats["nodes"]),
+        verification_elapsed_ms=float(verification_stats["elapsed_ms"]),
+        final_round_reveal_collapses=int(verification_stats["final_round_reveal_collapses"]),
+        final_round_score_prunes=int(verification_stats["final_round_score_prunes"]),
+        final_round_direct_resolutions=int(verification_stats["final_round_direct_resolutions"]),
+        oracle_purchase_actions=int(verification_stats["oracle_purchase_actions"]),
+        oracle_reserve_actions=int(verification_stats["oracle_reserve_actions"]),
+    )
+    verification = {
+        "all_reveals_verified": bool(raw["proven"]),
+        "reason": str(raw["reason"]),
+        "memoized_states": int(raw["memoized_states"]),
+        "stats": dict(verification_stats),
+    }
+    proof = {
+        "mode": "reveal_verified_mate",
+        "attacker": int(attacker),
+        "forced_win_depth": int(candidate_depth),
+        "assumptions": {
+            "hidden_decks_ignored_during_candidate_search": True,
+            "all_defender_responses_verified": True,
+            "all_reveal_shapes_verified": True,
+            "hidden_reveal_verification": "defender_dominating_reveal_oracle",
+            "reveal_identity_abstraction": "level_and_reveal_timing_preserved",
+            "reserve_deck": "disabled",
+            "attacker_candidate_policy": "heuristic_subset_for_bounded_proof",
+        },
+        "candidate": {
+            "mode": "visible_only_winner",
+            "elapsed_ms": float(candidate.stats.elapsed_ms),
+            "nodes": int(candidate.stats.nodes),
+            "line": candidate_tree.get("line"),
+        },
+        "verification": verification,
+        "line": _reveal_verified_line(game, raw["line"]),
+    }
+    if raw["proven"]:
+        return SearchResult(
+            MATE,
+            int(candidate_depth),
+            proof if options.include_proof else None,
+            None,
+            stats,
+        )
+    refutation = {
+        "mode": "reveal_verified_mate",
+        "candidate": proof["candidate"],
+        "verification": verification,
+    }
+    return SearchResult(UNKNOWN, None, None, refutation, stats)
+
+
+def _reveal_verified_line(
+    root_game: cs.Game,
+    raw_line: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    game = root_game.clone()
+    helper = MateSolver(attacker=int(game.board.current_player), max_depth=0)
+    line: List[Dict[str, Any]] = []
+    for ply, raw_entry in enumerate(raw_line):
+        action_code = int(raw_entry["action_code"])
+        action = cs.Action.unpack(action_code)
+        reveal_card = raw_entry["reveal_card"]
+        before_player = int(game.board.current_player)
+        before_scores = [int(v) for v in game.scores]
+        action_summary = helper._action_summary(action, game)
+        if reveal_card is not None:
+            level = DFPNMateSolver._card_info(int(action.card_id))[0] - 1
+            decks = [[int(card_id) for card_id in deck] for deck in game.board.decks]
+            decks[level].remove(int(reveal_card))
+            decks[level].append(int(reveal_card))
+            game.board.decks = decks
+        if not game.apply_action_code(action_code, False):
+            break
+        line.append(
+            {
+                "ply": ply,
+                "player": before_player,
+                "action": action_summary,
+                "reveal_card": reveal_card,
+                "scores_before": before_scores,
+                "scores_after": [int(v) for v in game.scores],
+                "legal_response_count": int(raw_entry["action_count"]),
+            }
+        )
+    return line
+
+
 def solve_game_dfpn(
     game: cs.Game,
     attacker: int,
@@ -2953,8 +3133,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--seed", type=int, default=0, help="initial game seed when state-json is omitted")
     parser.add_argument("--moves", action="append", default=[], help="USI move list, comma-separated or repeated")
     parser.add_argument("--attacker", type=int, default=0, choices=(0, 1))
-    parser.add_argument("--max-depth", type=int, default=4, help="attacker turn depth for DFPN; ignored by --visible-only-winner")
-    parser.add_argument("--node-limit", type=int, default=200000)
+    parser.add_argument("--max-depth", type=int, default=4, help="attacker turn depth for DFPN; ignored by --visible-only-winner and --reveal-verified")
+    parser.add_argument("--node-limit", type=int)
     parser.add_argument("--time-limit", type=float, default=10.0)
     parser.add_argument(
         "--simple-payment",
@@ -2967,6 +3147,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         dest="visible_only_winner",
         action="store_true",
         help="ignore hidden deck reveals and solve the visible-card game with full-response minimax; not a mate proof",
+    )
+    parser.add_argument(
+        "--reveal-verified",
+        action="store_true",
+        help="find a visible-only candidate mate, then verify all defender responses and hidden reveal shapes",
     )
     parser.add_argument(
         "--jobs",
@@ -3063,8 +3248,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.simple_payment:
             game.simple_payment_mode = True
         apply_usi_moves(game, _parse_moves(args.moves))
+        default_node_limit = 0 if args.visible_only_winner or args.reveal_verified else 200000
         options = SolverOptions(
-            max_nodes=args.node_limit,
+            max_nodes=default_node_limit if args.node_limit is None else args.node_limit,
             time_limit=args.time_limit,
             include_proof=not args.no_proof,
             allow_deck_reserve=args.allow_deck_reserve,
@@ -3075,6 +3261,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             result = solve_visible_only_winner(game, options=options)
             print(json.dumps(result.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
             return 0 if result.status in (PLAYER0_WIN, PLAYER1_WIN, DRAW) else 2
+        if args.reveal_verified:
+            result = solve_reveal_verified_mate(game, attacker=args.attacker, options=options)
+            print(json.dumps(result.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
+            return 0 if result.status == MATE else 2
         _DFPN_DEFAULT_PRUNING.update(
             {
                 "lazy_reveal": not args.no_lazy_reveal_pruning,

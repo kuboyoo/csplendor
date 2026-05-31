@@ -8,6 +8,7 @@ from ._csplendor import (
     ActionEncoderCpp,
     ActionEncoderV2,
     ActionEncoderV3,
+    solve_reveal_verified_mate_cpp,
     solve_visible_only_winner_cpp,
 )
 from .features import StateFeaturizer
@@ -21,6 +22,7 @@ __all__ = [
     "StateFeaturizer", "ActionEncoder", "ActionEncoderCpp", "ActionEncoderV2", "ActionEncoderV3", "StateEncoder",
     "MCTSConfig", "MCTSNode", "MCTS",
     "LeafRequest", "InferenceResult",
+    "solve_reveal_verified_mate_cpp",
     "solve_visible_only_winner_cpp",
 ]
 

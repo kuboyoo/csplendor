@@ -1,7 +1,12 @@
 import csplendor as cs
 from csplendor.api.usi_kifu import game_to_spn
 
-from scripts.dfpn_mate_solver import DFPNMateSolver, solve_game_dfpn, solve_visible_only_winner
+from scripts.dfpn_mate_solver import (
+    DFPNMateSolver,
+    solve_game_dfpn,
+    solve_reveal_verified_mate,
+    solve_visible_only_winner,
+)
 from scripts import dfpn_mate_solver
 from scripts.mate_solver import (
     MATE,
@@ -459,6 +464,25 @@ def test_visible_only_winner_finds_bench_forced_line():
     assert result.proof_tree["line"]
     assert result.proof_tree["line"][-1]["scores_after"][0] >= 15
     assert result.stats.elapsed_ms < 30000
+
+
+def test_reveal_verified_mate_finds_bench_forced_line():
+    result = solve_reveal_verified_mate(
+        load_game_from_usi_text(BENCH_POSITION),
+        attacker=0,
+        options=_fast_options(max_nodes=0, time_limit=30.0, include_proof=True),
+    )
+
+    assert result.status == MATE
+    assert result.depth <= 5
+    assert result.proof_tree["assumptions"]["all_reveal_shapes_verified"] is True
+    assert (
+        result.proof_tree["assumptions"]["hidden_reveal_verification"]
+        == "defender_dominating_reveal_oracle"
+    )
+    assert result.proof_tree["candidate"]["line"]
+    assert result.stats.oracle_purchase_actions > 0
+    assert result.stats.verification_elapsed_ms < 30000
 
 
 def test_dfpn_cli_visible_only_winner_does_not_require_max_depth(monkeypatch, capsys):
