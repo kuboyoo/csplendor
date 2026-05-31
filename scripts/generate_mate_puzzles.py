@@ -11,7 +11,7 @@ import shutil
 import sys
 import tempfile
 import time
-from typing import Optional, Protocol, Sequence
+from typing import Iterator, Optional, Protocol, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -131,6 +131,37 @@ def create_genbu_players(
     )
 
 
+def generate_candidate_positions(
+    rng: random.Random,
+    *,
+    players: Sequence[PuzzlePlayer],
+    game_seed: int,
+    min_playout_plies: int,
+    max_playout_plies: int,
+    progress: Optional[ProgressReporter] = None,
+    attempt: Optional[int] = None,
+) -> Iterator[cs.Game]:
+    if len(players) != 2:
+        raise ValueError("exactly two puzzle players are required")
+    game = cs.Game(seed=game_seed)
+    game.simple_payment_mode = True
+    start_ply = rng.randint(min_playout_plies, max_playout_plies)
+    ply = 0
+    while not game.is_game_over() and game.legal_actions:
+        if progress is not None:
+            progress.emit("genbu_playout", attempt=attempt, ply=ply, start_ply=start_ply)
+        before_player = int(game.board.current_player)
+        player = players[int(game.board.current_player)]
+        if not game.apply(player.select_action(game), False):
+            raise RuntimeError("engine rejected a generated legal action")
+        ply += 1
+        if ply < start_ply or int(game.board.current_player) == before_player:
+            continue
+        game.simple_payment_mode = False
+        yield game.clone_light()
+        game.simple_payment_mode = True
+
+
 def generate_candidate_position(
     rng: random.Random,
     *,
@@ -141,22 +172,18 @@ def generate_candidate_position(
     progress: Optional[ProgressReporter] = None,
     attempt: Optional[int] = None,
 ) -> Optional[cs.Game]:
-    if len(players) != 2:
-        raise ValueError("exactly two puzzle players are required")
-    game = cs.Game(seed=game_seed)
-    game.simple_payment_mode = True
-    plies = rng.randint(min_playout_plies, max_playout_plies)
-    for ply in range(plies):
-        if game.is_game_over() or not game.legal_actions:
-            game.simple_payment_mode = False
-            return game
-        if progress is not None:
-            progress.emit("genbu_playout", attempt=attempt, ply=ply, target_plies=plies)
-        player = players[int(game.board.current_player)]
-        if not game.apply(player.select_action(game), False):
-            raise RuntimeError("engine rejected a generated legal action")
-    game.simple_payment_mode = False
-    return game
+    return next(
+        generate_candidate_positions(
+            rng,
+            players=players,
+            game_seed=game_seed,
+            min_playout_plies=min_playout_plies,
+            max_playout_plies=max_playout_plies,
+            progress=progress,
+            attempt=attempt,
+        ),
+        None,
+    )
 
 
 def is_suspicious_position(
@@ -362,6 +389,111 @@ def save_puzzle(
     return puzzle_dir
 
 
+def try_save_candidate(
+    args: argparse.Namespace,
+    *,
+    output_dir: Path,
+    stats: GenerationStats,
+    progress: ProgressReporter,
+    game: cs.Game,
+    game_seed: int,
+    attempt: int,
+) -> None:
+    if not is_suspicious_position(
+        game,
+        min_attacker_points=args.min_attacker_points,
+        max_attacker_points=args.max_attacker_points,
+        min_defender_points=args.min_defender_points,
+        max_score_gap=args.max_score_gap,
+        allow_final_round=args.allow_final_round,
+    ):
+        stats.filtered += 1
+        report_rejected_position(progress, game, attempt=attempt, reason="balance_filter")
+        return
+
+    stats.candidates += 1
+    progress.emit("mate_search", force=True, attempt=attempt, candidates=stats.candidates)
+    result = solve_reveal_verified_mate(
+        game,
+        attacker=int(game.board.current_player),
+        options=SolverOptions(
+            max_nodes=args.node_limit,
+            time_limit=args.time_limit,
+            include_proof=True,
+            allow_deck_reserve=True,
+        ),
+        include_proof_dag=True,
+        proof_dag_node_limit=args.proof_dag_node_limit,
+        proof_dag_edge_limit=args.proof_dag_edge_limit,
+    )
+    if result.status != MATE or result.proof_tree is None:
+        stats.unknown += 1
+        report_rejected_position(
+            progress,
+            game,
+            attempt=attempt,
+            reason="no_mate",
+            status=result.status,
+        )
+        return
+
+    stats.mates += 1
+    depth = int(result.proof_tree["forced_win_depth"])
+    if depth < args.min_depth or (args.max_depth and depth > args.max_depth):
+        stats.filtered += 1
+        report_rejected_position(progress, game, attempt=attempt, reason="depth_filter", depth=depth)
+        return
+    dag = result.proof_tree["verification"].get("proof_dag", {})
+    if not bool(dag.get("complete")):
+        stats.incomplete_dags += 1
+        report_rejected_position(progress, game, attempt=attempt, reason="incomplete_dag")
+        return
+
+    blunders, checks = find_countermate_blunders(
+        game,
+        result,
+        min_losing_alternatives=args.min_losing_alternatives,
+        action_limit=args.countermate_action_limit,
+        node_limit=args.countermate_node_limit,
+        time_limit=args.countermate_time_limit,
+        progress=progress,
+        attempt=attempt,
+    )
+    stats.countermate_checks += checks
+    stats.countermates += len(blunders)
+    if len(blunders) < args.min_losing_alternatives:
+        stats.filtered += 1
+        report_rejected_position(
+            progress,
+            game,
+            attempt=attempt,
+            reason="insufficient_countermate_blunders",
+            found=len(blunders),
+            required=args.min_losing_alternatives,
+        )
+        return
+
+    scores = [int(score) for score in game.scores]
+    puzzle_dir = save_puzzle(
+        output_dir,
+        game,
+        result,
+        game_seed=game_seed,
+        attempt=attempt,
+        quality={
+            "score_gap": abs(scores[0] - scores[1]),
+            "countermate_blunders": blunders,
+        },
+    )
+    if puzzle_dir is None:
+        stats.duplicates += 1
+        report_rejected_position(progress, game, attempt=attempt, reason="duplicate")
+        return
+
+    stats.saved += 1
+    print(f"[saved {stats.saved}/{args.count}] {puzzle_dir}", flush=True)
+
+
 def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
     rng = random.Random(args.seed)
     output_dir = Path(args.output_dir)
@@ -388,7 +520,7 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
         progress.emit("attempt_start", force=True, attempt=stats.attempts, saved=stats.saved, game_seed=game_seed)
         game: Optional[cs.Game] = None
         try:
-            game = generate_candidate_position(
+            positions = generate_candidate_positions(
                 rng,
                 players=players,
                 game_seed=game_seed,
@@ -397,121 +529,18 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
                 progress=progress,
                 attempt=stats.attempts,
             )
-            if game is None or not is_suspicious_position(
-                game,
-                min_attacker_points=args.min_attacker_points,
-                max_attacker_points=args.max_attacker_points,
-                min_defender_points=args.min_defender_points,
-                max_score_gap=args.max_score_gap,
-                allow_final_round=args.allow_final_round,
-            ):
-                stats.filtered += 1
-                if game is not None:
-                    report_rejected_position(
-                        progress,
-                        game,
-                        attempt=stats.attempts,
-                        reason="balance_filter",
-                    )
-                continue
-
-            stats.candidates += 1
-            progress.emit("mate_search", force=True, attempt=stats.attempts, candidates=stats.candidates)
-            result = solve_reveal_verified_mate(
-                game,
-                attacker=int(game.board.current_player),
-                options=SolverOptions(
-                    max_nodes=args.node_limit,
-                    time_limit=args.time_limit,
-                    include_proof=True,
-                    allow_deck_reserve=True,
-                ),
-                include_proof_dag=True,
-                proof_dag_node_limit=args.proof_dag_node_limit,
-                proof_dag_edge_limit=args.proof_dag_edge_limit,
-            )
-            if result.status != MATE or result.proof_tree is None:
-                stats.unknown += 1
-                report_rejected_position(
-                    progress,
-                    game,
+            for game in positions:
+                try_save_candidate(
+                    args,
+                    output_dir=output_dir,
+                    stats=stats,
+                    progress=progress,
+                    game=game,
+                    game_seed=game_seed,
                     attempt=stats.attempts,
-                    reason="no_mate",
-                    status=result.status,
                 )
-                continue
-
-            stats.mates += 1
-            depth = int(result.proof_tree["forced_win_depth"])
-            if depth < args.min_depth or (args.max_depth and depth > args.max_depth):
-                stats.filtered += 1
-                report_rejected_position(
-                    progress,
-                    game,
-                    attempt=stats.attempts,
-                    reason="depth_filter",
-                    depth=depth,
-                )
-                continue
-            dag = result.proof_tree["verification"].get("proof_dag", {})
-            if not bool(dag.get("complete")):
-                stats.incomplete_dags += 1
-                report_rejected_position(
-                    progress,
-                    game,
-                    attempt=stats.attempts,
-                    reason="incomplete_dag",
-                )
-                continue
-
-            blunders, checks = find_countermate_blunders(
-                game,
-                result,
-                min_losing_alternatives=args.min_losing_alternatives,
-                action_limit=args.countermate_action_limit,
-                node_limit=args.countermate_node_limit,
-                time_limit=args.countermate_time_limit,
-                progress=progress,
-                attempt=stats.attempts,
-            )
-            stats.countermate_checks += checks
-            stats.countermates += len(blunders)
-            if len(blunders) < args.min_losing_alternatives:
-                stats.filtered += 1
-                report_rejected_position(
-                    progress,
-                    game,
-                    attempt=stats.attempts,
-                    reason="insufficient_countermate_blunders",
-                    found=len(blunders),
-                    required=args.min_losing_alternatives,
-                )
-                continue
-
-            scores = [int(score) for score in game.scores]
-            quality = {
-                "score_gap": abs(scores[0] - scores[1]),
-                "countermate_blunders": blunders,
-            }
-            puzzle_dir = save_puzzle(
-                output_dir,
-                game,
-                result,
-                game_seed=game_seed,
-                attempt=stats.attempts,
-                quality=quality,
-            )
-            if puzzle_dir is None:
-                stats.duplicates += 1
-                report_rejected_position(
-                    progress,
-                    game,
-                    attempt=stats.attempts,
-                    reason="duplicate",
-                )
-            else:
-                stats.saved += 1
-                print(f"[saved {stats.saved}/{args.count}] {puzzle_dir}", flush=True)
+                if stats.saved >= args.count:
+                    break
         except Exception as exc:
             stats.errors += 1
             if game is not None:

@@ -1,4 +1,5 @@
 import json
+from itertools import islice
 
 import csplendor as cs
 from csplendor.api.usi_kifu import action_to_usi, parse_kifu_text
@@ -8,6 +9,7 @@ from scripts.generate_mate_puzzles import (
     ProgressReporter,
     find_countermate_blunders,
     generate_candidate_position,
+    generate_candidate_positions,
     is_suspicious_position,
     report_rejected_position,
     save_puzzle,
@@ -56,6 +58,23 @@ def test_candidate_position_uses_two_players_and_simple_payment_mode():
     assert game.simple_payment_mode is False
     assert [player.calls for player in players] == [1, 1]
     assert [player.simple_payment_modes for player in players] == [[True], [True]]
+
+
+def test_candidate_positions_continue_until_endgame_after_first_candidate():
+    players = [FirstActionPlayer(), FirstActionPlayer()]
+
+    games = list(islice(generate_candidate_positions(
+        generate_mate_puzzles.random.Random(0),
+        players=players,
+        game_seed=0,
+        min_playout_plies=2,
+        max_playout_plies=2,
+    ), 3))
+
+    assert len(games) == 3
+    assert [int(game.board.current_player) for game in games] == [0, 1, 0]
+    assert [bool(game.simple_payment_mode) for game in games] == [False, False, False]
+    assert [player.calls for player in players] == [2, 2]
 
 
 def test_save_puzzle_writes_depth_grouped_answer_and_complete_strategy(tmp_path):
