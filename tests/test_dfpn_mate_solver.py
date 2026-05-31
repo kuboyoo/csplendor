@@ -460,10 +460,27 @@ def test_visible_only_winner_finds_bench_forced_line():
     assert result.status == dfpn_mate_solver.PLAYER0_WIN
     assert result.proof_tree["assumptions"]["mate_proof"] is True
     assert result.proof_tree["assumptions"]["all_visible_only_responses_read"] is True
+    assert result.proof_tree["assumptions"]["purchase_payments"] == "all_legal_patterns"
     assert result.proof_tree["forced_win_depth"] <= 5
     assert result.proof_tree["line"]
     assert result.proof_tree["line"][-1]["scores_after"][0] >= 15
     assert result.stats.elapsed_ms < 30000
+
+
+def test_visible_only_winner_respects_explicit_simple_payment_mode():
+    game = cs.Game(seed=0)
+    game.simple_payment_mode = True
+    game.board.winner = 0
+
+    result = solve_visible_only_winner(
+        game,
+        options=_fast_options(include_proof=True),
+    )
+
+    assert (
+        result.proof_tree["assumptions"]["purchase_payments"]
+        == "canonical_minimal_gold_only"
+    )
 
 
 def test_reveal_verified_mate_finds_bench_forced_line():
@@ -483,6 +500,14 @@ def test_reveal_verified_mate_finds_bench_forced_line():
     assert (
         result.proof_tree["assumptions"]["reserve_deck"]
         == "all_post_root_draws_verified"
+    )
+    assert (
+        result.proof_tree["assumptions"]["candidate_purchase_payments"]
+        == "all_legal_patterns"
+    )
+    assert (
+        result.proof_tree["assumptions"]["public_card_purchase_payments_during_verification"]
+        == "all_legal_patterns"
     )
     assert result.proof_tree["candidate"]["line"]
     assert result.stats.oracle_purchase_actions > 0

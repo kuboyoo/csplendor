@@ -396,6 +396,7 @@ PYBIND11_MODULE(_csplendor, m) {
         payload["forced_win_depth"] =
             result.forced_win_depth < 0 ? py::none()
                                         : py::cast(result.forced_win_depth);
+        payload["simple_payment_mode"] = result.simple_payment_mode;
         payload["winner_reason"] = result.winner_reason;
         payload["unknown_reason"] =
             result.unknown_reason.empty() ? py::none()

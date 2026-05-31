@@ -2523,6 +2523,7 @@ class VisibleOnlyWinnerSolver:
                 "max_depth_ignored": True,
                 "mate_proof": False,
                 "policy": "full_legal_minimax_with_cycle_score_adjudication",
+                "purchase_payments": self._payment_policy(working),
                 "all_visible_only_responses_read": True,
                 "equivalent_child_states_collapsed": True,
             },
@@ -2568,6 +2569,9 @@ class VisibleOnlyWinnerSolver:
                 "max_depth_ignored": True,
                 "mate_proof": forced_win_depth is not None,
                 "policy": policy,
+                "purchase_payments": self._payment_policy_for_mode(
+                    bool(raw["simple_payment_mode"])
+                ),
                 "attacker_candidate_policy": (
                     "heuristic_subset_for_bounded_proof"
                     if forced_win_depth is not None
@@ -2690,7 +2694,6 @@ class VisibleOnlyWinnerSolver:
     def _visible_only_game(game: cs.Game) -> cs.Game:
         visible_only = game.clone()
         visible_only.blank_refill_mode = True
-        visible_only.simple_payment_mode = True
         visible_only.board.decks = [[], [], []]
         return visible_only
 
@@ -2703,6 +2706,20 @@ class VisibleOnlyWinnerSolver:
         if winner == -2:
             return DRAW
         return UNKNOWN
+
+    @staticmethod
+    def _payment_policy(game: cs.Game) -> str:
+        return VisibleOnlyWinnerSolver._payment_policy_for_mode(
+            bool(game.simple_payment_mode)
+        )
+
+    @staticmethod
+    def _payment_policy_for_mode(simple_payment_mode: bool) -> str:
+        return (
+            "canonical_minimal_gold_only"
+            if simple_payment_mode
+            else "all_legal_patterns"
+        )
 
     @staticmethod
     def _known_card_count(game: cs.Game) -> int:
@@ -2966,6 +2983,15 @@ def solve_reveal_verified_mate(
             "reveal_identity_abstraction": "level_and_reveal_timing_preserved",
             "reserve_deck": "all_post_root_draws_verified",
             "attacker_candidate_policy": "heuristic_subset_for_bounded_proof",
+            "candidate_purchase_payments": candidate_tree["assumptions"][
+                "purchase_payments"
+            ],
+            "public_card_purchase_payments_during_verification": (
+                "canonical_minimal_gold_only"
+                if bool(game.simple_payment_mode)
+                else "all_legal_patterns"
+            ),
+            "hidden_card_purchase_payments_during_verification": "all_legal_patterns",
         },
         "candidate": {
             "mode": "visible_only_winner",

@@ -31,6 +31,7 @@ struct VisibleOnlyLineEntry {
 struct VisibleOnlySearchResult {
   int winner = -1;
   int forced_win_depth = -1;
+  bool simple_payment_mode = false;
   std::string winner_reason = "unknown";
   std::string unknown_reason;
   size_t memoized_states = 0;
@@ -50,12 +51,12 @@ public:
 
     Game game = input.clone_light();
     game.blank_refill_mode = true;
-    game.simple_payment_mode = true;
     for (int level = 0; level < 3; ++level)
       game.board.decks[level].clear();
     root_ = game.clone_light();
 
     VisibleOnlySearchResult result;
+    result.simple_payment_mode = game.simple_payment_mode;
     try {
       const int attacker = game.current_player();
       for (int depth = 1; depth <= FORCED_WIN_MAX_DEPTH; ++depth) {
