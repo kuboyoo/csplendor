@@ -5,9 +5,11 @@ from csplendor.api.usi_kifu import action_to_usi, parse_kifu_text
 
 import scripts.generate_mate_puzzles as generate_mate_puzzles
 from scripts.generate_mate_puzzles import (
+    ProgressReporter,
     find_countermate_blunders,
     generate_candidate_position,
     is_suspicious_position,
+    report_rejected_position,
     save_puzzle,
 )
 from scripts.mate_solver import MATE, SearchResult, SearchStats
@@ -22,6 +24,21 @@ class FirstActionPlayer:
         self.calls += 1
         self.simple_payment_modes.append(bool(game.simple_payment_mode))
         return game.legal_actions[0]
+
+
+def test_rejected_position_progress_contains_reason_and_spn(capsys):
+    game = cs.Game(seed=0)
+
+    report_rejected_position(
+        ProgressReporter(10.0),
+        game,
+        attempt=3,
+        reason="balance_filter",
+    )
+
+    output = capsys.readouterr().err
+    assert "[progress] stage=rejected attempt=3 reason=balance_filter position=" in output
+    assert "bank:W4U4G4R4K4D5" in output
 
 
 def test_candidate_position_uses_two_players_and_simple_payment_mode():

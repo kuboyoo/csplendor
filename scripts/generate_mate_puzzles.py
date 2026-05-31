@@ -64,6 +64,24 @@ def _position_id(position: str) -> str:
     return hashlib.sha256(position.encode("utf-8")).hexdigest()[:16]
 
 
+def report_rejected_position(
+    progress: ProgressReporter,
+    game: cs.Game,
+    *,
+    attempt: int,
+    reason: str,
+    **fields: object,
+) -> None:
+    progress.emit(
+        "rejected",
+        force=True,
+        attempt=attempt,
+        reason=reason,
+        position=json.dumps(game_to_spn(game), ensure_ascii=False),
+        **fields,
+    )
+
+
 class PuzzlePlayer(Protocol):
     def select_action(self, game: cs.Game) -> cs.Action:
         ...
@@ -130,7 +148,8 @@ def generate_candidate_position(
     plies = rng.randint(min_playout_plies, max_playout_plies)
     for ply in range(plies):
         if game.is_game_over() or not game.legal_actions:
-            return None
+            game.simple_payment_mode = False
+            return game
         if progress is not None:
             progress.emit("genbu_playout", attempt=attempt, ply=ply, target_plies=plies)
         player = players[int(game.board.current_player)]
@@ -367,6 +386,7 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
         stats.attempts += 1
         game_seed = rng.getrandbits(32)
         progress.emit("attempt_start", force=True, attempt=stats.attempts, saved=stats.saved, game_seed=game_seed)
+        game: Optional[cs.Game] = None
         try:
             game = generate_candidate_position(
                 rng,
@@ -386,6 +406,13 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
                 allow_final_round=args.allow_final_round,
             ):
                 stats.filtered += 1
+                if game is not None:
+                    report_rejected_position(
+                        progress,
+                        game,
+                        attempt=stats.attempts,
+                        reason="balance_filter",
+                    )
                 continue
 
             stats.candidates += 1
@@ -405,16 +432,36 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
             )
             if result.status != MATE or result.proof_tree is None:
                 stats.unknown += 1
+                report_rejected_position(
+                    progress,
+                    game,
+                    attempt=stats.attempts,
+                    reason="no_mate",
+                    status=result.status,
+                )
                 continue
 
             stats.mates += 1
             depth = int(result.proof_tree["forced_win_depth"])
             if depth < args.min_depth or (args.max_depth and depth > args.max_depth):
                 stats.filtered += 1
+                report_rejected_position(
+                    progress,
+                    game,
+                    attempt=stats.attempts,
+                    reason="depth_filter",
+                    depth=depth,
+                )
                 continue
             dag = result.proof_tree["verification"].get("proof_dag", {})
             if not bool(dag.get("complete")):
                 stats.incomplete_dags += 1
+                report_rejected_position(
+                    progress,
+                    game,
+                    attempt=stats.attempts,
+                    reason="incomplete_dag",
+                )
                 continue
 
             blunders, checks = find_countermate_blunders(
@@ -431,6 +478,14 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
             stats.countermates += len(blunders)
             if len(blunders) < args.min_losing_alternatives:
                 stats.filtered += 1
+                report_rejected_position(
+                    progress,
+                    game,
+                    attempt=stats.attempts,
+                    reason="insufficient_countermate_blunders",
+                    found=len(blunders),
+                    required=args.min_losing_alternatives,
+                )
                 continue
 
             scores = [int(score) for score in game.scores]
@@ -448,11 +503,25 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
             )
             if puzzle_dir is None:
                 stats.duplicates += 1
+                report_rejected_position(
+                    progress,
+                    game,
+                    attempt=stats.attempts,
+                    reason="duplicate",
+                )
             else:
                 stats.saved += 1
                 print(f"[saved {stats.saved}/{args.count}] {puzzle_dir}", flush=True)
         except Exception as exc:
             stats.errors += 1
+            if game is not None:
+                report_rejected_position(
+                    progress,
+                    game,
+                    attempt=stats.attempts,
+                    reason="error",
+                    error=type(exc).__name__,
+                )
             print(f"[attempt {stats.attempts}] {type(exc).__name__}: {exc}", file=sys.stderr)
         finally:
             if args.progress_interval and stats.attempts % args.progress_interval == 0:
