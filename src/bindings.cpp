@@ -499,6 +499,10 @@ PYBIND11_MODULE(_csplendor, m) {
             child["oracle_card"] =
                 edge.oracle_card < 0 ? py::none() : py::cast(edge.oracle_card);
             child["oracle_reserve"] = edge.oracle_reserve;
+            child["oracle_reserve_card"] =
+                edge.oracle_reserve_card < 0
+                    ? py::none()
+                    : py::cast(edge.oracle_reserve_card);
             child["oracle_return_color"] =
                 edge.oracle_return_color < 0
                     ? py::none()

@@ -42,6 +42,7 @@ struct RevealVerifiedProofEdge {
   int reveal_card = -1;
   int oracle_card = -1;
   bool oracle_reserve = false;
+  int oracle_reserve_card = -1;
   int oracle_return_color = -1;
   std::array<uint8_t, 5> oracle_gold_as = {0};
   size_t child = 0;
@@ -223,6 +224,7 @@ private:
     uint64_t code = 0;
     int oracle_card = -1;
     bool oracle_reserve = false;
+    int oracle_reserve_card = -1;
     int oracle_return_color = -1;
     std::array<uint8_t, 5> oracle_gold_as = {0};
 
@@ -237,6 +239,8 @@ private:
         return oracle_card < other.oracle_card;
       if (oracle_reserve != other.oracle_reserve)
         return oracle_reserve < other.oracle_reserve;
+      if (oracle_reserve_card != other.oracle_reserve_card)
+        return oracle_reserve_card < other.oracle_reserve_card;
       if (oracle_return_color != other.oracle_return_color)
         return oracle_return_color < other.oracle_return_color;
       return oracle_gold_as < other.oracle_gold_as;
@@ -764,24 +768,31 @@ private:
       add_oracle_purchase_actions(player, card, effective_cost, 0, 0, {},
                                   actions);
     }
-    if (player.can_reserve() && has_blank_slot(game.board)) {
-      const int total_gems = player.total_gems();
-      if (game.board.bank[GOLD] == 0 || total_gems < Board::MAX_TOKENS) {
-        add_oracle_reserve_action(-1, actions);
-      } else {
-        for (int color = 0; color < 6; ++color) {
-          if (player.gems[color] > 0 || color == GOLD)
-            add_oracle_reserve_action(color, actions);
+    if (player.can_reserve()) {
+      for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
+        if (!is_initial_hidden_card(card_id) ||
+            has_hidden_card_claimed(game.board, card_id) ||
+            !has_blank_slot_at_level(game.board, get_card(card_id).level - 1))
+          continue;
+        const int total_gems = player.total_gems();
+        if (game.board.bank[GOLD] == 0 || total_gems < Board::MAX_TOKENS) {
+          add_oracle_reserve_action(card_id, -1, actions);
+        } else {
+          for (int color = 0; color < 6; ++color) {
+            if (player.gems[color] > 0 || color == GOLD)
+              add_oracle_reserve_action(card_id, color, actions);
+          }
         }
       }
     }
   }
 
-  void add_oracle_reserve_action(int return_color,
+  void add_oracle_reserve_action(int card_id, int return_color,
                                  std::vector<OrderedAction> &actions) {
     OrderedAction action;
     action.rank = 1;
     action.oracle_reserve = true;
+    action.oracle_reserve_card = card_id;
     action.oracle_return_color = return_color;
     actions.push_back(action);
     ++stats_.oracle_reserve_actions;
@@ -813,7 +824,7 @@ private:
     }
   }
 
-  static bool apply_oracle_action(Game &game, const OrderedAction &ordered) {
+  bool apply_oracle_action(Game &game, const OrderedAction &ordered) const {
     Board &board = game.board;
     if (board.is_game_over() || board.waiting_noble ||
         board.current_player >= Board::NUM_PLAYERS)
@@ -847,12 +858,15 @@ private:
       player.points += card.points;
       player.sync_packed();
     } else if (ordered.oracle_reserve) {
-      if (!player.can_reserve())
+      if (!player.can_reserve() ||
+          !is_valid_card_id(ordered.oracle_reserve_card) ||
+          !is_initial_hidden_card(ordered.oracle_reserve_card) ||
+          has_hidden_card_claimed(board, ordered.oracle_reserve_card) ||
+          !has_blank_slot_at_level(
+              board, get_card(ordered.oracle_reserve_card).level - 1))
         return false;
-      // The identity stays unknown, but the reserved card still occupies a
-      // real slot and blocks further reserve actions once the limit is hit.
       player.reserved_is_hidden[player.reserved_count] = true;
-      player.reserved[player.reserved_count++] = -1;
+      player.reserved[player.reserved_count++] = ordered.oracle_reserve_card;
       if (board.bank[GOLD] > 0) {
         --board.bank[GOLD];
         ++player.gems[GOLD];
@@ -1248,7 +1262,8 @@ private:
           throw ProofDagBuildAborted("proof DAG edge limit exceeded");
         proof_nodes_[id].children.push_back(RevealVerifiedProofEdge{
             ordered.code, reveal_card, ordered.oracle_card,
-            ordered.oracle_reserve, ordered.oracle_return_color,
+            ordered.oracle_reserve, ordered.oracle_reserve_card,
+            ordered.oracle_return_color,
             ordered.oracle_gold_as, child});
         ++proof_dag_edges_;
         return true;
