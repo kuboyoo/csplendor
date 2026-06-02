@@ -173,6 +173,47 @@ def test_candidate_search_applies_visible_prefilter_before_verified_search(monke
     assert stats.filtered == 1
 
 
+def test_candidate_search_stops_playout_after_visible_only_short_mate(monkeypatch, tmp_path):
+    game = cs.Game(seed=0)
+    stats = GenerationStats()
+    monkeypatch.setattr(generate_mate_puzzles, "is_suspicious_position", lambda *args, **kwargs: True)
+    monkeypatch.setattr(generate_mate_puzzles, "is_tactical_candidate", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        generate_mate_puzzles,
+        "visible_only_prefilter",
+        lambda *args, **kwargs: SearchResult(
+            generate_mate_puzzles.PLAYER0_WIN,
+            1,
+            {"forced_win_depth": 1},
+            None,
+            SearchStats(),
+        ),
+    )
+    monkeypatch.setattr(
+        generate_mate_puzzles,
+        "solve_reveal_verified_mate",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("verified search should not run")),
+    )
+
+    stop_playout = try_save_candidate(
+        SimpleNamespace(
+            visible_prefilter=True,
+            min_depth=3,
+            max_depth=0,
+        ),
+        output_dir=tmp_path,
+        stats=stats,
+        progress=ProgressReporter(0),
+        game=game,
+        game_seed=0,
+        attempt=1,
+    )
+
+    assert stop_playout is True
+    assert stats.visible_prefiltered == 1
+    assert stats.filtered == 1
+
+
 def test_save_puzzle_writes_depth_grouped_answer_and_complete_strategy(tmp_path):
     game = cs.Game(seed=0)
     usi = action_to_usi(game.legal_actions[0], game=game)

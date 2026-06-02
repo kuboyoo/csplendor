@@ -649,10 +649,15 @@ def try_save_candidate(
         visible = visible_only_prefilter(game, args)
         visible_tree = visible.proof_tree or {}
         visible_depth = visible_tree.get("forced_win_depth")
+        too_short = (
+            visible.status == expected_visible_status
+            and visible_depth is not None
+            and int(visible_depth) < int(_arg(args, "min_depth", 1))
+        )
         if (
             visible.status != expected_visible_status
             or visible_depth is None
-            or int(visible_depth) < int(_arg(args, "min_depth", 1))
+            or too_short
             or (
                 int(_arg(args, "max_depth", 0))
                 and int(visible_depth) > int(_arg(args, "max_depth", 0))
@@ -668,7 +673,7 @@ def try_save_candidate(
                 status=visible.status,
                 depth=visible_depth,
             )
-            return False
+            return too_short
 
     progress.emit("mate_search", force=True, attempt=attempt, candidates=stats.candidates)
     result = solve_reveal_verified_mate(
