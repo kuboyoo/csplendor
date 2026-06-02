@@ -3,7 +3,7 @@ from itertools import islice
 from types import SimpleNamespace
 
 import csplendor as cs
-from csplendor.api.usi_kifu import action_to_usi, parse_kifu_text
+from csplendor.api.usi_kifu import action_to_usi, parse_kifu_text, spn_to_game
 
 import scripts.generate_mate_puzzles as generate_mate_puzzles
 from scripts.generate_mate_puzzles import (
@@ -170,6 +170,44 @@ def test_save_puzzle_writes_depth_grouped_answer_and_complete_strategy(tmp_path)
     }]
 
     assert save_puzzle(tmp_path, game, result, game_seed=42, attempt=8) is None
+
+
+def test_save_puzzle_keeps_exact_hidden_reserved_card_ids_for_replay(tmp_path):
+    game = cs.Game(seed=0)
+    reserve = next(
+        action for action in game.legal_actions
+        if action_to_usi(action, game=game).startswith("reserve:L")
+    )
+    assert game.apply(reserve, False)
+    usi = action_to_usi(game.legal_actions[0], game=game)
+    result = SearchResult(
+        MATE,
+        1,
+        {
+            "forced_win_depth": 1,
+            "line": [{"player": int(game.board.current_player), "action": {"usi": usi}}],
+            "verification": {
+                "proof_dag": {
+                    "complete": True,
+                    "root": 0,
+                    "nodes": [{"id": 0, "children": []}],
+                },
+            },
+        },
+        None,
+        SearchStats(),
+    )
+
+    puzzle_dir = save_puzzle(tmp_path, game, result, game_seed=42, attempt=7)
+
+    problem = json.loads((puzzle_dir / "problem.json").read_text(encoding="utf-8"))
+    strategy = json.loads((puzzle_dir / "strategy.json").read_text(encoding="utf-8"))
+    kifu = parse_kifu_text((puzzle_dir / "answer.kifu").read_text(encoding="utf-8"))
+    assert "?C" in problem["position"]
+    assert strategy["position"] == problem["position"]
+    assert kifu["position"] == problem["position"]
+    reloaded = spn_to_game(problem["position"])
+    assert any(bool(value) for value in reloaded.board.get_player(0).reserved_is_hidden)
 
 
 def test_suspicious_position_requires_close_scores():

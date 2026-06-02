@@ -118,7 +118,7 @@ python scripts/generate_mate_puzzles.py \
 
 進捗は attempt 開始、詰み探索開始、誤答側詰み探索開始時に表示されます。棄却時は `stage=rejected`、棄却理由、完全な SPN `position` を表示します。Genbu 対局中の定期表示間隔は `--progress-seconds` で変更できます。
 
-生成物は `depth_XX/<問題ID>/` に分類されます。`XX` はソルバー上の攻撃側手数深さです。各問題には局面情報 `problem.json`、代表手順 `answer.kifu`、完全応手DAG `strategy.json` が含まれます。`problem.json` の `quality.countermate_blunders` には相手側の詰みを許す誤答例が入ります。DAGは攻撃側の証明手、守備側の全合法応手、山札予約を含む全めくれ結果を保持し、同一局面をノードIDで共有します。既定上限に収まらず完全DAGを保存できない局面は採用されません。
+生成物は `depth_XX/<問題ID>/` に分類されます。`XX` はソルバー上の攻撃側手数深さです。各問題には局面情報 `problem.json`、代表手順 `answer.kifu`、完全応手DAG `strategy.json` が含まれます。`problem.json` の `quality.countermate_blunders` には相手側の詰みを許す誤答例が入ります。DAGは攻撃側の証明手、守備側の全合法応手、山札予約を含む全めくれ結果を保持し、同一局面をノードIDで共有します。既定上限に収まらず完全DAGを保存できない局面は採用されません。再現性を保つため、生成物内の SPN は伏せ予約カードを `?C<id>` 形式で保存します。通常の公開用 SPN における `?L<level>` と異なり、伏せ予約であることと実カードIDの両方を保持します。購入済みカードも `bought:[<id>,...]` にカードIDを保存します。
 
 ## ドキュメント
 詳細な仕様は `doc/` ディレクトリを参照してください。

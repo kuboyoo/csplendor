@@ -317,7 +317,7 @@ def save_puzzle(
         raise ValueError("principal line is required")
 
     depth = int(proof.get("forced_win_depth", result.depth))
-    position = game_to_spn(game)
+    position = game_to_spn(game, reveal_hidden_reserved_ids=True)
     puzzle_id = _position_id(position)
     depth_dir = output_dir / f"depth_{depth:02d}"
     puzzle_dir = depth_dir / puzzle_id
@@ -361,7 +361,12 @@ def save_puzzle(
         },
         "strategy_dag": dag,
     }
-    kifu = principal_line_to_kifu_text(game, line, attacker=attacker)
+    kifu = principal_line_to_kifu_text(
+        game,
+        line,
+        attacker=attacker,
+        reveal_hidden_reserved_ids=True,
+    )
 
     depth_dir.mkdir(parents=True, exist_ok=True)
     tmp_dir = Path(tempfile.mkdtemp(prefix=f".{puzzle_id}.", dir=depth_dir))

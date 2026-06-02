@@ -142,6 +142,23 @@ def test_spn_hidden_reserved_cards_are_rejected_for_exact_solver_state():
         spn_to_game(spn)
 
 
+def test_spn_exact_hidden_reserved_card_round_trips_with_hidden_label():
+    game = Game(seed=3)
+    action = next(
+        action for action in game.legal_actions
+        if action_to_usi(action, game=game).startswith("reserve:L")
+    )
+    assert game.apply(action, False)
+
+    public_spn = game_to_spn(game)
+    exact_spn = game_to_spn(game, reveal_hidden_reserved_ids=True)
+    parsed = spn_to_game(exact_spn)
+
+    assert "?L" in public_spn
+    assert "?C" in exact_spn
+    assert _state_signature(parsed) == _state_signature(game)
+
+
 def test_editor_spn_with_unknown_bought_cards_keeps_non_visible_non_reserved_cards_in_decks():
     spn = (
         "bank:W1U3G3R3K0D4 | "

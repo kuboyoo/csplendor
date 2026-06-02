@@ -233,6 +233,7 @@ def principal_line_to_kifu_text(
     line: Sequence[Dict[str, Any]],
     *,
     attacker: int,
+    reveal_hidden_reserved_ids: bool = False,
 ) -> str:
     """Serialize a solver principal-line array as replayable KIFU."""
     moves = []
@@ -244,7 +245,12 @@ def principal_line_to_kifu_text(
                 "player": int(entry.get("player", 0)),
                 "usi": str(usi),
             })
-    return _build_mate_kifu_text(game, moves, attacker=attacker)
+    return _build_mate_kifu_text(
+        game,
+        moves,
+        attacker=attacker,
+        reveal_hidden_reserved_ids=reveal_hidden_reserved_ids,
+    )
 
 
 def _build_mate_kifu_text(
@@ -252,6 +258,7 @@ def _build_mate_kifu_text(
     moves: Sequence[Dict[str, object]],
     *,
     attacker: int,
+    reveal_hidden_reserved_ids: bool = False,
 ) -> str:
     replay_moves = _with_implicit_noble_visits(game, moves)
     return build_kifu_text(
@@ -265,7 +272,10 @@ def _build_mate_kifu_text(
             "MateAttacker": f"P{attacker}",
             "MateLine": "principal variation",
         },
-        position=game_to_spn(game),
+        position=game_to_spn(
+            game,
+            reveal_hidden_reserved_ids=reveal_hidden_reserved_ids,
+        ),
         moves=replay_moves,
         result=f"P{attacker}_WIN",
         total_turns=len(replay_moves),

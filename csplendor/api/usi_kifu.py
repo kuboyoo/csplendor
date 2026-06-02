@@ -320,7 +320,7 @@ def find_legal_action_index_by_usi(game, usi_move: str) -> int:
     raise ValueError(f"unsupported USI move kind: {parsed.kind}")
 
 
-def board_to_spn(board) -> str:
+def board_to_spn(board, *, reveal_hidden_reserved_ids: bool = False) -> str:
     """Serialize current board to SPN text."""
     bank = [int(v) for v in board.bank]
     bank_part = f"bank:W{bank[0]}U{bank[1]}G{bank[2]}R{bank[3]}K{bank[4]}D{bank[5]}"
@@ -348,10 +348,14 @@ def board_to_spn(board) -> str:
             cid = int(card_id)
             if cid < 0:
                 continue
-            # Keep hidden cards as ?Lx when available.
+            # Public SPN hides deck-reserved identities. Reproducible artifacts
+            # may opt into ?C<id>, which preserves both identity and visibility.
             if slot_idx < len(p.reserved_is_hidden) and bool(p.reserved_is_hidden[slot_idx]):
-                lvl = card_level_from_id(cid)
-                reserved.append(f"?L{lvl}" if lvl > 0 else "?L1")
+                if reveal_hidden_reserved_ids:
+                    reserved.append(f"?C{cid}")
+                else:
+                    lvl = card_level_from_id(cid)
+                    reserved.append(f"?L{lvl}" if lvl > 0 else "?L1")
             else:
                 reserved.append(str(cid))
         bought = [str(int(cid)) for cid in p.purchased_cards if int(cid) >= 0]
@@ -373,8 +377,11 @@ def board_to_spn(board) -> str:
     )
 
 
-def game_to_spn(game) -> str:
-    return board_to_spn(game.board)
+def game_to_spn(game, *, reveal_hidden_reserved_ids: bool = False) -> str:
+    return board_to_spn(
+        game.board,
+        reveal_hidden_reserved_ids=reveal_hidden_reserved_ids,
+    )
 
 
 def spn_to_game(spn: str, seed: int = 0) -> Game:
@@ -562,7 +569,7 @@ def _parse_player_section(section: str, expected_player: int) -> Dict[str, objec
         raise ValueError(f"P{expected_player} missing fields: {sorted(missing)}")
 
     reserved, reserved_is_hidden = _parse_reserved_section(fields["reserved"])
-    if any(reserved_is_hidden):
+    if any(card_id < 0 and hidden for card_id, hidden in zip(reserved, reserved_is_hidden)):
         raise ValueError(
             "SPN hidden reserved cards (?Lx) cannot be solved exactly; use explicit card ids"
         )
@@ -633,6 +640,14 @@ def _parse_reserved_section(text: str) -> Tuple[List[int], List[bool]]:
     hidden: List[bool] = []
     for part in body.split(","):
         item = part.strip()
+        exact_hidden = re.fullmatch(r"\?C(\d+)", item, flags=re.IGNORECASE)
+        if exact_hidden:
+            card_id = int(exact_hidden.group(1))
+            if not 0 <= card_id < 90:
+                raise ValueError(f"reserved card id out of range: {card_id}")
+            reserved.append(card_id)
+            hidden.append(True)
+            continue
         if re.fullmatch(r"\?L[123]", item, flags=re.IGNORECASE):
             reserved.append(-1)
             hidden.append(True)
