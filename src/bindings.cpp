@@ -415,7 +415,7 @@ PYBIND11_MODULE(_csplendor, m) {
          double time_limit_seconds,
          const std::vector<uint64_t> &preferred_attacker_actions,
          bool include_proof_dag, size_t proof_dag_node_limit,
-         size_t proof_dag_edge_limit) {
+         size_t proof_dag_edge_limit, uint64_t required_root_action) {
         RevealVerifiedSearchResult result;
         {
           py::gil_scoped_release release;
@@ -424,7 +424,8 @@ PYBIND11_MODULE(_csplendor, m) {
                                         preferred_attacker_actions,
                                         include_proof_dag,
                                         proof_dag_node_limit,
-                                        proof_dag_edge_limit)
+                                        proof_dag_edge_limit,
+                                        required_root_action)
                        .solve(game);
         }
 
@@ -518,7 +519,8 @@ PYBIND11_MODULE(_csplendor, m) {
       py::arg("preferred_attacker_actions") = std::vector<uint64_t>{},
       py::arg("include_proof_dag") = false,
       py::arg("proof_dag_node_limit") = 100000,
-      py::arg("proof_dag_edge_limit") = 500000);
+      py::arg("proof_dag_edge_limit") = 500000,
+      py::arg("required_root_action") = UINT64_MAX);
 
   m.def("get_card", &get_card, py::arg("id"));
   m.def("get_noble", &get_noble, py::arg("id"));

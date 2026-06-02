@@ -7,6 +7,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -82,13 +83,15 @@ public:
                        std::vector<uint64_t> preferred_attacker_actions = {},
                        bool include_proof_dag = false,
                        size_t proof_dag_node_limit = 100000,
-                       size_t proof_dag_edge_limit = 500000)
+                       size_t proof_dag_edge_limit = 500000,
+                       uint64_t required_root_action = UINT64_MAX)
       : attacker_(attacker), depth_(depth), max_nodes_(max_nodes),
         time_limit_seconds_(time_limit_seconds),
         preferred_attacker_actions_(std::move(preferred_attacker_actions)),
         include_proof_dag_(include_proof_dag),
         proof_dag_node_limit_(proof_dag_node_limit),
-        proof_dag_edge_limit_(proof_dag_edge_limit) {}
+        proof_dag_edge_limit_(proof_dag_edge_limit),
+        required_root_action_(required_root_action) {}
 
   RevealVerifiedSearchResult solve(const Game &input) {
     memo_.clear();
@@ -251,6 +254,7 @@ private:
   bool include_proof_dag_ = false;
   size_t proof_dag_node_limit_ = 100000;
   size_t proof_dag_edge_limit_ = 500000;
+  uint64_t required_root_action_ = UINT64_MAX;
   size_t proof_dag_edges_ = 0;
   std::unordered_map<DepthStateKey, size_t, DepthStateKeyHash> proof_node_ids_;
   std::vector<RevealVerifiedProofNode> proof_nodes_;
@@ -290,7 +294,7 @@ private:
 
     std::vector<OrderedAction> actions = ordered_actions(game);
     if (game.current_player() == attacker_)
-      actions = forced_attacker_actions(game, actions, depth);
+      actions = forced_attacker_actions(game, actions, depth, path.empty());
     stats_.legal_moves += actions.size();
     if (actions.empty()) {
       ++stats_.terminal_nodes;
@@ -924,7 +928,16 @@ private:
   std::vector<OrderedAction>
   forced_attacker_actions(const Game &game,
                           const std::vector<OrderedAction> &actions,
-                          int depth) {
+                          int depth, bool is_root = false) {
+    if (is_root && required_root_action_ != UINT64_MAX) {
+      std::vector<OrderedAction> required;
+      std::copy_if(actions.begin(), actions.end(), std::back_inserter(required),
+                   [&](const OrderedAction &action) {
+                     return action.code == required_root_action_;
+                   });
+      return required;
+    }
+
     std::vector<OrderedAction> purchases;
     std::vector<std::pair<int, OrderedAction>> takes;
     std::vector<OrderedAction> reserves;
@@ -1203,7 +1216,7 @@ private:
 
     std::vector<OrderedAction> actions = ordered_actions(game);
     if (game.current_player() == attacker_) {
-      actions = forced_attacker_actions(game, actions, depth);
+      actions = forced_attacker_actions(game, actions, depth, id == 0);
       actions.erase(
           std::remove_if(actions.begin(), actions.end(),
                          [&](const OrderedAction &ordered) {

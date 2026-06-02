@@ -10,14 +10,17 @@ from scripts.generate_mate_puzzles import (
     ProgressReporter,
     GenerationStats,
     find_countermate_blunders,
+    find_verified_winning_actions,
     generate_candidate_position,
     generate_candidate_positions,
+    is_tactical_candidate,
     is_suspicious_position,
     report_rejected_position,
     save_puzzle,
+    threat_summary,
     try_save_candidate,
 )
-from scripts.mate_solver import MATE, SearchResult, SearchStats
+from scripts.mate_solver import MATE, UNKNOWN, SearchResult, SearchStats
 
 
 class FirstActionPlayer:
@@ -80,16 +83,17 @@ def test_candidate_positions_continue_until_endgame_after_first_candidate():
     assert [player.calls for player in players] == [2, 2]
 
 
-def test_candidate_search_stops_at_mate_before_applying_balance_filter(monkeypatch, tmp_path):
+def test_candidate_search_applies_balance_filter_before_mate_search(monkeypatch, tmp_path):
     game = cs.Game(seed=0)
-    result = SearchResult(MATE, 1, {}, None, SearchStats())
     stats = GenerationStats()
+    called = False
 
-    monkeypatch.setattr(
-        generate_mate_puzzles,
-        "solve_reveal_verified_mate",
-        lambda *args, **kwargs: result,
-    )
+    def fake_solve(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("mate search should not run")
+
+    monkeypatch.setattr(generate_mate_puzzles, "solve_reveal_verified_mate", fake_solve)
 
     mate_found = try_save_candidate(
         SimpleNamespace(
@@ -111,8 +115,61 @@ def test_candidate_search_stops_at_mate_before_applying_balance_filter(monkeypat
         attempt=1,
     )
 
-    assert mate_found is True
-    assert stats.mates == 1
+    assert mate_found is False
+    assert called is False
+    assert stats.mates == 0
+    assert stats.balance_filtered == 1
+    assert stats.filtered == 1
+
+
+def test_candidate_search_applies_visible_prefilter_before_verified_search(monkeypatch, tmp_path):
+    game = spn_to_game(
+        "bank:W3U2G3R4K4D3 | "
+        "visible:L1[11,37,7,28]L2[57,42,69,56]L3[79,70,76,72] | "
+        "decks:16,16,14 | nobles:[7,4,8] | "
+        "P0:gems:W0U0G0R0K0D1;bonuses:W5U1G1R5K4;points:10;"
+        "reserved:[66,59,81];bought:[38,27,3,15,17,25,19,14,20,10,62,54,29,46,49,60] | "
+        "P1:gems:W1U2G1R0K0D1;bonuses:W2U4G4R1K1;points:8;"
+        "reserved:[53];bought:[2,34,36,6,33,0,23,31,50,4,64,82] | 1"
+    )
+    stats = GenerationStats()
+    monkeypatch.setattr(
+        generate_mate_puzzles,
+        "visible_only_prefilter",
+        lambda *args, **kwargs: SearchResult(UNKNOWN, None, None, None, SearchStats()),
+    )
+    monkeypatch.setattr(
+        generate_mate_puzzles,
+        "solve_reveal_verified_mate",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("verified search should not run")),
+    )
+
+    mate_found = try_save_candidate(
+        SimpleNamespace(
+            min_attacker_points=8,
+            max_attacker_points=14,
+            min_defender_points=8,
+            max_score_gap=3,
+            allow_final_round=False,
+            min_legal_actions=12,
+            threat_turns=3,
+            min_optimistic_score=15,
+            min_threat_score=0,
+            require_both_threats=True,
+            visible_prefilter=True,
+            min_depth=3,
+            max_depth=0,
+        ),
+        output_dir=tmp_path,
+        stats=stats,
+        progress=ProgressReporter(0),
+        game=game,
+        game_seed=0,
+        attempt=1,
+    )
+
+    assert mate_found is False
+    assert stats.visible_prefiltered == 1
     assert stats.filtered == 1
 
 
@@ -235,6 +292,59 @@ def test_suspicious_position_requires_close_scores():
         max_score_gap=1,
         allow_final_round=False,
     )
+
+
+def test_tactical_candidate_requires_both_players_to_have_near_term_score_ceiling():
+    game = spn_to_game(
+        "bank:W3U2G3R4K4D3 | "
+        "visible:L1[11,37,7,28]L2[57,42,69,56]L3[79,70,76,72] | "
+        "decks:16,16,14 | nobles:[7,4,8] | "
+        "P0:gems:W0U0G0R0K0D1;bonuses:W5U1G1R5K4;points:10;"
+        "reserved:[66,59,81];bought:[38,27,3,15,17,25,19,14,20,10,62,54,29,46,49,60] | "
+        "P1:gems:W1U2G1R0K0D1;bonuses:W2U4G4R1K1;points:8;"
+        "reserved:[53];bought:[2,34,36,6,33,0,23,31,50,4,64,82] | 1"
+    )
+    args = SimpleNamespace(
+        min_attacker_points=8,
+        max_attacker_points=14,
+        min_defender_points=8,
+        max_score_gap=3,
+        allow_final_round=False,
+        min_legal_actions=12,
+        threat_turns=3,
+        min_optimistic_score=15,
+        min_threat_score=0,
+        require_both_threats=True,
+    )
+
+    assert threat_summary(game, 0, turns=3).optimistic_score >= 15
+    assert threat_summary(game, 1, turns=3).optimistic_score >= 15
+    assert is_tactical_candidate(game, args)
+
+
+def test_verified_winning_action_filter_finds_unique_root_move():
+    game = spn_to_game(
+        "bank:W3U2G3R4K4D3 | "
+        "visible:L1[11,37,7,28]L2[57,42,69,56]L3[79,70,76,72] | "
+        "decks:16,16,14 | nobles:[7,4,8] | "
+        "P0:gems:W0U0G0R0K0D1;bonuses:W5U1G1R5K4;points:10;"
+        "reserved:[66,59,81];bought:[38,27,3,15,17,25,19,14,20,10,62,54,29,46,49,60] | "
+        "P1:gems:W1U2G1R0K0D1;bonuses:W2U4G4R1K1;points:8;"
+        "reserved:[53];bought:[2,34,36,6,33,0,23,31,50,4,64,82] | 1"
+    )
+
+    result = find_verified_winning_actions(
+        game,
+        attacker=1,
+        depth=3,
+        max_winning_actions=1,
+        node_limit=0,
+        time_limit=5.0,
+    )
+
+    assert result["complete"] is True
+    assert result["checks"] == len(game.legal_actions)
+    assert result["winning_actions"] == ["buy:C28/pay:W1U0G0R0K0D0"]
 
 
 def test_countermate_filter_accepts_wrong_move_that_allows_opponent_mate(monkeypatch):

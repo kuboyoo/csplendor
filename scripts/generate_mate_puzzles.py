@@ -11,7 +11,7 @@ import shutil
 import sys
 import tempfile
 import time
-from typing import Iterator, Optional, Protocol, Sequence
+from typing import Callable, Iterator, Optional, Protocol, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -20,7 +20,13 @@ if str(REPO_ROOT) not in sys.path:
 import csplendor as cs
 from csplendor.api.usi_kifu import action_to_usi, game_to_spn, now_iso
 
-from scripts.dfpn_mate_solver import principal_line_to_kifu_text, solve_reveal_verified_mate
+from scripts.dfpn_mate_solver import (
+    PLAYER0_WIN,
+    PLAYER1_WIN,
+    principal_line_to_kifu_text,
+    solve_reveal_verified_mate,
+    solve_visible_only_winner,
+)
 from scripts.mate_solver import MATE, SearchResult, SolverOptions
 
 DEFAULT_GENBU_WEIGHTS = REPO_ROOT / "scripts" / "weights" / "genbu.pt"
@@ -30,7 +36,13 @@ DLSPLENDOR_ROOT = REPO_ROOT.parent / "dlsplendor"
 @dataclass
 class GenerationStats:
     attempts: int = 0
+    sampled_positions: int = 0
     candidates: int = 0
+    balance_filtered: int = 0
+    threat_filtered: int = 0
+    visible_prefiltered: int = 0
+    uniqueness_filtered: int = 0
+    uniqueness_checks: int = 0
     mates: int = 0
     saved: int = 0
     duplicates: int = 0
@@ -40,6 +52,17 @@ class GenerationStats:
     countermate_checks: int = 0
     countermates: int = 0
     errors: int = 0
+
+
+@dataclass(frozen=True)
+class ThreatSummary:
+    player: int
+    points: int
+    optimistic_score: int
+    affordable_purchases: int
+    reachable_scoring_cards: int
+    immediate_winning_purchases: int
+    score: int
 
 
 class ProgressReporter:
@@ -140,6 +163,7 @@ def generate_candidate_positions(
     max_playout_plies: int,
     progress: Optional[ProgressReporter] = None,
     attempt: Optional[int] = None,
+    candidate_filter: Optional[Callable[[cs.Game], bool]] = None,
 ) -> Iterator[cs.Game]:
     if len(players) != 2:
         raise ValueError("exactly two puzzle players are required")
@@ -158,7 +182,9 @@ def generate_candidate_positions(
         if ply < start_ply or int(game.board.current_player) == before_player:
             continue
         game.simple_payment_mode = False
-        yield game.clone_light()
+        candidate = game.clone_light()
+        if candidate_filter is None or candidate_filter(candidate):
+            yield candidate
         game.simple_payment_mode = True
 
 
@@ -171,6 +197,7 @@ def generate_candidate_position(
     max_playout_plies: int,
     progress: Optional[ProgressReporter] = None,
     attempt: Optional[int] = None,
+    candidate_filter: Optional[Callable[[cs.Game], bool]] = None,
 ) -> Optional[cs.Game]:
     return next(
         generate_candidate_positions(
@@ -181,6 +208,7 @@ def generate_candidate_position(
             max_playout_plies=max_playout_plies,
             progress=progress,
             attempt=attempt,
+            candidate_filter=candidate_filter,
         ),
         None,
     )
@@ -208,6 +236,187 @@ def is_suspicious_position(
         and defender_points >= min_defender_points
         and abs(attacker_points - defender_points) <= max_score_gap
     )
+
+
+def _arg(args: argparse.Namespace, name: str, default: object) -> object:
+    return getattr(args, name, default)
+
+
+def _position_card_ids(game: cs.Game, player: int) -> list[int]:
+    card_ids = {
+        int(card_id)
+        for row in game.board.visible
+        for card_id in row
+        if int(card_id) >= 0
+    }
+    card_ids.update(
+        int(card_id)
+        for card_id in game.board.get_player(player).reserved
+        if int(card_id) >= 0
+    )
+    return sorted(card_ids)
+
+
+def _payment_gap(player: cs.PlayerState, card: cs.Card) -> int:
+    shortage = sum(
+        max(0, int(card.cost[color]) - int(player.bonuses[color]) - int(player.gems[color]))
+        for color in range(5)
+    )
+    return max(0, shortage - int(player.gems[5]))
+
+
+def _noble_points_after_purchase(
+    game: cs.Game,
+    player: cs.PlayerState,
+    card: cs.Card,
+) -> int:
+    bonuses = [int(value) for value in player.bonuses]
+    bonuses[int(card.bonus)] += 1
+    return max(
+        (
+            int(noble.points)
+            for noble_id in game.board.nobles
+            for noble in [cs.get_noble(int(noble_id))]
+            if all(bonuses[color] >= int(noble.requirement[color]) for color in range(5))
+        ),
+        default=0,
+    )
+
+
+def threat_summary(game: cs.Game, player_index: int, *, turns: int) -> ThreatSummary:
+    player = game.board.get_player(player_index)
+    points = int(player.points)
+    reachable_points: list[int] = []
+    affordable_purchases = 0
+    immediate_winning_purchases = 0
+    reachable_scoring_cards = 0
+    for card_id in _position_card_ids(game, player_index):
+        card = cs.get_card(card_id)
+        gap = _payment_gap(player, card)
+        if gap == 0:
+            affordable_purchases += 1
+        if gap > max(0, turns) * 3:
+            continue
+        gain = int(card.points) + _noble_points_after_purchase(game, player, card)
+        reachable_points.append(gain)
+        if gain > 0:
+            reachable_scoring_cards += 1
+        if gap == 0 and points + gain >= 15:
+            immediate_winning_purchases += 1
+
+    reachable_points.sort(reverse=True)
+    optimistic_score = points + sum(reachable_points[:max(0, turns)])
+    score = (
+        optimistic_score * 10
+        + affordable_purchases * 3
+        + reachable_scoring_cards * 2
+        + immediate_winning_purchases * 25
+    )
+    return ThreatSummary(
+        player=player_index,
+        points=points,
+        optimistic_score=optimistic_score,
+        affordable_purchases=affordable_purchases,
+        reachable_scoring_cards=reachable_scoring_cards,
+        immediate_winning_purchases=immediate_winning_purchases,
+        score=score,
+    )
+
+
+def _threat_summaries(game: cs.Game, args: argparse.Namespace) -> tuple[ThreatSummary, ThreatSummary]:
+    turns = int(_arg(args, "threat_turns", 3))
+    return (
+        threat_summary(game, 0, turns=turns),
+        threat_summary(game, 1, turns=turns),
+    )
+
+
+def is_tactical_candidate(
+    game: cs.Game,
+    args: argparse.Namespace,
+    *,
+    summaries: Optional[tuple[ThreatSummary, ThreatSummary]] = None,
+) -> bool:
+    if not is_suspicious_position(
+        game,
+        min_attacker_points=int(_arg(args, "min_attacker_points", 8)),
+        max_attacker_points=int(_arg(args, "max_attacker_points", 14)),
+        min_defender_points=int(_arg(args, "min_defender_points", 8)),
+        max_score_gap=int(_arg(args, "max_score_gap", 3)),
+        allow_final_round=bool(_arg(args, "allow_final_round", False)),
+    ):
+        return False
+    if len(game.legal_actions) < int(_arg(args, "min_legal_actions", 12)):
+        return False
+
+    summaries = summaries or _threat_summaries(game, args)
+    attacker = int(game.board.current_player)
+    defender = 1 - attacker
+    min_optimistic_score = int(_arg(args, "min_optimistic_score", 15))
+    if summaries[attacker].optimistic_score < min_optimistic_score:
+        return False
+    if bool(_arg(args, "require_both_threats", True)):
+        if summaries[defender].optimistic_score < min_optimistic_score:
+            return False
+    min_threat_score = int(_arg(args, "min_threat_score", 0))
+    return summaries[attacker].score >= min_threat_score
+
+
+def visible_only_prefilter(
+    game: cs.Game,
+    args: argparse.Namespace,
+) -> SearchResult:
+    return solve_visible_only_winner(
+        game,
+        options=SolverOptions(
+            max_nodes=int(_arg(args, "visible_prefilter_node_limit", 50000)),
+            time_limit=float(_arg(args, "visible_prefilter_time_limit", 0.5)),
+            include_proof=True,
+            allow_deck_reserve=True,
+        ),
+    )
+
+
+def find_verified_winning_actions(
+    game: cs.Game,
+    *,
+    attacker: int,
+    depth: int,
+    max_winning_actions: int,
+    node_limit: int,
+    time_limit: float,
+) -> dict[str, object]:
+    winning_actions: list[str] = []
+    unknown_actions: list[str] = []
+    checks = 0
+    truncated = False
+    for action in game.legal_actions:
+        checks += 1
+        usi = action_to_usi(action, game=game)
+        raw = cs.solve_reveal_verified_mate_cpp(
+            game,
+            attacker=attacker,
+            depth=depth,
+            max_nodes=max(0, node_limit),
+            time_limit_seconds=max(0.0, time_limit),
+            preferred_attacker_actions=[],
+            include_proof_dag=False,
+            required_root_action=int(action.pack()),
+        )
+        if bool(raw["proven"]):
+            winning_actions.append(usi)
+            if len(winning_actions) > max_winning_actions:
+                truncated = True
+                break
+        elif raw["unknown_reason"] is not None:
+            unknown_actions.append(usi)
+    return {
+        "checks": checks,
+        "winning_actions": winning_actions,
+        "unknown_actions": unknown_actions,
+        "complete": not unknown_actions and not truncated,
+        "truncated": truncated,
+    }
 
 
 def _completed_turn_children(game: cs.Game, action: cs.Action) -> list[cs.Game]:
@@ -404,7 +613,63 @@ def try_save_candidate(
     game_seed: int,
     attempt: int,
 ) -> bool:
+    stats.sampled_positions += 1
+    if not is_suspicious_position(
+        game,
+        min_attacker_points=int(_arg(args, "min_attacker_points", 8)),
+        max_attacker_points=int(_arg(args, "max_attacker_points", 14)),
+        min_defender_points=int(_arg(args, "min_defender_points", 8)),
+        max_score_gap=int(_arg(args, "max_score_gap", 3)),
+        allow_final_round=bool(_arg(args, "allow_final_round", False)),
+    ):
+        stats.filtered += 1
+        stats.balance_filtered += 1
+        report_rejected_position(progress, game, attempt=attempt, reason="balance_filter")
+        return False
+
+    summaries = _threat_summaries(game, args)
+    if not is_tactical_candidate(game, args, summaries=summaries):
+        stats.filtered += 1
+        stats.threat_filtered += 1
+        report_rejected_position(
+            progress,
+            game,
+            attempt=attempt,
+            reason="threat_filter",
+            legal_actions=len(game.legal_actions),
+            optimistic_scores=[summary.optimistic_score for summary in summaries],
+            threat_scores=[summary.score for summary in summaries],
+        )
+        return False
+
     stats.candidates += 1
+    expected_visible_status = PLAYER0_WIN if int(game.board.current_player) == 0 else PLAYER1_WIN
+    if bool(_arg(args, "visible_prefilter", True)):
+        progress.emit("visible_prefilter", force=True, attempt=attempt, candidates=stats.candidates)
+        visible = visible_only_prefilter(game, args)
+        visible_tree = visible.proof_tree or {}
+        visible_depth = visible_tree.get("forced_win_depth")
+        if (
+            visible.status != expected_visible_status
+            or visible_depth is None
+            or int(visible_depth) < int(_arg(args, "min_depth", 1))
+            or (
+                int(_arg(args, "max_depth", 0))
+                and int(visible_depth) > int(_arg(args, "max_depth", 0))
+            )
+        ):
+            stats.filtered += 1
+            stats.visible_prefiltered += 1
+            report_rejected_position(
+                progress,
+                game,
+                attempt=attempt,
+                reason="visible_prefilter",
+                status=visible.status,
+                depth=visible_depth,
+            )
+            return False
+
     progress.emit("mate_search", force=True, attempt=attempt, candidates=stats.candidates)
     result = solve_reveal_verified_mate(
         game,
@@ -431,18 +696,6 @@ def try_save_candidate(
         return False
 
     stats.mates += 1
-    if not is_suspicious_position(
-        game,
-        min_attacker_points=args.min_attacker_points,
-        max_attacker_points=args.max_attacker_points,
-        min_defender_points=args.min_defender_points,
-        max_score_gap=args.max_score_gap,
-        allow_final_round=args.allow_final_round,
-    ):
-        stats.filtered += 1
-        report_rejected_position(progress, game, attempt=attempt, reason="balance_filter")
-        return True
-
     depth = int(result.proof_tree["forced_win_depth"])
     if depth < args.min_depth or (args.max_depth and depth > args.max_depth):
         stats.filtered += 1
@@ -452,6 +705,33 @@ def try_save_candidate(
     if not bool(dag.get("complete")):
         stats.incomplete_dags += 1
         report_rejected_position(progress, game, attempt=attempt, reason="incomplete_dag")
+        return True
+
+    uniqueness = find_verified_winning_actions(
+        game,
+        attacker=int(game.board.current_player),
+        depth=depth,
+        max_winning_actions=int(_arg(args, "max_winning_actions", 1)),
+        node_limit=int(_arg(args, "uniqueness_node_limit", 0)),
+        time_limit=float(_arg(args, "uniqueness_time_limit", 5.0)),
+    )
+    stats.uniqueness_checks += int(uniqueness["checks"])
+    winning_actions = list(uniqueness["winning_actions"])
+    if bool(_arg(args, "require_unique_solution", True)) and (
+        not bool(uniqueness["complete"])
+        or len(winning_actions) != int(_arg(args, "max_winning_actions", 1))
+    ):
+        stats.filtered += 1
+        stats.uniqueness_filtered += 1
+        report_rejected_position(
+            progress,
+            game,
+            attempt=attempt,
+            reason="uniqueness_filter",
+            complete=uniqueness["complete"],
+            winning_actions=len(winning_actions),
+            unknown_actions=len(uniqueness["unknown_actions"]),
+        )
         return True
 
     blunders, checks = find_countermate_blunders(
@@ -479,6 +759,8 @@ def try_save_candidate(
         return True
 
     scores = [int(score) for score in game.scores]
+    dag_nodes = list(dag.get("nodes", []))
+    defender = 1 - int(game.board.current_player)
     puzzle_dir = save_puzzle(
         output_dir,
         game,
@@ -487,7 +769,24 @@ def try_save_candidate(
         attempt=attempt,
         quality={
             "score_gap": abs(scores[0] - scores[1]),
+            "legal_actions": len(game.legal_actions),
+            "optimistic_scores": [summary.optimistic_score for summary in summaries],
+            "threat_scores": [summary.score for summary in summaries],
+            "verified_winning_actions": winning_actions,
+            "verified_winning_action_count": len(winning_actions),
+            "uniqueness_complete": bool(uniqueness["complete"]),
+            "uniqueness_checks": int(uniqueness["checks"]),
             "countermate_blunders": blunders,
+            "countermate_blunder_count": len(blunders),
+            "strategy_dag_nodes": len(dag_nodes),
+            "max_defender_responses": max(
+                (
+                    len(node.get("children", []))
+                    for node in dag_nodes
+                    if int(node.get("player", -1)) == defender
+                ),
+                default=0,
+            ),
         },
     )
     if puzzle_dir is None:
@@ -534,6 +833,7 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
                 max_playout_plies=args.max_playout_plies,
                 progress=progress,
                 attempt=stats.attempts,
+                candidate_filter=lambda candidate: is_tactical_candidate(candidate, args),
             )
             for game in positions:
                 mate_found = try_save_candidate(
@@ -582,8 +882,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-defender-points", type=int, default=8)
     parser.add_argument("--max-score-gap", type=int, default=3)
     parser.add_argument("--allow-final-round", action="store_true")
-    parser.add_argument("--min-depth", type=int, default=1)
+    parser.add_argument("--min-legal-actions", type=int, default=12)
+    parser.add_argument("--threat-turns", type=int, default=3)
+    parser.add_argument("--min-optimistic-score", type=int, default=15)
+    parser.add_argument("--min-threat-score", type=int, default=0)
+    parser.add_argument("--no-require-both-threats", dest="require_both_threats", action="store_false")
+    parser.set_defaults(require_both_threats=True)
+    parser.add_argument("--min-depth", type=int, default=3)
     parser.add_argument("--max-depth", type=int, default=0, help="0 disables the upper bound")
+    parser.add_argument("--no-visible-prefilter", dest="visible_prefilter", action="store_false")
+    parser.set_defaults(visible_prefilter=True)
+    parser.add_argument("--visible-prefilter-node-limit", type=int, default=50000)
+    parser.add_argument("--visible-prefilter-time-limit", type=float, default=0.5)
     parser.add_argument("--node-limit", type=int, default=0, help="0 disables the search node limit")
     parser.add_argument("--time-limit", type=float, default=30.0, help="seconds per candidate")
     parser.add_argument("--proof-dag-node-limit", type=int, default=100000)
@@ -592,6 +902,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--countermate-action-limit", type=int, default=12, help="0 checks all wrong moves")
     parser.add_argument("--countermate-node-limit", type=int, default=0, help="0 disables the search node limit")
     parser.add_argument("--countermate-time-limit", type=float, default=5.0, help="seconds per wrong move")
+    parser.add_argument("--no-require-unique-solution", dest="require_unique_solution", action="store_false")
+    parser.set_defaults(require_unique_solution=True)
+    parser.add_argument("--max-winning-actions", type=int, default=1)
+    parser.add_argument("--uniqueness-node-limit", type=int, default=0, help="0 disables the per-action node limit")
+    parser.add_argument("--uniqueness-time-limit", type=float, default=5.0, help="seconds per initial action")
     parser.add_argument("--progress-interval", type=int, default=100)
     parser.add_argument("--progress-seconds", type=float, default=10.0, help="seconds between in-attempt progress messages; 0 disables periodic messages")
     return parser
@@ -611,8 +926,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise ValueError("invalid attacker point range")
     if args.min_defender_points < 0 or args.max_score_gap < 0:
         raise ValueError("invalid balance filter")
+    if (
+        args.min_legal_actions < 0
+        or args.threat_turns < 0
+        or args.min_optimistic_score < 0
+        or args.min_threat_score < 0
+    ):
+        raise ValueError("invalid threat filter")
     if args.min_depth < 0 or args.max_depth < 0:
         raise ValueError("mate depths must be non-negative")
+    if args.visible_prefilter_node_limit < 0 or args.visible_prefilter_time_limit < 0:
+        raise ValueError("visible prefilter limits must be non-negative")
     if args.node_limit < 0 or args.time_limit < 0:
         raise ValueError("search limits must be non-negative")
     if args.proof_dag_node_limit < 0 or args.proof_dag_edge_limit < 0:
@@ -624,6 +948,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         or args.countermate_time_limit < 0
     ):
         raise ValueError("countermate limits must be non-negative")
+    if (
+        args.max_winning_actions <= 0
+        or args.uniqueness_node_limit < 0
+        or args.uniqueness_time_limit < 0
+    ):
+        raise ValueError("uniqueness limits must be non-negative")
     stats = generate_puzzles(args)
     print(json.dumps(asdict(stats), indent=2, sort_keys=True))
     return 0 if stats.saved >= args.count else 1
