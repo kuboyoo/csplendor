@@ -566,7 +566,7 @@ def test_reveal_verified_mate_finds_bench_forced_line():
     )
 
     assert result.status == MATE
-    assert result.depth <= 5
+    assert result.depth == 5
     assert result.proof_tree["assumptions"]["all_reveal_shapes_verified"] is True
     assert (
         result.proof_tree["assumptions"]["hidden_reveal_verification"]

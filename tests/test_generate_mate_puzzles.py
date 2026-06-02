@@ -8,11 +8,15 @@ from csplendor.api.usi_kifu import action_to_usi, parse_kifu_text, spn_to_game
 import scripts.generate_mate_puzzles as generate_mate_puzzles
 from scripts.generate_mate_puzzles import (
     ProgressReporter,
+    RankedCandidate,
     GenerationStats,
+    build_parser,
+    candidate_rank_score,
     find_countermate_blunders,
     find_verified_winning_actions,
     generate_candidate_position,
     generate_candidate_positions,
+    generate_ranked_candidate_positions,
     is_tactical_candidate,
     is_suspicious_position,
     report_rejected_position,
@@ -49,6 +53,25 @@ def test_rejected_position_progress_contains_reason_and_spn(capsys):
     assert "bank:W4U4G4R4K4D5" in output
 
 
+def test_rejected_position_is_appended_to_jsonl(tmp_path):
+    game = cs.Game(seed=0)
+    path = tmp_path / "rejections.jsonl"
+
+    report_rejected_position(
+        ProgressReporter(0, path),
+        game,
+        attempt=3,
+        reason="balance_filter",
+        depth=2,
+    )
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["attempt"] == 3
+    assert payload["reason"] == "balance_filter"
+    assert payload["depth"] == 2
+    assert payload["position"].startswith("bank:")
+
+
 def test_candidate_position_uses_two_players_and_simple_payment_mode():
     players = [FirstActionPlayer(), FirstActionPlayer()]
 
@@ -81,6 +104,39 @@ def test_candidate_positions_continue_until_endgame_after_first_candidate():
     assert [int(game.board.current_player) for game in games] == [0, 1, 0]
     assert [bool(game.simple_payment_mode) for game in games] == [False, False, False]
     assert [player.calls for player in players] == [2, 2]
+
+
+def test_ranked_candidate_positions_collect_boundary_history(monkeypatch):
+    players = [FirstActionPlayer(), FirstActionPlayer()]
+    args = SimpleNamespace(
+        min_playout_plies=1,
+        max_playout_plies=1,
+        boundary_history=4,
+        boundary_trigger_depth=3,
+        branch_root_count=0,
+        branch_rollouts=0,
+        branch_rollout_plies=0,
+        ranked_candidates_per_attempt=8,
+    )
+    monkeypatch.setattr(
+        generate_mate_puzzles,
+        "_candidate_snapshot",
+        lambda game, args, source, ply: RankedCandidate(game.clone_light(), ply, source, ply),
+    )
+    monkeypatch.setattr(generate_mate_puzzles, "_visible_depth", lambda game, args: 2)
+    stats = GenerationStats()
+
+    candidates = generate_ranked_candidate_positions(
+        generate_mate_puzzles.random.Random(0),
+        players=players,
+        game_seed=0,
+        args=args,
+        stats=stats,
+    )
+
+    assert stats.boundary_hits == 1
+    assert stats.boundary_candidates == 1
+    assert candidates
 
 
 def test_candidate_search_applies_balance_filter_before_mate_search(monkeypatch, tmp_path):
@@ -361,6 +417,91 @@ def test_tactical_candidate_requires_both_players_to_have_near_term_score_ceilin
     assert threat_summary(game, 0, turns=3).optimistic_score >= 15
     assert threat_summary(game, 1, turns=3).optimistic_score >= 15
     assert is_tactical_candidate(game, args)
+
+
+def test_default_candidate_filter_keeps_known_depth_five_position():
+    game = spn_to_game(
+        "bank:W1U3G3R3K0D4 | "
+        "visible:L1[35,33,20,24]L2[46,61,51,66]L3[80,86,87,88] | "
+        "decks:36,23,15 | nobles:[1,10,6] | "
+        "P0:gems:W3U1G1R1K2D0;bonuses:W2U2G1R3K3;points:5;"
+        "reserved:[68];bought:[_,_,_,_,_,_,_,_,_,_,_] | "
+        "P1:gems:W0U0G0R0K2D1;bonuses:W3U1G0R0K3;points:8;"
+        "reserved:[85,44,43];bought:[_,_,_,_,_,_,_] | 0"
+    )
+    args = build_parser().parse_args([])
+
+    assert is_tactical_candidate(game, args)
+    assert candidate_rank_score(game, args) > 0
+
+
+def test_candidate_builds_proof_dag_only_after_quality_filters(monkeypatch, tmp_path):
+    game = cs.Game(seed=0)
+    correct = game.legal_actions[0]
+    calls = []
+
+    def fake_solve(*args, include_proof_dag=False, **kwargs):
+        calls.append(include_proof_dag)
+        proof = {
+            "forced_win_depth": 3,
+            "line": [{"player": 0, "action": {"pack": int(correct.pack())}}],
+            "verification": {
+                "line": [{"player": 0, "action": {"pack": int(correct.pack())}}],
+            },
+        }
+        if include_proof_dag:
+            proof["verification"]["proof_dag"] = {
+                "complete": True,
+                "nodes": [{"id": 0, "player": 0, "children": []}],
+            }
+        return SearchResult(MATE, 3, proof, None, SearchStats())
+
+    monkeypatch.setattr(generate_mate_puzzles, "is_suspicious_position", lambda *args, **kwargs: True)
+    monkeypatch.setattr(generate_mate_puzzles, "is_tactical_candidate", lambda *args, **kwargs: True)
+    monkeypatch.setattr(generate_mate_puzzles, "solve_reveal_verified_mate", fake_solve)
+    monkeypatch.setattr(
+        generate_mate_puzzles,
+        "find_verified_winning_actions",
+        lambda *args, **kwargs: {
+            "checks": 1,
+            "winning_actions": ["take:WUG"],
+            "unknown_actions": [],
+            "complete": True,
+        },
+    )
+    monkeypatch.setattr(generate_mate_puzzles, "find_countermate_blunders", lambda *args, **kwargs: ([{}], 1))
+    monkeypatch.setattr(generate_mate_puzzles, "save_puzzle", lambda *args, **kwargs: tmp_path / "saved")
+
+    saved = try_save_candidate(
+        SimpleNamespace(
+            visible_prefilter=False,
+            visible_uniqueness_prefilter=False,
+            node_limit=0,
+            time_limit=1.0,
+            min_depth=3,
+            max_depth=0,
+            max_winning_actions=1,
+            uniqueness_node_limit=0,
+            uniqueness_time_limit=1.0,
+            require_unique_solution=True,
+            min_losing_alternatives=1,
+            countermate_action_limit=1,
+            countermate_node_limit=0,
+            countermate_time_limit=1.0,
+            proof_dag_node_limit=100,
+            proof_dag_edge_limit=100,
+            count=1,
+        ),
+        output_dir=tmp_path,
+        stats=GenerationStats(),
+        progress=ProgressReporter(0),
+        game=game,
+        game_seed=0,
+        attempt=1,
+    )
+
+    assert saved is True
+    assert calls == [False, True]
 
 
 def test_verified_winning_action_filter_finds_unique_root_move():
