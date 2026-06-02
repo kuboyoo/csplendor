@@ -38,8 +38,16 @@ class FirstActionPlayer:
         return game.legal_actions[0]
 
 
+def _set_purchased_cards(game, player_id, card_ids):
+    player = game.board.get_player(player_id)
+    player.purchased_cards = list(card_ids)
+    player.purchased_count = len(card_ids)
+    game.board.set_player(player_id, player)
+
+
 def test_rejected_position_progress_contains_reason_and_spn(capsys):
     game = cs.Game(seed=0)
+    _set_purchased_cards(game, 0, [12])
 
     report_rejected_position(
         ProgressReporter(10.0),
@@ -51,10 +59,12 @@ def test_rejected_position_progress_contains_reason_and_spn(capsys):
     output = capsys.readouterr().err
     assert "[progress] stage=rejected attempt=3 reason=balance_filter position=" in output
     assert "bank:W4U4G4R4K4D5" in output
+    assert "bought:[12]" in output
 
 
 def test_rejected_position_is_appended_to_jsonl(tmp_path):
     game = cs.Game(seed=0)
+    _set_purchased_cards(game, 1, [34])
     path = tmp_path / "rejections.jsonl"
 
     report_rejected_position(
@@ -70,6 +80,7 @@ def test_rejected_position_is_appended_to_jsonl(tmp_path):
     assert payload["reason"] == "balance_filter"
     assert payload["depth"] == 2
     assert payload["position"].startswith("bank:")
+    assert "bought:[34]" in payload["position"]
 
 
 def test_candidate_position_uses_two_players_and_simple_payment_mode():
@@ -272,6 +283,7 @@ def test_candidate_search_stops_playout_after_visible_only_short_mate(monkeypatc
 
 def test_save_puzzle_writes_depth_grouped_answer_and_complete_strategy(tmp_path):
     game = cs.Game(seed=0)
+    _set_purchased_cards(game, 0, [12])
     usi = action_to_usi(game.legal_actions[0], game=game)
     line = [{"player": 0, "action": {"usi": usi}}]
     result = SearchResult(
@@ -313,6 +325,9 @@ def test_save_puzzle_writes_depth_grouped_answer_and_complete_strategy(tmp_path)
     assert problem["forced_win_depth"] == 3
     assert strategy["format"] == "csplendor_mate_strategy_v1"
     assert strategy["strategy_dag"]["complete"] is True
+    assert "bought:[12]" in problem["position"]
+    assert strategy["position"] == problem["position"]
+    assert kifu["position"] == problem["position"]
     assert kifu["moves"] == [{"player": 0, "usi": usi}]
     assert manifest == [{
         "attacker": 0,

@@ -110,6 +110,14 @@ def _position_id(position: str) -> str:
     return hashlib.sha256(position.encode("utf-8")).hexdigest()[:16]
 
 
+def _generator_spn(game: cs.Game, *, reveal_hidden_reserved_ids: bool = False) -> str:
+    return game_to_spn(
+        game,
+        reveal_hidden_reserved_ids=reveal_hidden_reserved_ids,
+        require_purchased_card_ids=True,
+    )
+
+
 def report_rejected_position(
     progress: ProgressReporter,
     game: cs.Game,
@@ -118,7 +126,7 @@ def report_rejected_position(
     reason: str,
     **fields: object,
 ) -> None:
-    position = game_to_spn(game)
+    position = _generator_spn(game)
     progress.record_rejection({
         "attempt": int(attempt),
         "reason": reason,
@@ -616,7 +624,7 @@ def generate_ranked_candidate_positions(
 
     unique: dict[str, RankedCandidate] = {}
     for candidate in candidates:
-        position = game_to_spn(candidate.game)
+        position = _generator_spn(candidate.game)
         known = unique.get(position)
         if known is None or candidate.rank_score > known.rank_score:
             unique[position] = candidate
@@ -804,7 +812,7 @@ def save_puzzle(
         raise ValueError("principal line is required")
 
     depth = int(proof.get("forced_win_depth", result.depth))
-    position = game_to_spn(game, reveal_hidden_reserved_ids=True)
+    position = _generator_spn(game, reveal_hidden_reserved_ids=True)
     puzzle_id = _position_id(position)
     depth_dir = output_dir / f"depth_{depth:02d}"
     puzzle_dir = depth_dir / puzzle_id

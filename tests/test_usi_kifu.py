@@ -179,6 +179,11 @@ def test_editor_spn_with_unknown_bought_cards_keeps_non_visible_non_reserved_car
     assert int(game.board.get_player(1).purchased_count) == 7
     assert list(game.board.get_player(0).purchased_cards) == []
     assert list(game.board.get_player(1).purchased_cards) == []
+    serialized = game_to_spn(game)
+    assert "bought:[_,_,_,_,_,_,_,_,_,_,_]" in serialized
+    assert "bought:[_,_,_,_,_,_,_]" in serialized
+    with pytest.raises(ValueError, match="purchased card IDs are incomplete"):
+        game_to_spn(game, require_purchased_card_ids=True)
     assert 68 not in game.board.decks[1]
     assert 85 not in game.board.decks[2]
     assert 35 not in game.board.decks[0]

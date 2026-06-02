@@ -320,7 +320,12 @@ def find_legal_action_index_by_usi(game, usi_move: str) -> int:
     raise ValueError(f"unsupported USI move kind: {parsed.kind}")
 
 
-def board_to_spn(board, *, reveal_hidden_reserved_ids: bool = False) -> str:
+def board_to_spn(
+    board,
+    *,
+    reveal_hidden_reserved_ids: bool = False,
+    require_purchased_card_ids: bool = False,
+) -> str:
     """Serialize current board to SPN text."""
     bank = [int(v) for v in board.bank]
     bank_part = f"bank:W{bank[0]}U{bank[1]}G{bank[2]}R{bank[3]}K{bank[4]}D{bank[5]}"
@@ -359,6 +364,13 @@ def board_to_spn(board, *, reveal_hidden_reserved_ids: bool = False) -> str:
             else:
                 reserved.append(str(cid))
         bought = [str(int(cid)) for cid in p.purchased_cards if int(cid) >= 0]
+        unknown_bought_count = int(p.purchased_count) - len(bought)
+        if require_purchased_card_ids and unknown_bought_count != 0:
+            raise ValueError(
+                f"P{p_idx} purchased card IDs are incomplete: "
+                f"count={int(p.purchased_count)}, known={len(bought)}"
+            )
+        bought.extend("_" for _ in range(max(0, unknown_bought_count)))
         players_part.append(
             "P{idx}:gems:W{g0}U{g1}G{g2}R{g3}K{g4}D{g5};"
             "bonuses:W{b0}U{b1}G{b2}R{b3}K{b4};"
@@ -377,10 +389,16 @@ def board_to_spn(board, *, reveal_hidden_reserved_ids: bool = False) -> str:
     )
 
 
-def game_to_spn(game, *, reveal_hidden_reserved_ids: bool = False) -> str:
+def game_to_spn(
+    game,
+    *,
+    reveal_hidden_reserved_ids: bool = False,
+    require_purchased_card_ids: bool = False,
+) -> str:
     return board_to_spn(
         game.board,
         reveal_hidden_reserved_ids=reveal_hidden_reserved_ids,
+        require_purchased_card_ids=require_purchased_card_ids,
     )
 
 
