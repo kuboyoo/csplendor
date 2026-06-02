@@ -3173,7 +3173,7 @@ def solve_reveal_verified_mate(
             "defender_nodes": "all_legal_actions_with_all_nondeterministic_outcomes",
             "oracle_reserve_card": "concrete_initially_hidden_card_id",
             "shared_states": "referenced_by_node_id",
-            "resolved_leaves": "sound_final_round_proof_summaries",
+            "resolved_leaves": "terminal_results_after_expanded_final_round_responses",
         }
         verification["proof_dag"] = proof_dag
     proof = {

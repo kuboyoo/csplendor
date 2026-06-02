@@ -609,10 +609,11 @@ def test_reveal_verified_mate_emits_bounded_proof_dag():
     assert dag["root"] == 0
     assert 1 < len(dag["nodes"]) <= 10000
     assert any(node["children"] for node in dag["nodes"])
-    assert any(
+    assert not any(
         node["resolution"] == "final_round_proof_summary"
         for node in dag["nodes"]
     )
+    assert any(node["kind"] == "terminal" for node in dag["nodes"])
 
 
 @pytest.mark.parametrize(

@@ -8,8 +8,10 @@
 #include <chrono>
 #include <cstdint>
 #include <iterator>
+#include <map>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -266,6 +268,7 @@ private:
   uint64_t required_root_action_ = UINT64_MAX;
   size_t proof_dag_edges_ = 0;
   std::unordered_map<DepthStateKey, size_t, DepthStateKeyHash> proof_node_ids_;
+  std::map<std::tuple<int, int, int>, size_t> proof_terminal_node_ids_;
   std::vector<RevealVerifiedProofNode> proof_nodes_;
   static constexpr size_t ATTACKER_TAKE_LIMIT = 6;
   static constexpr size_t ATTACKER_RESERVE_LIMIT = 3;
@@ -1194,6 +1197,7 @@ private:
     RevealVerifiedProofDag dag;
     dag.requested = true;
     proof_node_ids_.clear();
+    proof_terminal_node_ids_.clear();
     proof_nodes_.clear();
     proof_dag_edges_ = 0;
     const RevealVerifiedSearchStats search_stats = stats_;
@@ -1206,12 +1210,127 @@ private:
       dag.omitted_reason = exc.what();
       proof_nodes_.clear();
       proof_node_ids_.clear();
+      proof_terminal_node_ids_.clear();
     }
     stats_ = search_stats;
     return dag;
   }
 
+  void append_proof_edge(size_t id, const OrderedAction &ordered,
+                         int reveal_card, size_t child) {
+    if (proof_dag_edge_limit_ && proof_dag_edges_ >= proof_dag_edge_limit_)
+      throw ProofDagBuildAborted("proof DAG edge limit exceeded");
+    proof_nodes_[id].children.push_back(RevealVerifiedProofEdge{
+        ordered.code, reveal_card, ordered.oracle_card,
+        ordered.oracle_reserve, ordered.oracle_reserve_card,
+        ordered.oracle_return_color, ordered.oracle_gold_as, child});
+    ++proof_dag_edges_;
+  }
+
+  size_t build_terminal_proof_node(const Game &game, int depth) {
+    const auto key =
+        std::make_tuple(game.current_player(), depth, game.winner());
+    auto known = proof_terminal_node_ids_.find(key);
+    if (known != proof_terminal_node_ids_.end())
+      return known->second;
+    if (proof_dag_node_limit_ && proof_nodes_.size() >= proof_dag_node_limit_)
+      throw ProofDagBuildAborted("proof DAG node limit exceeded");
+    const size_t id = proof_nodes_.size();
+    proof_terminal_node_ids_[key] = id;
+    proof_nodes_.push_back(
+        RevealVerifiedProofNode{id, game.current_player(), depth});
+    proof_nodes_[id].kind = "terminal";
+    proof_nodes_[id].resolution =
+        game.winner() == attacker_ ? "attacker_win" : "non_attacker_win";
+    return id;
+  }
+
+  std::pair<size_t, bool> build_final_round_noble_proof_node(Game &game,
+                                                             int depth) {
+    if (proof_dag_node_limit_ && proof_nodes_.size() >= proof_dag_node_limit_)
+      throw ProofDagBuildAborted("proof DAG node limit exceeded");
+    const size_t id = proof_nodes_.size();
+    proof_nodes_.push_back(
+        RevealVerifiedProofNode{id, game.current_player(), depth});
+    const int current_player = game.current_player();
+    const std::vector<OrderedAction> actions = ordered_actions(game);
+    bool proven = current_player != attacker_;
+    bool expanded = false;
+    for (const OrderedAction &ordered : actions) {
+      const Board previous = game.board;
+      if (!game.apply_action_code_trusted(ordered.code, false))
+        continue;
+      if (!game.is_game_over()) {
+        game.board = previous;
+        throw ProofDagBuildAborted(
+            "final round noble choice did not reach terminal state");
+      }
+      const bool child_proven = game.winner() == attacker_;
+      const size_t child = build_proof_node(game, depth);
+      game.board = previous;
+      if (current_player == attacker_) {
+        if (!child_proven)
+          continue;
+        append_proof_edge(id, ordered, -1, child);
+        expanded = true;
+        proven = true;
+        break;
+      }
+      append_proof_edge(id, ordered, -1, child);
+      expanded = true;
+      proven = proven && child_proven;
+    }
+    return {id, expanded && proven};
+  }
+
+  void expand_final_round_proof_summary(Game &game, int depth, size_t id) {
+    if (!can_resolve_final_round(game))
+      throw ProofDagBuildAborted(
+          "proof DAG cannot expand non-final-round summary");
+    const int current_player = game.current_player();
+    const std::vector<OrderedAction> actions = ordered_actions(game);
+    bool proven = current_player != attacker_;
+    bool expanded = false;
+    for (const OrderedAction &ordered : actions) {
+      std::vector<std::pair<int, size_t>> edges;
+      bool action_proven = true;
+      const bool completed = for_each_outcome(game, ordered, [&](int reveal) {
+        size_t child = 0;
+        bool child_proven = false;
+        if (game.board.waiting_noble) {
+          std::tie(child, child_proven) =
+              build_final_round_noble_proof_node(game, depth);
+        } else {
+          if (!game.is_game_over())
+            throw ProofDagBuildAborted(
+                "final round action did not reach terminal state");
+          child_proven = game.winner() == attacker_;
+          child = build_proof_node(game, depth);
+        }
+        edges.push_back({reveal, child});
+        action_proven = action_proven && child_proven;
+        return true;
+      });
+      action_proven = completed && !edges.empty() && action_proven;
+      if (current_player == attacker_ && !action_proven)
+        continue;
+      for (const auto &[reveal, child] : edges)
+        append_proof_edge(id, ordered, reveal, child);
+      expanded = true;
+      if (current_player == attacker_) {
+        proven = true;
+        break;
+      }
+      proven = proven && action_proven;
+    }
+    if (!expanded || !proven)
+      throw ProofDagBuildAborted(
+          "final round summary could not be expanded as proof");
+  }
+
   size_t build_proof_node(Game &game, int depth) {
+    if (game.is_game_over())
+      return build_terminal_proof_node(game, depth);
     const DepthStateKey key{state_key(game), depth};
     auto known = proof_node_ids_.find(key);
     if (known != proof_node_ids_.end())
@@ -1223,21 +1342,13 @@ private:
     proof_node_ids_[key] = id;
     proof_nodes_.push_back(
         RevealVerifiedProofNode{id, game.current_player(), depth});
-    if (game.is_game_over()) {
-      proof_nodes_[id].kind = "terminal";
-      proof_nodes_[id].resolution =
-          game.winner() == attacker_ ? "attacker_win" : "non_attacker_win";
-      return id;
-    }
-
     auto memo_it = memo_.find(key);
     if (memo_it == memo_.end() || memo_it->second.status != ForceStatus::PROVEN) {
       throw ProofDagBuildAborted("proof DAG references unmaterialized subtree");
     }
     const Entry &entry = memo_it->second;
     if (!entry.has_action) {
-      proof_nodes_[id].kind = "resolved";
-      proof_nodes_[id].resolution = "final_round_proof_summary";
+      expand_final_round_proof_summary(game, depth, id);
       return id;
     }
 
@@ -1258,14 +1369,7 @@ private:
             depth - static_cast<int>(current_player == attacker_ &&
                                      game.current_player() != current_player);
         const size_t child = build_proof_node(game, next_depth);
-        if (proof_dag_edge_limit_ && proof_dag_edges_ >= proof_dag_edge_limit_)
-          throw ProofDagBuildAborted("proof DAG edge limit exceeded");
-        proof_nodes_[id].children.push_back(RevealVerifiedProofEdge{
-            ordered.code, reveal_card, ordered.oracle_card,
-            ordered.oracle_reserve, ordered.oracle_reserve_card,
-            ordered.oracle_return_color,
-            ordered.oracle_gold_as, child});
-        ++proof_dag_edges_;
+        append_proof_edge(id, ordered, reveal_card, child);
         return true;
       });
     }
