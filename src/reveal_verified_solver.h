@@ -153,6 +153,8 @@ private:
     uint8_t points1 = 0;
     uint8_t purchased0 = 0;
     uint8_t purchased1 = 0;
+    uint8_t reserved0 = 0;
+    uint8_t reserved1 = 0;
     bool final_round = false;
     int8_t winner = -1;
 
@@ -163,7 +165,8 @@ private:
              acquired_hidden_high == other.acquired_hidden_high &&
              points0 == other.points0 &&
              points1 == other.points1 && purchased0 == other.purchased0 &&
-             purchased1 == other.purchased1 &&
+             purchased1 == other.purchased1 && reserved0 == other.reserved0 &&
+             reserved1 == other.reserved1 &&
              final_round == other.final_round && winner == other.winner;
     }
   };
@@ -174,9 +177,11 @@ private:
       meta |= static_cast<uint64_t>(key.points1) << 8;
       meta |= static_cast<uint64_t>(key.purchased0) << 16;
       meta |= static_cast<uint64_t>(key.purchased1) << 24;
-      meta |= static_cast<uint64_t>(key.final_round ? 1 : 0) << 32;
+      meta |= static_cast<uint64_t>(key.reserved0) << 32;
+      meta |= static_cast<uint64_t>(key.reserved1) << 40;
+      meta |= static_cast<uint64_t>(key.final_round ? 1 : 0) << 48;
       meta |= static_cast<uint64_t>(static_cast<uint8_t>(key.winner + 2))
-              << 33;
+              << 49;
       const uint64_t mixed =
           key.board_hash ^ (key.unseen_low * 0x9e3779b97f4a7c15ULL) ^
           (key.unseen_high * 0xc2b2ae3d27d4eb4fULL) ^
@@ -759,7 +764,7 @@ private:
       add_oracle_purchase_actions(player, card, effective_cost, 0, 0, {},
                                   actions);
     }
-    if (has_blank_slot(game.board)) {
+    if (player.can_reserve() && has_blank_slot(game.board)) {
       const int total_gems = player.total_gems();
       if (game.board.bank[GOLD] == 0 || total_gems < Board::MAX_TOKENS) {
         add_oracle_reserve_action(-1, actions);
@@ -842,6 +847,12 @@ private:
       player.points += card.points;
       player.sync_packed();
     } else if (ordered.oracle_reserve) {
+      if (!player.can_reserve())
+        return false;
+      // The identity stays unknown, but the reserved card still occupies a
+      // real slot and blocks further reserve actions once the limit is hit.
+      player.reserved_is_hidden[player.reserved_count] = true;
+      player.reserved[player.reserved_count++] = -1;
       if (board.bank[GOLD] > 0) {
         --board.bank[GOLD];
         ++player.gems[GOLD];
@@ -1159,6 +1170,8 @@ private:
                     board.players[1].points,
                     board.players[0].purchased_count,
                     board.players[1].purchased_count,
+                    board.players[0].reserved_count,
+                    board.players[1].reserved_count,
                     board.final_round,
                     board.winner};
   }
