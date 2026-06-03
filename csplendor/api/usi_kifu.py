@@ -371,14 +371,20 @@ def board_to_spn(
                 f"count={int(p.purchased_count)}, known={len(bought)}"
             )
         bought.extend("_" for _ in range(max(0, unknown_bought_count)))
+        acquired_nobles = [
+            str(int(noble_id))
+            for noble_id in p.acquired_nobles
+            if int(noble_id) >= 0
+        ]
         players_part.append(
             "P{idx}:gems:W{g0}U{g1}G{g2}R{g3}K{g4}D{g5};"
             "bonuses:W{b0}U{b1}G{b2}R{b3}K{b4};"
-            "points:{pts};reserved:[{res}];bought:[{bought}]".format(
+            "points:{pts};nobles:[{nobles}];reserved:[{res}];bought:[{bought}]".format(
                 idx=p_idx,
                 g0=gems[0], g1=gems[1], g2=gems[2], g3=gems[3], g4=gems[4], g5=gems[5],
                 b0=bonuses[0], b1=bonuses[1], b2=bonuses[2], b3=bonuses[3], b4=bonuses[4],
                 pts=int(p.points),
+                nobles=",".join(acquired_nobles),
                 res=",".join(reserved),
                 bought=",".join(bought),
             )
@@ -458,7 +464,7 @@ def spn_to_game(spn: str, seed: int = 0) -> Game:
         player.reserved_count = pdata["reserved_count"]
         player.purchased_cards = pdata["bought"]
         player.purchased_count = pdata["purchased_count"]
-        player.acquired_nobles = []
+        player.acquired_nobles = pdata["nobles"]
         board.set_player(idx, player)
 
     return game
@@ -596,11 +602,15 @@ def _parse_player_section(section: str, expected_player: int) -> Dict[str, objec
     reserved_slots = reserved + [-1] * (3 - len(reserved))
 
     bought_ids, purchased_count, unknown_bought_count = _parse_bought_section(fields["bought"])
+    nobles = _parse_nobles_section("nobles:" + fields.get("nobles", "[]"))
+    if len(nobles) > 3:
+        raise ValueError("a player can acquire at most 3 nobles")
 
     return {
         "gems": _parse_prefixed_counts("gems:" + fields["gems"], "gems:", include_gold=True),
         "bonuses": _parse_prefixed_counts("bonuses:" + fields["bonuses"], "bonuses:", include_gold=False),
         "points": int(fields["points"]),
+        "nobles": nobles,
         "reserved": reserved_slots,
         "reserved_is_hidden": reserved_is_hidden[:3] + [False] * (3 - len(reserved_is_hidden)),
         "reserved_count": len(reserved),
@@ -636,7 +646,10 @@ def _parse_id_list(text: str, label: str) -> List[int]:
         return []
     ids: List[int] = []
     for part in body.split(","):
-        value = int(part.strip())
+        item = part.strip()
+        if item == "-":
+            continue
+        value = int(item)
         if label == "card" and not 0 <= value < 90:
             raise ValueError(f"card id out of range: {value}")
         if label == "noble" and not 0 <= value < 12:

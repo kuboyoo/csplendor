@@ -39,6 +39,7 @@ def _state_signature(game):
             int(player.reserved_count),
             int(player.purchased_count),
             tuple(int(v) for v in player.purchased_cards),
+            tuple(int(v) for v in player.acquired_nobles),
         ))
     return (
         tuple(int(v) for v in board.bank),
@@ -111,6 +112,20 @@ def test_spn_to_game_round_trips_observable_state_and_unseen_sets():
 
     parsed = spn_to_game(spn)
 
+    assert _state_signature(parsed) == _state_signature(game)
+
+
+def test_spn_round_trips_acquired_nobles():
+    game = Game(seed=5)
+    player = game.board.get_player(0)
+    player.acquired_nobles = [int(game.board.nobles[0])]
+    game.board.nobles = list(game.board.nobles)[1:]
+    game.board.set_player(0, player)
+
+    spn = game_to_spn(game)
+    parsed = spn_to_game(spn)
+
+    assert f"nobles:[{int(player.acquired_nobles[0])}]" in spn
     assert _state_signature(parsed) == _state_signature(game)
 
 

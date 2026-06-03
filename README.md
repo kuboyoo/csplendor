@@ -120,7 +120,7 @@ python scripts/generate_mate_puzzles.py \
 
 高コストなめくれ検証の前に、点差、合法手数、両者の楽観的な近未来得点、visible-only 探索で候補を絞ります。既定では両者が3手以内に15点へ到達しうる合法手12個以上の局面を対象とし、depth 3以上の詰みだけを採用します。詰み証明後は全合法初手を固定して再検証し、別解がない問題だけを保存します。条件は `--threat-turns`、`--min-legal-actions`、`--min-optimistic-score`、`--min-depth`、`--visible-prefilter-time-limit`、`--uniqueness-time-limit` で調整できます。
 
-生成物は `depth_XX/<問題ID>/` に分類されます。`XX` はソルバー上の攻撃側手数深さです。各問題には局面情報 `problem.json`、代表手順 `answer.kifu`、完全応手DAG `strategy.json` が含まれます。`problem.json` の `quality.countermate_blunders` には相手側の詰みを許す誤答例が入ります。DAGは攻撃側の証明手、守備側の全合法応手、山札予約を含む全めくれ結果を保持し、同一局面をノードIDで共有します。めくれカードに対する oracle 予約は、DAG エッジの `oracle_reserve_card` に具体的なカード ID を保持します。既定上限に収まらず完全DAGを保存できない局面は採用されません。再現性を保つため、生成物内の SPN は伏せ予約カードを `?C<id>` 形式で保存します。通常の公開用 SPN における `?L<level>` と異なり、伏せ予約であることと実カードIDの両方を保持します。購入済みカードも `bought:[<id>,...]` にカードIDを保存します。
+生成物は `depth_XX/<問題ID>/` に分類されます。`XX` はソルバー上の攻撃側手数深さです。各問題には局面情報 `problem.json`、代表手順 `answer.kifu`、完全応手DAG `strategy.json` が含まれます。`problem.json` の `quality.countermate_blunders` には相手側の詰みを許す誤答例が入ります。DAGは攻撃側の証明手、守備側の全合法応手、山札予約を含む全めくれ結果を保持し、同一局面をノードIDで共有します。めくれカードに対する oracle 予約は、DAG エッジの `oracle_reserve_card` に具体的なカード ID を保持します。既定上限に収まらず完全DAGを保存できない局面は採用されません。再現性を保つため、生成物内の SPN は伏せ予約カードを `?C<id>` 形式で保存します。通常の公開用 SPN における `?L<level>` と異なり、伏せ予約であることと実カードIDの両方を保持します。購入済みカードは `bought:[<id>,...]`、取得済み貴族は player section の `nobles:[<id>,...]` に保存します。
 
 ## ドキュメント
 詳細な仕様は `doc/` ディレクトリを参照してください。

@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from csplendor.api.usi_kifu import now_iso, spn_to_game
+from csplendor.api.usi_kifu import game_to_spn, now_iso, spn_to_game
 
 from scripts.dfpn_mate_solver import principal_line_to_kifu_text, solve_reveal_verified_mate
 from scripts.mate_solver import MATE, SolverOptions
@@ -94,13 +94,14 @@ def convert_problem(
     overwrite: bool,
 ) -> Optional[Path]:
     source_problem = _load_json(problem_path)
-    position = str(source_problem["position"])
-    if "?L" in position:
+    source_position = str(source_problem["position"])
+    if "?L" in source_position:
         raise InexactHiddenPositionError(
             "SPN hidden reserved cards (?Lx) cannot be solved exactly; use explicit card ids"
         )
     puzzle_id = str(source_problem["id"])
-    game = spn_to_game(position)
+    game = spn_to_game(source_position)
+    position = game_to_spn(game, reveal_hidden_reserved_ids=True)
     attacker = int(source_problem.get("attacker", game.board.current_player))
     if attacker != int(game.board.current_player):
         raise ValueError(
