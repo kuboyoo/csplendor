@@ -54,6 +54,11 @@ struct RevealVerifiedProofNode {
   size_t id = 0;
   int player = -1;
   int depth = 0;
+  std::array<int, 2> scores = {0, 0};
+  int winner = -1;
+  bool waiting_noble = false;
+  std::vector<int> nobles;
+  std::array<std::vector<int>, 2> acquired_nobles;
   std::string kind = "state";
   std::string resolution;
   std::vector<RevealVerifiedProofEdge> children;
@@ -268,7 +273,8 @@ private:
   uint64_t required_root_action_ = UINT64_MAX;
   size_t proof_dag_edges_ = 0;
   std::unordered_map<DepthStateKey, size_t, DepthStateKeyHash> proof_node_ids_;
-  std::map<std::tuple<int, int, int>, size_t> proof_terminal_node_ids_;
+  std::unordered_map<DepthStateKey, size_t, DepthStateKeyHash>
+      proof_terminal_node_ids_;
   std::vector<RevealVerifiedProofNode> proof_nodes_;
   static constexpr size_t ATTACKER_TAKE_LIMIT = 6;
   static constexpr size_t ATTACKER_RESERVE_LIMIT = 3;
@@ -1228,8 +1234,7 @@ private:
   }
 
   size_t build_terminal_proof_node(const Game &game, int depth) {
-    const auto key =
-        std::make_tuple(game.current_player(), depth, game.winner());
+    const DepthStateKey key{state_key(game), depth};
     auto known = proof_terminal_node_ids_.find(key);
     if (known != proof_terminal_node_ids_.end())
       return known->second;
@@ -1237,8 +1242,7 @@ private:
       throw ProofDagBuildAborted("proof DAG node limit exceeded");
     const size_t id = proof_nodes_.size();
     proof_terminal_node_ids_[key] = id;
-    proof_nodes_.push_back(
-        RevealVerifiedProofNode{id, game.current_player(), depth});
+    proof_nodes_.push_back(make_proof_node(id, game, depth));
     proof_nodes_[id].kind = "terminal";
     proof_nodes_[id].resolution =
         game.winner() == attacker_ ? "attacker_win" : "non_attacker_win";
@@ -1250,8 +1254,7 @@ private:
     if (proof_dag_node_limit_ && proof_nodes_.size() >= proof_dag_node_limit_)
       throw ProofDagBuildAborted("proof DAG node limit exceeded");
     const size_t id = proof_nodes_.size();
-    proof_nodes_.push_back(
-        RevealVerifiedProofNode{id, game.current_player(), depth});
+    proof_nodes_.push_back(make_proof_node(id, game, depth));
     const int current_player = game.current_player();
     const std::vector<OrderedAction> actions = ordered_actions(game);
     bool proven = current_player != attacker_;
@@ -1340,8 +1343,7 @@ private:
 
     const size_t id = proof_nodes_.size();
     proof_node_ids_[key] = id;
-    proof_nodes_.push_back(
-        RevealVerifiedProofNode{id, game.current_player(), depth});
+    proof_nodes_.push_back(make_proof_node(id, game, depth));
     auto memo_it = memo_.find(key);
     if (memo_it == memo_.end() || memo_it->second.status != ForceStatus::PROVEN) {
       throw ProofDagBuildAborted("proof DAG references unmaterialized subtree");
@@ -1374,6 +1376,25 @@ private:
       });
     }
     return id;
+  }
+
+  static RevealVerifiedProofNode make_proof_node(size_t id, const Game &game,
+                                                 int depth) {
+    RevealVerifiedProofNode node;
+    node.id = id;
+    node.player = game.current_player();
+    node.depth = depth;
+    node.scores = {static_cast<int>(game.board.players[0].points),
+                   static_cast<int>(game.board.players[1].points)};
+    node.winner = game.winner();
+    node.waiting_noble = game.board.waiting_noble;
+    for (uint8_t noble_id : game.board.nobles)
+      node.nobles.push_back(static_cast<int>(noble_id));
+    for (int player = 0; player < Board::NUM_PLAYERS; ++player) {
+      for (uint8_t noble_id : game.board.players[player].acquired_nobles)
+        node.acquired_nobles[player].push_back(static_cast<int>(noble_id));
+    }
+    return node;
   }
 
   std::vector<RevealVerifiedLineEntry> principal_line() const {

@@ -488,6 +488,11 @@ PYBIND11_MODULE(_csplendor, m) {
           item["player"] = node.player;
           item["depth"] = node.depth;
           item["kind"] = node.kind;
+          item["scores"] = node.scores;
+          item["winner"] = node.winner;
+          item["waiting_noble"] = node.waiting_noble;
+          item["nobles"] = node.nobles;
+          item["acquired_nobles"] = node.acquired_nobles;
           item["resolution"] =
               node.resolution.empty() ? py::none() : py::cast(node.resolution);
           py::list children;

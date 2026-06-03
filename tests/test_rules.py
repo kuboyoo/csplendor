@@ -53,6 +53,37 @@ def test_noble_visit_is_automatic_or_requires_explicit_choice():
     assert player_after.points >= 3
 
 
+def test_trusted_action_code_applies_explicit_noble_choice_points():
+    game = Game(seed=5)
+    noble_ids = [int(noble_id) for noble_id in game.board.nobles[:2]]
+    requirements = [get_noble(noble_id).requirement for noble_id in noble_ids]
+
+    player = game.board.players[0]
+    player.bonuses = [
+        max(int(requirement[color]) for requirement in requirements)
+        for color in range(5)
+    ]
+    game.board.set_player(0, player)
+
+    regular_action = next(a for a in game.legal_actions if a.type == ActionType.TAKE_DIFFERENT)
+    assert game.apply_action_code_trusted(int(regular_action.pack()), False) is True
+    assert game.board.waiting_noble is True
+    assert game.current_player == 0
+
+    noble_action = next(
+        a for a in game.legal_actions
+        if a.type == ActionType.VISIT_NOBLE and int(a.noble_choice) == noble_ids[1]
+    )
+    assert game.apply_action_code_trusted(int(noble_action.pack()), False) is True
+
+    player_after = game.board.players[0]
+    assert game.board.waiting_noble is False
+    assert game.current_player == 1
+    assert int(player_after.points) == int(get_noble(noble_ids[1]).points)
+    assert noble_ids[1] in [int(n) for n in player_after.acquired_nobles]
+    assert noble_ids[1] not in [int(n) for n in game.board.nobles]
+
+
 def test_final_round_winner_by_points_after_both_players_move():
     game = Game(seed=9)
     player0 = game.board.players[0]

@@ -35,7 +35,7 @@ def test_oracle_reserve_proof_edges_keep_concrete_hidden_card_ids():
         depth=5,
         time_limit_seconds=30.0,
         include_proof_dag=True,
-        proof_dag_node_limit=10000,
+        proof_dag_node_limit=200000,
     )
 
     dag = result["proof_dag"]
@@ -47,5 +47,7 @@ def test_oracle_reserve_proof_edges_keep_concrete_hidden_card_ids():
     ]
     assert result["proven"] is True
     assert dag["complete"] is True
+    assert all("scores" in node for node in dag["nodes"])
+    assert all("winner" in node for node in dag["nodes"])
     assert oracle_reserves
     assert all(edge["oracle_reserve_card"] is not None for edge in oracle_reserves)

@@ -599,7 +599,7 @@ def test_reveal_verified_mate_emits_bounded_proof_dag():
         attacker=0,
         options=_fast_options(max_nodes=0, time_limit=30.0, include_proof=True),
         include_proof_dag=True,
-        proof_dag_node_limit=10000,
+        proof_dag_node_limit=100000,
     )
 
     dag = result.proof_tree["verification"]["proof_dag"]
@@ -607,13 +607,21 @@ def test_reveal_verified_mate_emits_bounded_proof_dag():
     assert dag["format"] == "strategy_dag_v1"
     assert dag["complete"] is True
     assert dag["root"] == 0
-    assert 1 < len(dag["nodes"]) <= 10000
+    assert 1 < len(dag["nodes"]) <= 100000
     assert any(node["children"] for node in dag["nodes"])
     assert not any(
         node["resolution"] == "final_round_proof_summary"
         for node in dag["nodes"]
     )
-    assert any(node["kind"] == "terminal" for node in dag["nodes"])
+    assert all("scores" in node for node in dag["nodes"])
+    assert all("winner" in node for node in dag["nodes"])
+    assert all("waiting_noble" in node for node in dag["nodes"])
+    assert all("nobles" in node for node in dag["nodes"])
+    assert all("acquired_nobles" in node for node in dag["nodes"])
+    terminal_nodes = [node for node in dag["nodes"] if node["kind"] == "terminal"]
+    assert terminal_nodes
+    assert all(node["winner"] == 0 for node in terminal_nodes)
+    assert all(node["scores"][0] >= 15 for node in terminal_nodes)
 
 
 @pytest.mark.parametrize(
