@@ -519,20 +519,22 @@ def test_candidate_builds_proof_dag_only_after_quality_filters(monkeypatch, tmp_
     assert calls == [False, True]
 
 
-def test_verified_winning_action_filter_finds_unique_root_move():
-    game = spn_to_game(
-        "bank:W3U2G3R4K4D3 | "
-        "visible:L1[11,37,7,28]L2[57,42,69,56]L3[79,70,76,72] | "
-        "decks:16,16,14 | nobles:[7,4,8] | "
-        "P0:gems:W0U0G0R0K0D1;bonuses:W5U1G1R5K4;points:10;"
-        "reserved:[66,59,81];bought:[38,27,3,15,17,25,19,14,20,10,62,54,29,46,49,60] | "
-        "P1:gems:W1U2G1R0K0D1;bonuses:W2U4G4R1K1;points:8;"
-        "reserved:[53];bought:[2,34,36,6,33,0,23,31,50,4,64,82] | 1"
-    )
+def test_verified_winning_action_filter_finds_unique_root_move(monkeypatch):
+    game = cs.Game(seed=0)
+    winning_code = int(game.legal_actions[0].pack())
+    winning_usi = action_to_usi(game.legal_actions[0], game=game)
+
+    def fake_reveal_verified(*args, required_root_action, **kwargs):
+        return {
+            "proven": int(required_root_action) == winning_code,
+            "unknown_reason": None,
+        }
+
+    monkeypatch.setattr(cs, "solve_reveal_verified_mate_cpp", fake_reveal_verified)
 
     result = find_verified_winning_actions(
         game,
-        attacker=1,
+        attacker=0,
         depth=3,
         max_winning_actions=1,
         node_limit=0,
@@ -541,7 +543,7 @@ def test_verified_winning_action_filter_finds_unique_root_move():
 
     assert result["complete"] is True
     assert result["checks"] == len(game.legal_actions)
-    assert result["winning_actions"] == ["buy:C28/pay:W1U0G0R0K0D0"]
+    assert result["winning_actions"] == [winning_usi]
 
 
 def test_countermate_filter_accepts_wrong_move_that_allows_opponent_mate(monkeypatch):

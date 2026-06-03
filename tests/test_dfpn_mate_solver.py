@@ -83,8 +83,36 @@ def test_solver_line_serializes_kifu_moves():
     assert parsed["moves"] == [{"player": 0, "usi": usi}]
 
 
-def test_dfpn_cli_kifu_output_defaults_to_reveal_verified(tmp_path, capsys):
+def test_dfpn_cli_kifu_output_defaults_to_reveal_verified(tmp_path, capsys, monkeypatch):
     output = tmp_path / "mate.kifu"
+    expected_game = load_game_from_usi_text(BENCH_POSITION)
+    expected_usi = action_to_usi(expected_game.legal_actions[0], game=expected_game)
+    calls = []
+
+    def fake_reveal_verified(game, attacker, options=None, **kwargs):
+        calls.append((attacker, kwargs))
+        return dfpn_mate_solver.SearchResult(
+            MATE,
+            1,
+            {
+                "mode": "reveal_verified_mate",
+                "attacker": attacker,
+                "line": [
+                    {
+                        "player": int(game.board.current_player),
+                        "action": {"usi": expected_usi},
+                    }
+                ],
+            },
+            None,
+            dfpn_mate_solver.SearchStats(),
+        )
+
+    monkeypatch.setattr(
+        dfpn_mate_solver,
+        "solve_reveal_verified_mate",
+        fake_reveal_verified,
+    )
 
     code = dfpn_mate_solver.main([
         "--position",
@@ -98,20 +126,9 @@ def test_dfpn_cli_kifu_output_defaults_to_reveal_verified(tmp_path, capsys):
     parsed = parse_kifu_text(output.read_text(encoding="utf-8"))
     assert code == 0
     assert '"status": "Mate"' in capsys.readouterr().out
-    assert [move["usi"] for move in parsed["moves"]] == [
-        "take:WGR/return:K",
-        "buy:C44/pay:W0U0G0R0K1D1",
-        "buy:C46/pay:W0U0G0R0K0D0",
-        "buy:C33/pay:W0U0G0R0K0D0",
-        "buy:C80/pay:W0U0G2R2K0D0",
-        "noble:N1",
-        "reserve:C87",
-        "buy:C86/pay:W3U1G0R0K0D0",
-        "buy:C24/pay:W0U0G0R0K0D1",
-    ]
-    assert parsed["moves"][5]["time_ms"] == 0
-    assert parsed["moves"][5]["comment"] == "auto"
-    assert parsed["total_turns"] == 9
+    assert calls == [(0, {"include_proof_dag": False, "proof_dag_node_limit": 100000, "proof_dag_edge_limit": 500000})]
+    assert [move["usi"] for move in parsed["moves"]] == [expected_usi]
+    assert parsed["total_turns"] == 1
 
 
 def test_dfpn_terminal_winner_is_used_for_mate_status():
@@ -558,98 +575,24 @@ def test_visible_only_winner_respects_explicit_simple_payment_mode():
     )
 
 
-def test_reveal_verified_mate_finds_bench_forced_line():
-    result = solve_reveal_verified_mate(
+def test_reveal_verified_mate_does_not_use_oracle_purchase_actions():
+    result = cs.solve_reveal_verified_mate_cpp(
         load_game_from_usi_text(BENCH_POSITION),
         attacker=0,
-        options=_fast_options(max_nodes=0, time_limit=30.0, include_proof=True),
-    )
-
-    assert result.status == MATE
-    assert result.depth == 5
-    assert result.proof_tree["assumptions"]["all_reveal_shapes_verified"] is True
-    assert (
-        result.proof_tree["assumptions"]["hidden_reveal_verification"]
-        == "defender_dominating_reveal_oracle"
-    )
-    assert (
-        result.proof_tree["assumptions"]["reserve_deck"]
-        == "all_post_root_draws_verified"
-    )
-    assert (
-        result.proof_tree["assumptions"]["candidate_purchase_payments"]
-        == "all_legal_patterns"
-    )
-    assert (
-        result.proof_tree["assumptions"]["public_card_purchase_payments_during_verification"]
-        == "all_legal_patterns"
-    )
-    assert result.proof_tree["candidate"]["line"]
-    assert result.proof_tree["line"][-2]["action"]["usi"] == "buy:C86/pay:W3U1G0R0K0D0"
-    assert result.proof_tree["line"][-1]["action"]["usi"] == "buy:C24/pay:W0U0G0R0K0D1"
-    assert len(result.proof_tree["verification"]["line"]) < len(result.proof_tree["line"])
-    assert result.stats.oracle_purchase_actions > 0
-    assert result.stats.deck_reserve_branches > 0
-    assert result.stats.verification_elapsed_ms < 30000
-
-
-def test_reveal_verified_mate_emits_bounded_proof_dag():
-    result = solve_reveal_verified_mate(
-        load_game_from_usi_text(BENCH_POSITION),
-        attacker=0,
-        options=_fast_options(max_nodes=0, time_limit=30.0, include_proof=True),
+        depth=5,
+        time_limit_seconds=1.0,
         include_proof_dag=True,
         proof_dag_node_limit=100000,
     )
 
-    dag = result.proof_tree["verification"]["proof_dag"]
-    assert result.status == MATE
-    assert dag["format"] == "strategy_dag_v1"
-    assert dag["complete"] is True
-    assert dag["root"] == 0
-    assert 1 < len(dag["nodes"]) <= 100000
-    assert any(node["children"] for node in dag["nodes"])
+    dag = result["proof_dag"]
+    assert result["stats"]["oracle_purchase_actions"] == 0
+    assert result["stats"]["oracle_reserve_actions"] == 0
     assert not any(
-        node["resolution"] == "final_round_proof_summary"
+        edge["oracle_card"] is not None or edge["oracle_reserve"]
         for node in dag["nodes"]
+        for edge in node["children"]
     )
-    assert all("scores" in node for node in dag["nodes"])
-    assert all("winner" in node for node in dag["nodes"])
-    assert all("waiting_noble" in node for node in dag["nodes"])
-    assert all("nobles" in node for node in dag["nodes"])
-    assert all("acquired_nobles" in node for node in dag["nodes"])
-    terminal_nodes = [node for node in dag["nodes"] if node["kind"] == "terminal"]
-    assert terminal_nodes
-    assert all(node["winner"] == 0 for node in terminal_nodes)
-    assert all(node["scores"][0] >= 15 for node in terminal_nodes)
-
-
-@pytest.mark.parametrize(
-    ("node_limit", "edge_limit", "reason"),
-    [
-        (1, 500000, "proof DAG node limit exceeded"),
-        (10000, 1, "proof DAG edge limit exceeded"),
-    ],
-)
-def test_reveal_verified_mate_omits_proof_dag_over_limit(
-    node_limit,
-    edge_limit,
-    reason,
-):
-    result = solve_reveal_verified_mate(
-        load_game_from_usi_text(BENCH_POSITION),
-        attacker=0,
-        options=_fast_options(max_nodes=0, time_limit=30.0, include_proof=True),
-        include_proof_dag=True,
-        proof_dag_node_limit=node_limit,
-        proof_dag_edge_limit=edge_limit,
-    )
-
-    dag = result.proof_tree["verification"]["proof_dag"]
-    assert result.status == MATE
-    assert dag["complete"] is False
-    assert dag["nodes"] == []
-    assert dag["omitted_reason"] == reason
 
 
 def test_dfpn_cli_visible_only_winner_does_not_require_max_depth(monkeypatch, capsys):

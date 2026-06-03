@@ -3171,7 +3171,8 @@ def solve_reveal_verified_mate(
         proof_dag["semantics"] = {
             "attacker_nodes": "one_proven_action_with_all_nondeterministic_outcomes",
             "defender_nodes": "all_legal_actions_with_all_nondeterministic_outcomes",
-            "oracle_reserve_card": "concrete_initially_hidden_card_id",
+            "reveal_card": "concrete_card_id_revealed_by_purchase_or_reserve",
+            "oracle_fields": "deprecated_and_always_empty_for_legal_strategy_dag",
             "shared_states": "referenced_by_node_id",
             "resolved_leaves": "terminal_results_after_expanded_final_round_responses",
         }
@@ -3184,19 +3185,19 @@ def solve_reveal_verified_mate(
             "hidden_decks_ignored_during_candidate_search": True,
             "all_defender_responses_verified": True,
             "all_reveal_shapes_verified": True,
-            "hidden_reveal_verification": "defender_dominating_reveal_oracle",
-            "reveal_identity_abstraction": "level_and_reveal_timing_preserved",
             "reserve_deck": "all_post_root_draws_verified",
             "attacker_candidate_policy": "heuristic_subset_for_bounded_proof",
             "candidate_purchase_payments": candidate_tree["assumptions"][
                 "purchase_payments"
             ],
+            "hidden_reveal_verification": "explicit_legal_reveal_branching",
+            "reveal_identity_abstraction": "concrete_card_id_preserved_in_strategy_dag",
             "public_card_purchase_payments_during_verification": (
                 "canonical_minimal_gold_only"
                 if bool(game.simple_payment_mode)
                 else "all_legal_patterns"
             ),
-            "hidden_card_purchase_payments_during_verification": "all_legal_patterns",
+            "hidden_card_purchase_payments_during_verification": "reserved_cards_only",
         },
         "candidate": {
             "mode": "visible_only_winner",

@@ -389,18 +389,13 @@ private:
   template <typename Visitor>
   bool for_each_outcome(Game &game, const OrderedAction &ordered,
                         Visitor visitor) {
-    if (ordered.oracle_card >= 0 || ordered.oracle_reserve) {
-      const Board previous = game.board;
-      if (!apply_oracle_action(game, ordered))
-        return false;
-      const bool keep_going = visitor(-1);
-      game.board = previous;
-      return keep_going;
-    }
-
     const Action action = Action::unpack(ordered.code);
     if (action.type == RESERVE_DECK)
       return for_each_deck_reserve_outcome(game, action, visitor);
+
+    const int level = visible_refill_level(action);
+    if (level >= 0 && !game.board.decks[level].empty())
+      return for_each_visible_refill_outcome(game, action, visitor);
 
     const Board previous = game.board;
     if (!game.apply_trusted(action, false))
@@ -412,6 +407,31 @@ private:
 
   static bool is_replayable(const OrderedAction &ordered) {
     return ordered.oracle_card < 0 && !ordered.oracle_reserve;
+  }
+
+  template <typename Visitor>
+  bool for_each_visible_refill_outcome(Game &game, const Action &action,
+                                       Visitor visitor) {
+    const int level = visible_refill_level(action);
+    const int slot = visible_refill_slot(game.board, action);
+    if (level < 0 || level >= 3 || slot < 0 ||
+        game.board.decks[level].empty())
+      return false;
+    const std::vector<int> cards = visible_refill_cards(game, level);
+    if (cards.empty())
+      return false;
+    const Board previous = game.board;
+    for (int card_id : cards) {
+      game.board = previous;
+      if (!apply_visible_refill_outcome(game, action, level, slot, card_id))
+        continue;
+      if (!visitor(card_id)) {
+        game.board = previous;
+        return false;
+      }
+    }
+    game.board = previous;
+    return true;
   }
 
   template <typename Visitor>
@@ -451,6 +471,62 @@ private:
     return cards;
   }
 
+  std::vector<int> visible_refill_cards(const Game &game, int level) const {
+    std::vector<int> cards;
+    if (level < 0 || level >= 3 || game.board.decks[level].empty())
+      return cards;
+    for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
+      const Card &card = get_card(card_id);
+      if (card.level - 1 == level && is_initial_hidden_card(card_id) &&
+          !has_hidden_card_claimed(game.board, card_id))
+        cards.push_back(card_id);
+    }
+    return cards;
+  }
+
+  static int visible_refill_slot(const Board &board, const Action &action) {
+    if (action.type != RESERVE_VISIBLE &&
+        !(action.type == PURCHASE && !action.from_reserved))
+      return -1;
+    for (int level = 0; level < 3; ++level) {
+      for (int slot = 0; slot < Board::CARDS_PER_LEVEL; ++slot) {
+        if (board.visible[level][slot] == action.card_id)
+          return slot;
+      }
+    }
+    return -1;
+  }
+
+  static bool remove_card_from_deck(Board &board, int level, int card_id) {
+    if (level < 0 || level >= 3)
+      return false;
+    auto &deck = board.decks[level];
+    const auto it =
+        std::find(deck.begin(), deck.end(), static_cast<uint8_t>(card_id));
+    if (it == deck.end())
+      return false;
+    deck.erase(it);
+    return true;
+  }
+
+  static bool apply_visible_refill_outcome(Game &game, const Action &action,
+                                           int level, int slot, int card_id) {
+    if (!is_valid_card_id(card_id) || get_card(card_id).level - 1 != level ||
+        slot < 0 || slot >= Board::CARDS_PER_LEVEL ||
+        !remove_card_from_deck(game.board, level, card_id))
+      return false;
+    game.board.decks[level].push_back(static_cast<uint8_t>(card_id));
+    const bool previous_blank_refill = game.blank_refill_mode;
+    game.blank_refill_mode = false;
+    const bool applied = game.apply_trusted(action, false);
+    game.blank_refill_mode = previous_blank_refill;
+    if (!applied)
+      return false;
+    if (game.board.visible[level][slot] != card_id)
+      return false;
+    return true;
+  }
+
   static bool apply_deck_reserve_outcome(Game &game, const Action &action,
                                          int card_id) {
     Board &board = game.board;
@@ -480,7 +556,7 @@ private:
       board.bank[color] += action.return_gems[color];
     }
     player.sync_packed();
-    end_oracle_turn(board);
+    end_reveal_branch_turn(board);
     return true;
   }
 
@@ -521,22 +597,20 @@ private:
     Entry representative;
     representative.action_count = actions.size();
     for (const OrderedAction &ordered : actions) {
-      const Action action = Action::unpack(ordered.code);
       const Board previous = game.board;
-      const int level = visible_refill_level(action);
-      const int reveal_card =
-          level >= 0 && !game.board.decks[level].empty()
-              ? static_cast<int>(game.board.decks[level].back())
-              : -1;
-      if (level >= 0 && !game.board.decks[level].empty())
-        stats_.final_round_reveal_collapses +=
-            game.board.decks[level].size() - 1;
-      if (!game.apply_trusted(action, false))
-        continue;
-      const ForceStatus child = game.board.waiting_noble
-                                    ? resolve_final_round_noble(game)
-                                    : terminal_status(game);
+      ForceStatus child = ForceStatus::UNKNOWN;
+      int reveal_card = -1;
+      bool applied = false;
+      const bool completed = for_each_outcome(game, ordered, [&](int reveal) {
+        reveal_card = reveal;
+        child = game.board.waiting_noble ? resolve_final_round_noble(game)
+                                         : terminal_status(game);
+        applied = true;
+        return false;
+      });
       game.board = previous;
+      if (!completed && !applied)
+        continue;
 
       if (!representative.has_action) {
         representative =
@@ -609,7 +683,6 @@ private:
   bool resolve_final_round_direct(const Game &game, ForceStatus &status) const {
     const Board &board = game.board;
     const PlayerState &player = board.players[1];
-    const bool allow_oracle = attacker_ != 1;
     bool has_action = false;
     bool has_player0_only_outcomes = true;
     bool has_player1_win = false;
@@ -620,7 +693,7 @@ private:
       has_player1_win = has_player1_win || winner == 1;
     };
 
-    if (has_nonpurchase_action(board, allow_oracle)) {
+    if (has_nonpurchase_action(board)) {
       consider(static_cast<int>(player.points) +
                    max_noble_points(board, player.bonuses),
                player.purchased_count);
@@ -631,14 +704,6 @@ private:
     }
     for (int slot = 0; slot < Board::MAX_RESERVED; ++slot)
       consider_purchase(board, player, player.reserved[slot], consider);
-    if (allow_oracle) {
-      for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
-        if (is_initial_hidden_card(card_id) &&
-            !has_hidden_card_claimed(board, card_id) &&
-            has_blank_slot_at_level(board, get_card(card_id).level - 1))
-          consider_purchase(board, player, card_id, consider);
-      }
-    }
 
     if (!has_action)
       return false;
@@ -664,9 +729,7 @@ private:
             player.purchased_count + 1);
   }
 
-  static bool has_nonpurchase_action(const Board &board, bool allow_oracle) {
-    if (allow_oracle && has_blank_slot(board))
-      return true;
+  static bool has_nonpurchase_action(const Board &board) {
     for (int color = 0; color < 5; ++color) {
       if (board.bank[color] > 0)
         return true;
@@ -678,22 +741,6 @@ private:
         if (is_valid_card_id(board.visible[level][slot]))
           return true;
       }
-    }
-    return false;
-  }
-
-  static bool has_blank_slot(const Board &board) {
-    for (int level = 0; level < 3; ++level) {
-      if (has_blank_slot_at_level(board, level))
-        return true;
-    }
-    return false;
-  }
-
-  static bool has_blank_slot_at_level(const Board &board, int level) {
-    for (int slot = 0; slot < Board::CARDS_PER_LEVEL; ++slot) {
-      if (!is_valid_card_id(board.visible[level][slot]))
-        return true;
     }
     return false;
   }
@@ -741,8 +788,6 @@ private:
 
   std::vector<OrderedAction> ordered_actions(const Game &game) {
     std::vector<OrderedAction> actions = ordinary_ordered_actions(game);
-    if (game.current_player() != attacker_ && !game.board.waiting_noble)
-      add_oracle_actions(game, actions);
     std::sort(actions.begin(), actions.end());
     return actions;
   }
@@ -757,160 +802,7 @@ private:
     return actions;
   }
 
-  void add_oracle_actions(const Game &game,
-                          std::vector<OrderedAction> &actions) {
-    const PlayerState &player = game.board.players[game.current_player()];
-    for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
-      if (!is_initial_hidden_card(card_id) ||
-          has_hidden_card_claimed(game.board, card_id) ||
-          !has_blank_slot_at_level(game.board, get_card(card_id).level - 1))
-        continue;
-      const Card &card = get_card(card_id);
-      if (!player.can_afford(card))
-        continue;
-      std::array<int, 5> effective_cost = {0};
-      for (int color = 0; color < 5; ++color) {
-        effective_cost[color] =
-            std::max(0, static_cast<int>(card.cost[color]) -
-                            static_cast<int>(player.bonuses[color]));
-      }
-      add_oracle_purchase_actions(player, card, effective_cost, 0, 0, {},
-                                  actions);
-    }
-    if (player.can_reserve()) {
-      for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
-        if (!is_initial_hidden_card(card_id) ||
-            has_hidden_card_claimed(game.board, card_id) ||
-            !has_blank_slot_at_level(game.board, get_card(card_id).level - 1))
-          continue;
-        const int total_gems = player.total_gems();
-        if (game.board.bank[GOLD] == 0 || total_gems < Board::MAX_TOKENS) {
-          add_oracle_reserve_action(card_id, -1, actions);
-        } else {
-          for (int color = 0; color < 6; ++color) {
-            if (player.gems[color] > 0 || color == GOLD)
-              add_oracle_reserve_action(card_id, color, actions);
-          }
-        }
-      }
-    }
-  }
-
-  void add_oracle_reserve_action(int card_id, int return_color,
-                                 std::vector<OrderedAction> &actions) {
-    OrderedAction action;
-    action.rank = 1;
-    action.oracle_reserve = true;
-    action.oracle_reserve_card = card_id;
-    action.oracle_return_color = return_color;
-    actions.push_back(action);
-    ++stats_.oracle_reserve_actions;
-  }
-
-  void add_oracle_purchase_actions(
-      const PlayerState &player, const Card &card,
-      const std::array<int, 5> &effective_cost, int color, int gold_used,
-      std::array<uint8_t, 5> gold_as, std::vector<OrderedAction> &actions) {
-    if (color == 5) {
-      OrderedAction action;
-      action.rank = 0;
-      action.neg_points = -static_cast<int>(card.points);
-      action.oracle_card = card.id;
-      action.oracle_gold_as = gold_as;
-      actions.push_back(action);
-      ++stats_.oracle_purchase_actions;
-      return;
-    }
-    const int min_gold =
-        std::max(0, effective_cost[color] - static_cast<int>(player.gems[color]));
-    const int max_gold =
-        std::min(effective_cost[color],
-                 static_cast<int>(player.gems[GOLD]) - gold_used);
-    for (int amount = min_gold; amount <= max_gold; ++amount) {
-      gold_as[color] = amount;
-      add_oracle_purchase_actions(player, card, effective_cost, color + 1,
-                                  gold_used + amount, gold_as, actions);
-    }
-  }
-
-  bool apply_oracle_action(Game &game, const OrderedAction &ordered) const {
-    Board &board = game.board;
-    if (board.is_game_over() || board.waiting_noble ||
-        board.current_player >= Board::NUM_PLAYERS)
-      return false;
-    board.invalidate_hash();
-    PlayerState &player = board.players[board.current_player];
-    if (ordered.oracle_card >= 0) {
-      const Card &card = get_card(ordered.oracle_card);
-      if (!player.can_afford(card))
-        return false;
-      int gold_used = 0;
-      for (int color = 0; color < 5; ++color) {
-        const int cost =
-            std::max(0, static_cast<int>(card.cost[color]) -
-                            static_cast<int>(player.bonuses[color]));
-        const int from_gold = ordered.oracle_gold_as[color];
-        const int from_gems = cost - from_gold;
-        if (from_gold > cost || from_gems > player.gems[color])
-          return false;
-        player.gems[color] -= from_gems;
-        board.bank[color] += from_gems;
-        gold_used += from_gold;
-      }
-      if (gold_used > player.gems[GOLD])
-        return false;
-      player.gems[GOLD] -= gold_used;
-      board.bank[GOLD] += gold_used;
-      player.purchased_cards.push_back(card.id);
-      ++player.purchased_count;
-      ++player.bonuses[card.bonus];
-      player.points += card.points;
-      player.sync_packed();
-    } else if (ordered.oracle_reserve) {
-      if (!player.can_reserve() ||
-          !is_valid_card_id(ordered.oracle_reserve_card) ||
-          !is_initial_hidden_card(ordered.oracle_reserve_card) ||
-          has_hidden_card_claimed(board, ordered.oracle_reserve_card) ||
-          !has_blank_slot_at_level(
-              board, get_card(ordered.oracle_reserve_card).level - 1))
-        return false;
-      player.reserved_is_hidden[player.reserved_count] = true;
-      player.reserved[player.reserved_count++] = ordered.oracle_reserve_card;
-      if (board.bank[GOLD] > 0) {
-        --board.bank[GOLD];
-        ++player.gems[GOLD];
-        if (ordered.oracle_return_color >= 0) {
-          if (player.gems[ordered.oracle_return_color] == 0)
-            return false;
-          --player.gems[ordered.oracle_return_color];
-          ++board.bank[ordered.oracle_return_color];
-        }
-      }
-      player.sync_packed();
-    } else {
-      return false;
-    }
-
-    const auto eligible =
-        MoveGenerator::get_eligible_nobles_fixed(board, board.current_player);
-    if (eligible.size() > 1) {
-      board.waiting_noble = true;
-      return true;
-    }
-    if (eligible.size() == 1)
-      acquire_noble(board, eligible[0]);
-    end_oracle_turn(board);
-    return true;
-  }
-
-  static void acquire_noble(Board &board, int noble_id) {
-    PlayerState &player = board.players[board.current_player];
-    player.points += get_noble(noble_id).points;
-    player.acquired_nobles.push_back(noble_id);
-    board.nobles.remove(noble_id);
-  }
-
-  static void end_oracle_turn(Board &board) {
+  static void end_reveal_branch_turn(Board &board) {
     if (!board.final_round && board.players[board.current_player].points >= 15)
       board.final_round = true;
     board.current_player = 1 - board.current_player;
@@ -950,6 +842,12 @@ private:
   static bool has_hidden_card_claimed(const Board &board, int card_id) {
     if (has_hidden_card_acquired(board, card_id))
       return true;
+    for (int level = 0; level < 3; ++level) {
+      for (int slot = 0; slot < Board::CARDS_PER_LEVEL; ++slot) {
+        if (board.visible[level][slot] == card_id)
+          return true;
+      }
+    }
     for (int player = 0; player < Board::NUM_PLAYERS; ++player) {
       for (int slot = 0; slot < Board::MAX_RESERVED; ++slot) {
         if (board.players[player].reserved[slot] == card_id)

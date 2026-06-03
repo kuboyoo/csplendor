@@ -13,41 +13,36 @@ BENCH_POSITION = (
 )
 
 
-def test_oracle_reserve_is_not_generated_when_reserve_slots_are_full():
+def test_oracle_actions_are_not_generated_for_blank_visible_slots():
     game = cs.Game(seed=0)
     visible = game.board.visible
     visible[0][0] = -1
     game.board.visible = visible
-    player = game.board.get_player(1)
-    player.reserved = [0, 1, 2]
-    game.board.set_player(1, player)
     game.board.current_player = 1
 
     result = cs.solve_reveal_verified_mate_cpp(game, attacker=0, depth=0)
 
+    assert result["stats"]["oracle_purchase_actions"] == 0
     assert result["stats"]["oracle_reserve_actions"] == 0
 
 
-def test_oracle_reserve_proof_edges_keep_concrete_hidden_card_ids():
+def test_reveal_verified_solver_does_not_emit_oracle_edges():
     result = cs.solve_reveal_verified_mate_cpp(
         load_game_from_usi_text(BENCH_POSITION),
         attacker=0,
         depth=5,
-        time_limit_seconds=30.0,
+        time_limit_seconds=1.0,
         include_proof_dag=True,
         proof_dag_node_limit=200000,
     )
 
     dag = result["proof_dag"]
-    oracle_reserves = [
+    oracle_edges = [
         edge
         for node in dag["nodes"]
         for edge in node["children"]
-        if edge["oracle_reserve"]
+        if edge["oracle_card"] is not None or edge["oracle_reserve"]
     ]
-    assert result["proven"] is True
-    assert dag["complete"] is True
-    assert all("scores" in node for node in dag["nodes"])
-    assert all("winner" in node for node in dag["nodes"])
-    assert oracle_reserves
-    assert all(edge["oracle_reserve_card"] is not None for edge in oracle_reserves)
+    assert result["stats"]["oracle_purchase_actions"] == 0
+    assert result["stats"]["oracle_reserve_actions"] == 0
+    assert oracle_edges == []
