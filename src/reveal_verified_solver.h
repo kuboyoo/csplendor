@@ -418,7 +418,8 @@ private:
     if (level < 0 || level >= 3 || slot < 0 ||
         game.board.decks[level].empty())
       return false;
-    const std::vector<int> cards = visible_refill_cards(game, level);
+    const std::vector<int> cards =
+        visible_refill_cards(game, action, level, slot);
     if (cards.empty())
       return false;
     const Board previous = game.board;
@@ -543,7 +544,8 @@ private:
            gap * 100 + static_cast<int>(card.bonus);
   }
 
-  std::vector<int> visible_refill_cards(const Game &game, int level) const {
+  std::vector<int> visible_refill_cards(const Game &game, const Action &action,
+                                        int level, int slot) const {
     std::vector<int> cards;
     if (level < 0 || level >= 3 || game.board.decks[level].empty())
       return cards;
@@ -553,7 +555,66 @@ private:
           seen.insert(card_equivalence_key(card_id)).second)
         cards.push_back(static_cast<int>(card_id));
     }
+    order_visible_refill_cards_by_blank_probe(game, action, level, slot, cards);
     return cards;
+  }
+
+  void order_visible_refill_cards_by_blank_probe(const Game &game,
+                                                 const Action &action,
+                                                 int level, int slot,
+                                                 std::vector<int> &cards) const {
+    if (cards.size() <= 1)
+      return;
+    Game blank = game.clone_light();
+    if (!apply_visible_refill_blank_outcome(blank, action, level, slot))
+      return;
+    std::sort(cards.begin(), cards.end(), [&](int left, int right) {
+      const int left_score = reveal_counterexample_score(blank, level, left);
+      const int right_score = reveal_counterexample_score(blank, level, right);
+      if (left_score != right_score)
+        return left_score > right_score;
+      return left < right;
+    });
+  }
+
+  static bool apply_visible_refill_blank_outcome(Game &game,
+                                                 const Action &action,
+                                                 int level, int slot) {
+    if (level < 0 || level >= 3 || slot < 0 ||
+        slot >= Board::CARDS_PER_LEVEL || game.board.decks[level].empty())
+      return false;
+    const bool previous_blank_refill = game.blank_refill_mode;
+    game.blank_refill_mode = true;
+    const bool applied = game.apply_trusted(action, false);
+    game.blank_refill_mode = previous_blank_refill;
+    return applied && game.board.visible[level][slot] == -1;
+  }
+
+  static int reveal_counterexample_score(const Game &blank, int level,
+                                         int card_id) {
+    if (!is_valid_card_id(card_id))
+      return 0;
+    const Board &board = blank.board;
+    if (board.is_game_over() || board.waiting_noble ||
+        board.current_player >= Board::NUM_PLAYERS)
+      return 0;
+    const PlayerState &player = board.players[board.current_player];
+    const Card &card = get_card(card_id);
+    int score = static_cast<int>(card.points) * 10000 +
+                static_cast<int>(card.bonus) * 100;
+    if (player.can_afford(card)) {
+      std::array<uint8_t, 5> bonuses = player.bonuses;
+      ++bonuses[card.bonus];
+      const int noble_points = max_noble_points(board, bonuses);
+      score += 100000 + noble_points * 1000;
+      if (static_cast<int>(player.points) + static_cast<int>(card.points) +
+              noble_points >=
+          15)
+        score += 1000000;
+    }
+    if (player.can_reserve())
+      score += level * 1000 + static_cast<int>(card.points) * 500;
+    return score;
   }
 
   static int visible_refill_slot(const Board &board, const Action &action) {
@@ -671,19 +732,14 @@ private:
     representative.action_count = actions.size();
     for (const OrderedAction &ordered : actions) {
       const Board previous = game.board;
-      ForceStatus child = ForceStatus::UNKNOWN;
-      int reveal_card = -1;
-      bool applied = false;
-      const bool completed = for_each_outcome(game, ordered, [&](int reveal) {
-        reveal_card = reveal;
-        child = game.board.waiting_noble ? resolve_final_round_noble(game)
-                                         : terminal_status(game);
-        applied = true;
-        return false;
-      });
-      game.board = previous;
-      if (!completed && !applied)
+      const Action action = Action::unpack(ordered.code);
+      const int reveal_card = final_round_representative_reveal(game, action);
+      if (!game.apply_trusted(action, false))
         continue;
+      const ForceStatus child = game.board.waiting_noble
+                                    ? resolve_final_round_noble(game)
+                                    : terminal_status(game);
+      game.board = previous;
 
       if (!representative.has_action) {
         representative =
@@ -726,6 +782,19 @@ private:
     return has_unknown ? ForceStatus::UNKNOWN
                        : current_player == attacker_ ? ForceStatus::REFUTED
                                                      : ForceStatus::PROVEN;
+  }
+
+  static int final_round_representative_reveal(const Game &game,
+                                               const Action &action) {
+    if (action.type == RESERVE_DECK) {
+      const int level = action.deck_level;
+      if (level >= 0 && level < 3 && !game.board.decks[level].empty())
+        return static_cast<int>(game.board.decks[level].back());
+    }
+    const int level = visible_refill_level(action);
+    if (level >= 0 && !game.board.decks[level].empty())
+      return static_cast<int>(game.board.decks[level].back());
+    return -1;
   }
 
   ForceStatus terminal_status(const Game &game) {
