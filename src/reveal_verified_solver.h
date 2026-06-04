@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <iterator>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -437,7 +438,7 @@ private:
   template <typename Visitor>
   bool for_each_deck_reserve_outcome(Game &game, const Action &action,
                                      Visitor visitor) {
-    const std::vector<int> cards = deck_reserve_cards(game, action.deck_level);
+    const std::vector<int> cards = deck_reserve_cards(game, action);
     stats_.deck_reserve_candidates += cards.size();
     if (cards.empty())
       return false;
@@ -456,30 +457,101 @@ private:
     return true;
   }
 
-  std::vector<int> deck_reserve_cards(const Game &game, int level) const {
+  struct CardEquivalenceKey {
+    int level = 0;
+    int points = 0;
+    int bonus = 0;
+    std::array<uint8_t, 5> cost = {0};
+
+    bool operator<(const CardEquivalenceKey &other) const {
+      if (level != other.level)
+        return level < other.level;
+      if (points != other.points)
+        return points < other.points;
+      if (bonus != other.bonus)
+        return bonus < other.bonus;
+      return cost < other.cost;
+    }
+  };
+
+  static CardEquivalenceKey card_equivalence_key(int card_id) {
+    const Card &card = get_card(card_id);
+    return CardEquivalenceKey{card.level, card.points, card.bonus, card.cost};
+  }
+
+  std::vector<int> deck_reserve_cards(const Game &game,
+                                      const Action &action) const {
+    const int level = action.deck_level;
     std::vector<int> cards;
     if (level < 0 || level >= 3 || game.board.decks[level].empty())
       return cards;
-    // Blank refills erase card identity, so conservatively branch over every
-    // unclaimed initial hidden card of the requested level.
-    for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
-      const Card &card = get_card(card_id);
-      if (card.level - 1 == level && is_initial_hidden_card(card_id) &&
-          !has_hidden_card_claimed(game.board, card_id))
-        cards.push_back(card_id);
+    std::set<CardEquivalenceKey> seen;
+    for (uint8_t card_id : game.board.decks[level]) {
+      if (!has_hidden_card_claimed(game.board, card_id) &&
+          seen.insert(card_equivalence_key(card_id)).second)
+        cards.push_back(static_cast<int>(card_id));
+    }
+    if (game.current_player() != attacker_) {
+      std::sort(cards.begin(), cards.end(), [&](int left, int right) {
+        const int left_score =
+            defender_reserved_card_threat_score(game, action, left);
+        const int right_score =
+            defender_reserved_card_threat_score(game, action, right);
+        if (left_score != right_score)
+          return left_score > right_score;
+        return left < right;
+      });
     }
     return cards;
+  }
+
+  static int defender_reserved_card_threat_score(const Game &game,
+                                                 const Action &action,
+                                                 int card_id) {
+    if (!is_valid_card_id(card_id))
+      return 0;
+    const Board &board = game.board;
+    const PlayerState &player = board.players[board.current_player];
+    std::array<int, 6> gems = {0};
+    for (int color = 0; color < 6; ++color)
+      gems[color] = static_cast<int>(player.gems[color]);
+    if (board.bank[GOLD] > 0)
+      ++gems[GOLD];
+    for (int color = 0; color < 6; ++color)
+      gems[color] -= static_cast<int>(action.return_gems[color]);
+
+    const Card &card = get_card(card_id);
+    int shortage = 0;
+    for (int color = 0; color < 5; ++color) {
+      const int need =
+          std::max(0, static_cast<int>(card.cost[color]) -
+                          static_cast<int>(player.bonuses[color]));
+      shortage += std::max(0, need - gems[color]);
+    }
+    const int gap = std::max(0, shortage - gems[GOLD]);
+    std::array<uint8_t, 5> bonuses = player.bonuses;
+    ++bonuses[card.bonus];
+    const int noble_points = max_noble_points(board, bonuses);
+    const int immediate_win_bonus =
+        static_cast<int>(player.points) + static_cast<int>(card.points) +
+                    noble_points >=
+                15
+            ? 1000000
+            : 0;
+    return immediate_win_bonus + (gap == 0 ? 100000 : 0) +
+           static_cast<int>(card.points) * 10000 + noble_points * 1000 -
+           gap * 100 + static_cast<int>(card.bonus);
   }
 
   std::vector<int> visible_refill_cards(const Game &game, int level) const {
     std::vector<int> cards;
     if (level < 0 || level >= 3 || game.board.decks[level].empty())
       return cards;
-    for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
-      const Card &card = get_card(card_id);
-      if (card.level - 1 == level && is_initial_hidden_card(card_id) &&
-          !has_hidden_card_claimed(game.board, card_id))
-        cards.push_back(card_id);
+    std::set<CardEquivalenceKey> seen;
+    for (uint8_t card_id : game.board.decks[level]) {
+      if (!has_hidden_card_claimed(game.board, card_id) &&
+          seen.insert(card_equivalence_key(card_id)).second)
+        cards.push_back(static_cast<int>(card_id));
     }
     return cards;
   }
@@ -542,7 +614,8 @@ private:
       return false;
 
     board.invalidate_hash();
-    board.decks[action.deck_level].pop_back();
+    if (!remove_card_from_deck(board, action.deck_level, card_id))
+      return false;
     player.reserved_is_hidden[player.reserved_count] = true;
     player.reserved[player.reserved_count++] = card_id;
     if (board.bank[GOLD] > 0) {
