@@ -3122,18 +3122,91 @@ def solve_reveal_verified_mate(
         for entry in candidate_tree.get("line", [])
         if int(entry["player"]) == attacker
     ]
-    raw = cs.solve_reveal_verified_mate_cpp(
-        game,
-        attacker=int(attacker),
-        depth=int(candidate_depth),
-        max_nodes=remaining_nodes,
-        time_limit_seconds=remaining_time,
-        preferred_attacker_actions=preferred_attacker_actions,
-        include_proof_dag=bool(include_proof_dag),
-        proof_dag_node_limit=max(0, int(proof_dag_node_limit)),
-        proof_dag_edge_limit=max(0, int(proof_dag_edge_limit)),
-    )
+    strict_verification_stats = None
+    used_strict_result = False
+    if preferred_attacker_actions and remaining_time > 0.0 and remaining_nodes != 1:
+        strict_time = min(remaining_time, max(0.001, remaining_time * 0.25))
+        strict_nodes = (
+            max(1, int(remaining_nodes * 0.25))
+            if remaining_nodes
+            else 0
+        )
+        strict_start = time.monotonic()
+        raw = None
+        strict_verification_stats = {}
+        for strict_prefix in range(len(preferred_attacker_actions), 0, -1):
+            elapsed_strict = time.monotonic() - strict_start
+            if elapsed_strict >= strict_time:
+                break
+            strict_remaining_time = max(0.001, strict_time - elapsed_strict)
+            strict_raw = cs.solve_reveal_verified_mate_cpp(
+                game,
+                attacker=int(attacker),
+                depth=int(candidate_depth),
+                max_nodes=strict_nodes,
+                time_limit_seconds=strict_remaining_time,
+                preferred_attacker_actions=preferred_attacker_actions,
+                include_proof_dag=bool(include_proof_dag),
+                proof_dag_node_limit=max(0, int(proof_dag_node_limit)),
+                proof_dag_edge_limit=max(0, int(proof_dag_edge_limit)),
+                strict_preferred_attacker_prefix=int(strict_prefix),
+            )
+            for key, value in dict(strict_raw["stats"]).items():
+                if isinstance(value, (int, float)):
+                    strict_verification_stats[key] = (
+                        strict_verification_stats.get(key, 0) + value
+                    )
+            if bool(strict_raw["proven"]):
+                raw = strict_raw
+                used_strict_result = True
+                break
+
+        if raw is None:
+            elapsed = time.monotonic() - start_time
+            remaining_time = (
+                max(0.001, float(options.time_limit) - elapsed)
+                if options.time_limit
+                else 0.0
+            )
+            remaining_nodes = (
+                max(
+                    1,
+                    int(options.max_nodes)
+                    - int(candidate.stats.nodes)
+                    - int(strict_verification_stats.get("nodes", 0)),
+                )
+                if options.max_nodes
+                else 0
+            )
+            raw = cs.solve_reveal_verified_mate_cpp(
+                game,
+                attacker=int(attacker),
+                depth=int(candidate_depth),
+                max_nodes=remaining_nodes,
+                time_limit_seconds=remaining_time,
+                preferred_attacker_actions=preferred_attacker_actions,
+                include_proof_dag=bool(include_proof_dag),
+                proof_dag_node_limit=max(0, int(proof_dag_node_limit)),
+                proof_dag_edge_limit=max(0, int(proof_dag_edge_limit)),
+            )
+    else:
+        raw = cs.solve_reveal_verified_mate_cpp(
+            game,
+            attacker=int(attacker),
+            depth=int(candidate_depth),
+            max_nodes=remaining_nodes,
+            time_limit_seconds=remaining_time,
+            preferred_attacker_actions=preferred_attacker_actions,
+            include_proof_dag=bool(include_proof_dag),
+            proof_dag_node_limit=max(0, int(proof_dag_node_limit)),
+            proof_dag_edge_limit=max(0, int(proof_dag_edge_limit)),
+        )
     verification_stats = raw["stats"]
+    if strict_verification_stats is not None and not used_strict_result:
+        verification_stats = dict(verification_stats)
+        for key, value in strict_verification_stats.items():
+            if isinstance(value, (int, float)) and key in verification_stats:
+                verification_stats[key] += value
     unknown_reason = raw["unknown_reason"]
     if not raw["proven"] and unknown_reason is None:
         unknown_reason = "visible-only candidate mate has a reveal counterexample"

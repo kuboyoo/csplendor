@@ -93,14 +93,18 @@ public:
                        bool include_proof_dag = false,
                        size_t proof_dag_node_limit = 100000,
                        size_t proof_dag_edge_limit = 500000,
-                       uint64_t required_root_action = UINT64_MAX)
+                       uint64_t required_root_action = UINT64_MAX,
+                       bool strict_preferred_attacker_actions = false,
+                       size_t strict_preferred_attacker_prefix = 0)
       : attacker_(attacker), depth_(depth), max_nodes_(max_nodes),
         time_limit_seconds_(time_limit_seconds),
         preferred_attacker_actions_(std::move(preferred_attacker_actions)),
         include_proof_dag_(include_proof_dag),
         proof_dag_node_limit_(proof_dag_node_limit),
         proof_dag_edge_limit_(proof_dag_edge_limit),
-        required_root_action_(required_root_action) {}
+        required_root_action_(required_root_action),
+        strict_preferred_attacker_actions_(strict_preferred_attacker_actions),
+        strict_preferred_attacker_prefix_(strict_preferred_attacker_prefix) {}
 
   RevealVerifiedSearchResult solve(const Game &input) {
     memo_.clear();
@@ -272,6 +276,8 @@ private:
   size_t proof_dag_node_limit_ = 100000;
   size_t proof_dag_edge_limit_ = 500000;
   uint64_t required_root_action_ = UINT64_MAX;
+  bool strict_preferred_attacker_actions_ = false;
+  size_t strict_preferred_attacker_prefix_ = 0;
   size_t proof_dag_edges_ = 0;
   std::unordered_map<DepthStateKey, size_t, DepthStateKeyHash> proof_node_ids_;
   std::unordered_map<DepthStateKey, size_t, DepthStateKeyHash>
@@ -1010,6 +1016,25 @@ private:
                      return action.code == required_root_action_;
                    });
       return required;
+    }
+    const size_t strict_prefix =
+        strict_preferred_attacker_actions_
+            ? preferred_attacker_actions_.size()
+            : strict_preferred_attacker_prefix_;
+    if (strict_prefix > 0) {
+      const int index = depth_ - depth;
+      if (index >= 0 && static_cast<size_t>(index) < strict_prefix) {
+        if (index >= static_cast<int>(preferred_attacker_actions_.size()))
+          return {};
+        const uint64_t preferred = preferred_attacker_actions_[index];
+        std::vector<OrderedAction> required;
+        std::copy_if(actions.begin(), actions.end(),
+                     std::back_inserter(required),
+                     [&](const OrderedAction &action) {
+                       return action.code == preferred;
+                     });
+        return required;
+      }
     }
 
     std::vector<OrderedAction> purchases;

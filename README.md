@@ -72,7 +72,7 @@ uvicorn csplendor.api:app --reload
 
 `scripts/dfpn_mate_solver.py` は、任意局面から player0 または player1 の強制勝利を探索します。
 
-実用上は、公開カードだけで候補手順を高速探索し、その後に未公開カードのめくれ、相手の全応手、全支払いパターン、局面入力後の山札予約結果を検証する `--reveal-verified` モードを推奨します。
+実用上は、公開カードだけで候補手順を高速探索し、その後に未公開カードのめくれ、相手の全応手、全支払いパターン、局面入力後の山札予約結果を検証する `--reveal-verified` モードを推奨します。めくれ検証では visible-only の最短主手順 prefix を固定して先に厳密検証し、証明できなかった場合は固定範囲を緩め、最後に通常の幅広い検証へ戻ります。
 
 ```bash
 python scripts/dfpn_mate_solver.py \
