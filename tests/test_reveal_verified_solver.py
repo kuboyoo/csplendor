@@ -47,3 +47,32 @@ def test_reveal_verified_solver_does_not_emit_oracle_edges():
         if edge["oracle_card"] is not None or edge["oracle_reserve"]
     ]
     assert oracle_edges == []
+
+
+def test_reveal_verified_solver_validates_complete_proof_dag():
+    game = cs.Game(seed=0)
+    game.board.current_player = 1
+    player = game.board.get_player(1)
+    player.points = 14
+    player.bonuses = [10, 10, 10, 10, 10]
+    game.board.set_player(1, player)
+
+    result = cs.solve_reveal_verified_mate_cpp(
+        game,
+        attacker=1,
+        depth=1,
+        include_proof_dag=True,
+        proof_dag_node_limit=1000,
+        proof_dag_edge_limit=5000,
+    )
+
+    dag = result["proof_dag"]
+    assert result["proven"] is True
+    assert dag["complete"] is True
+    assert dag["validated"] is True
+    assert dag["omitted_reason"] is None
+    assert all(
+        edge["oracle_card"] is None and not edge["oracle_reserve"]
+        for node in dag["nodes"]
+        for edge in node["children"]
+    )

@@ -96,7 +96,7 @@ python scripts/dfpn_mate_solver.py \
   --time-limit 30
 ```
 
-証明 DAG は `proof_tree.verification.proof_dag` に返ります。攻撃側は証明に採用した手、守備側は全合法応手、山札予約は全ドロー結果を保持します。探索中は hidden-card 抽象を使って blank 補充後の反例探索を圧縮しますが、DAG 出力時は合法手と具体 reveal 分岐だけを materialize します。上限超過時も詰み判定結果は維持し、DAG のみ破棄して理由を返します。
+証明 DAG は `proof_tree.verification.proof_dag` に返ります。攻撃側は証明に採用した手、守備側は全合法応手、山札予約は全ドロー結果を保持します。探索中は hidden-card 抽象を使って blank 補充後の反例探索を圧縮しますが、DAG 出力時は合法手と具体 reveal 分岐だけを materialize します。complete DAG は返却前に全 edge を合法手として再走査し、検査済みなら `validated: true` になります。上限超過時も詰み判定結果は維持し、DAG のみ破棄して理由を返します。
 
 確認用の主手順を `splendorgui` で再生する場合は、`--kifu-output mate.kifu` を追加します。`--kifu-output` は既定で `--reveal-verified` を有効化し、検証済み候補主手順を Splendor KIFU として保存します。通常の DFPN 証明木から主手順を保存する場合は `--kifu-dfpn` も指定します。具体的なめくれカードを持つ DFPN 証明木では、棋譜コメントに `reveal:C<id>` 注釈を出力します。
 

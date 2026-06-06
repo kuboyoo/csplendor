@@ -68,6 +68,7 @@ struct RevealVerifiedProofNode {
 struct RevealVerifiedProofDag {
   bool requested = false;
   bool complete = false;
+  bool validated = false;
   std::string omitted_reason;
   size_t root = 0;
   std::vector<RevealVerifiedProofNode> nodes;
@@ -1492,7 +1493,9 @@ private:
     try {
       Game game = root_.clone_light();
       dag.root = build_proof_node(game, depth_);
+      validate_proof_dag(game, depth_, dag.root);
       dag.complete = true;
+      dag.validated = true;
       dag.nodes = std::move(proof_nodes_);
     } catch (const ProofDagBuildAborted &exc) {
       dag.omitted_reason = exc.what();
@@ -1507,6 +1510,105 @@ private:
     }
     stats_ = search_stats;
     return dag;
+  }
+
+  void validate_proof_dag(Game &game, int depth, size_t root_id) {
+    std::unordered_map<size_t, DepthStateKey> seen;
+    validate_proof_dag_node(game, depth, root_id, seen);
+  }
+
+  void validate_proof_dag_node(
+      Game &game, int depth, size_t node_id,
+      std::unordered_map<size_t, DepthStateKey> &seen) {
+    if (node_id >= proof_nodes_.size())
+      throw ProofDagBuildAborted("proof DAG validation found invalid node id");
+    const DepthStateKey key{state_key(game), depth};
+    const auto known = seen.find(node_id);
+    if (known != seen.end()) {
+      if (!(known->second == key))
+        throw ProofDagBuildAborted(
+            "proof DAG validation found inconsistent shared node state");
+      return;
+    }
+    seen.emplace(node_id, key);
+
+    const RevealVerifiedProofNode &node = proof_nodes_[node_id];
+    validate_proof_node_summary(game, depth, node);
+    if (game.is_game_over()) {
+      if (!node.children.empty())
+        throw ProofDagBuildAborted(
+            "proof DAG validation found terminal node with children");
+      return;
+    }
+
+    for (const RevealVerifiedProofEdge &edge : node.children) {
+      validate_proof_edge(game, depth, edge, seen);
+    }
+  }
+
+  void validate_proof_node_summary(const Game &game, int depth,
+                                   const RevealVerifiedProofNode &node) const {
+    if (node.depth != depth || node.player != game.current_player() ||
+        node.winner != game.winner() ||
+        node.waiting_noble != game.board.waiting_noble ||
+        node.scores[0] != static_cast<int>(game.board.players[0].points) ||
+        node.scores[1] != static_cast<int>(game.board.players[1].points)) {
+      throw ProofDagBuildAborted(
+          "proof DAG validation found node summary mismatch");
+    }
+  }
+
+  void validate_proof_edge(
+      Game &game, int depth, const RevealVerifiedProofEdge &edge,
+      std::unordered_map<size_t, DepthStateKey> &seen) {
+    if (edge.oracle_card >= 0 || edge.oracle_reserve ||
+        edge.oracle_reserve_card >= 0 || edge.oracle_return_color >= 0) {
+      throw ProofDagBuildAborted(
+          "proof DAG validation found non-replayable oracle edge");
+    }
+    const std::vector<uint64_t> legal_codes = game.legal_action_codes();
+    if (std::find(legal_codes.begin(), legal_codes.end(), edge.action_code) ==
+        legal_codes.end()) {
+      throw ProofDagBuildAborted(
+          "proof DAG validation found illegal action edge");
+    }
+
+    const Board previous = game.board;
+    const int current_player = game.current_player();
+    const Action action = Action::unpack(edge.action_code);
+    bool applied = false;
+    if (action.type == RESERVE_DECK) {
+      if (edge.reveal_card < 0)
+        throw ProofDagBuildAborted(
+            "proof DAG validation found deck reserve without reveal card");
+      applied = apply_deck_reserve_outcome(game, action, edge.reveal_card);
+    } else {
+      const int level = visible_refill_level(action);
+      if (level >= 0 && !game.board.decks[level].empty()) {
+        const int slot = visible_refill_slot(game.board, action);
+        if (edge.reveal_card < 0)
+          throw ProofDagBuildAborted(
+              "proof DAG validation found visible refill without reveal card");
+        applied =
+            apply_visible_refill_outcome(game, action, level, slot,
+                                         edge.reveal_card);
+      } else {
+        if (edge.reveal_card >= 0)
+          throw ProofDagBuildAborted(
+              "proof DAG validation found unexpected reveal card");
+        applied = game.apply_action_code_trusted(edge.action_code, false);
+      }
+    }
+    if (!applied) {
+      game.board = previous;
+      throw ProofDagBuildAborted(
+          "proof DAG validation could not replay edge transition");
+    }
+    const int next_depth =
+        depth - static_cast<int>(current_player == attacker_ &&
+                                 game.current_player() != current_player);
+    validate_proof_dag_node(game, next_depth, edge.child, seen);
+    game.board = previous;
   }
 
   void append_proof_edge(size_t id, const OrderedAction &ordered,

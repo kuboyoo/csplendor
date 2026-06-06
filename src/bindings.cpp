@@ -478,6 +478,7 @@ PYBIND11_MODULE(_csplendor, m) {
         py::dict proof_dag;
         proof_dag["requested"] = result.proof_dag.requested;
         proof_dag["complete"] = result.proof_dag.complete;
+        proof_dag["validated"] = result.proof_dag.validated;
         proof_dag["omitted_reason"] =
             result.proof_dag.omitted_reason.empty()
                 ? py::none()
