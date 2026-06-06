@@ -10,6 +10,7 @@
 #include <iterator>
 #include <map>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -1541,8 +1542,9 @@ private:
       return;
     }
 
+    const bool preserve_child_depth = node.kind == "final_round_summary";
     for (const RevealVerifiedProofEdge &edge : node.children) {
-      validate_proof_edge(game, depth, edge, seen);
+      validate_proof_edge(game, depth, edge, preserve_child_depth, seen);
     }
   }
 
@@ -1553,13 +1555,29 @@ private:
         node.waiting_noble != game.board.waiting_noble ||
         node.scores[0] != static_cast<int>(game.board.players[0].points) ||
         node.scores[1] != static_cast<int>(game.board.players[1].points)) {
-      throw ProofDagBuildAborted(
-          "proof DAG validation found node summary mismatch");
+      std::ostringstream message;
+      message << "proof DAG validation found node summary mismatch"
+              << " id=" << node.id
+              << " expected_depth=" << depth
+              << " actual_depth=" << node.depth
+              << " expected_player=" << game.current_player()
+              << " actual_player=" << node.player
+              << " expected_winner=" << game.winner()
+              << " actual_winner=" << node.winner
+              << " expected_waiting=" << game.board.waiting_noble
+              << " actual_waiting=" << node.waiting_noble
+              << " expected_scores="
+              << static_cast<int>(game.board.players[0].points) << ","
+              << static_cast<int>(game.board.players[1].points)
+              << " actual_scores=" << node.scores[0] << ","
+              << node.scores[1];
+      throw ProofDagBuildAborted(message.str());
     }
   }
 
   void validate_proof_edge(
       Game &game, int depth, const RevealVerifiedProofEdge &edge,
+      bool preserve_child_depth,
       std::unordered_map<size_t, DepthStateKey> &seen) {
     if (edge.oracle_card >= 0 || edge.oracle_reserve ||
         edge.oracle_reserve_card >= 0 || edge.oracle_return_color >= 0) {
@@ -1605,8 +1623,10 @@ private:
           "proof DAG validation could not replay edge transition");
     }
     const int next_depth =
-        depth - static_cast<int>(current_player == attacker_ &&
-                                 game.current_player() != current_player);
+        previous.waiting_noble || preserve_child_depth
+            ? depth
+            : depth - static_cast<int>(current_player == attacker_ &&
+                                       game.current_player() != current_player);
     validate_proof_dag_node(game, next_depth, edge.child, seen);
     game.board = previous;
   }
@@ -1679,6 +1699,7 @@ private:
     if (!can_resolve_final_round(game))
       throw ProofDagBuildAborted(
           "proof DAG cannot expand non-final-round summary");
+    proof_nodes_[id].kind = "final_round_summary";
     const int current_player = game.current_player();
     const std::vector<OrderedAction> actions = proof_ordered_actions(game);
     bool proven = current_player != attacker_;
@@ -1763,11 +1784,15 @@ private:
           actions.end());
     }
     const int current_player = game.current_player();
+    const bool waiting_noble_action = game.board.waiting_noble;
     for (const OrderedAction &ordered : actions) {
       for_each_proof_outcome(game, ordered, [&](int reveal_card) {
         const int next_depth =
-            depth - static_cast<int>(current_player == attacker_ &&
-                                     game.current_player() != current_player);
+            waiting_noble_action
+                ? depth
+                : depth - static_cast<int>(current_player == attacker_ &&
+                                           game.current_player() !=
+                                               current_player);
         const size_t child = build_proof_node(game, next_depth);
         append_proof_edge(id, ordered, reveal_card, child);
         return true;
