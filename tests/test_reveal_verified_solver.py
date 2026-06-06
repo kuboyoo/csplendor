@@ -13,7 +13,7 @@ BENCH_POSITION = (
 )
 
 
-def test_oracle_actions_are_not_generated_for_blank_visible_slots():
+def test_oracle_actions_are_internal_only_for_blank_visible_slots():
     game = cs.Game(seed=0)
     visible = game.board.visible
     visible[0][0] = -1
@@ -22,8 +22,11 @@ def test_oracle_actions_are_not_generated_for_blank_visible_slots():
 
     result = cs.solve_reveal_verified_mate_cpp(game, attacker=0, depth=0)
 
-    assert result["stats"]["oracle_purchase_actions"] == 0
-    assert result["stats"]["oracle_reserve_actions"] == 0
+    assert (
+        result["stats"]["oracle_purchase_actions"]
+        + result["stats"]["oracle_reserve_actions"]
+        > 0
+    )
 
 
 def test_reveal_verified_solver_does_not_emit_oracle_edges():
@@ -43,6 +46,4 @@ def test_reveal_verified_solver_does_not_emit_oracle_edges():
         for edge in node["children"]
         if edge["oracle_card"] is not None or edge["oracle_reserve"]
     ]
-    assert result["stats"]["oracle_purchase_actions"] == 0
-    assert result["stats"]["oracle_reserve_actions"] == 0
     assert oracle_edges == []

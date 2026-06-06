@@ -125,7 +125,7 @@ public:
     result.depth = depth_;
     try {
       std::unordered_set<DepthStateKey, DepthStateKeyHash> path;
-      const ForceStatus status = forced_win(game, path, depth_);
+      const ForceStatus status = forced_win(game, path, depth_, false);
       result.proven = status == ForceStatus::PROVEN;
       result.reason = result.proven ? "all_reveals_verified"
                                     : "candidate_mate_not_verified";
@@ -266,6 +266,7 @@ private:
   Clock::time_point start_time_;
   RevealVerifiedSearchStats stats_;
   std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash> memo_;
+  std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash> exact_memo_;
   Game root_{0};
   uint64_t initial_known_low_ = 0;
   uint64_t initial_known_high_ = 0;
@@ -289,7 +290,7 @@ private:
   ForceStatus
   forced_win(Game &game,
              std::unordered_set<DepthStateKey, DepthStateKeyHash> &path,
-             int depth) {
+             int depth, bool exact_refinement) {
     check_limits();
     ++stats_.nodes;
 
@@ -302,8 +303,9 @@ private:
       return ForceStatus::REFUTED;
 
     const DepthStateKey key{state_key(game), depth};
-    auto memo_it = memo_.find(key);
-    if (memo_it != memo_.end()) {
+    auto &memo = exact_refinement ? exact_memo_ : memo_;
+    auto memo_it = memo.find(key);
+    if (memo_it != memo.end()) {
       ++stats_.memo_hits;
       return memo_it->second.status;
     }
@@ -312,18 +314,19 @@ private:
       return ForceStatus::UNKNOWN;
     }
     if (can_resolve_final_round(game)) {
-      const Entry resolved = resolve_final_round(game);
-      memo_[key] = resolved;
+      const Entry resolved = resolve_final_round(game, exact_refinement);
+      memo[key] = resolved;
       return resolved.status;
     }
 
-    std::vector<OrderedAction> actions = ordered_actions(game);
+    std::vector<OrderedAction> actions =
+        exact_refinement ? proof_ordered_actions(game) : ordered_actions(game);
     if (game.current_player() == attacker_)
       actions = forced_attacker_actions(game, actions, depth, path.empty());
     stats_.legal_moves += actions.size();
     if (actions.empty()) {
       ++stats_.terminal_nodes;
-      memo_[key] = Entry{ForceStatus::REFUTED, 0, -1, false, 0};
+      memo[key] = Entry{ForceStatus::REFUTED, 0, -1, false, 0};
       return ForceStatus::REFUTED;
     }
 
@@ -338,25 +341,26 @@ private:
       bool action_refuted = false;
       int representative_reveal = -1;
       bool has_representative_reveal = false;
-      const bool completed = for_each_outcome(
-          game, ordered,
-          [&](int reveal_card) {
-            const int next_depth =
-                depth - static_cast<int>(current_player == attacker_ &&
-                                         game.current_player() !=
-                                             current_player);
-            const ForceStatus child = forced_win(game, path, next_depth);
-            if (!has_representative_reveal) {
-              representative_reveal = reveal_card;
-              has_representative_reveal = true;
-            }
-            if (child == ForceStatus::REFUTED) {
-              action_refuted = true;
-              return false;
-            }
-            action_unknown = action_unknown || child == ForceStatus::UNKNOWN;
-            return true;
-          });
+      const auto visit_outcome = [&](int reveal_card) {
+        const int next_depth =
+            depth - static_cast<int>(current_player == attacker_ &&
+                                     game.current_player() != current_player);
+        const ForceStatus child =
+            forced_win(game, path, next_depth, exact_refinement);
+        if (!has_representative_reveal) {
+          representative_reveal = reveal_card;
+          has_representative_reveal = true;
+        }
+        if (child == ForceStatus::REFUTED) {
+          action_refuted = true;
+          return false;
+        }
+        action_unknown = action_unknown || child == ForceStatus::UNKNOWN;
+        return true;
+      };
+      const bool completed =
+          exact_refinement ? for_each_proof_outcome(game, ordered, visit_outcome)
+                           : for_each_search_outcome(game, ordered, visit_outcome);
       if (!completed && !action_refuted)
         action_unknown = true;
 
@@ -367,16 +371,16 @@ private:
       }
       if (current_player == attacker_ && !action_refuted && !action_unknown) {
         path.erase(key);
-        memo_[key] = Entry{ForceStatus::PROVEN, ordered.code,
-                           representative_reveal, true, actions.size(),
-                           is_replayable(ordered)};
+        memo[key] = Entry{ForceStatus::PROVEN, ordered.code,
+                          representative_reveal, true, actions.size(),
+                          is_replayable(ordered)};
         return ForceStatus::PROVEN;
       }
       if (current_player != attacker_ && action_refuted) {
         path.erase(key);
-        memo_[key] = Entry{ForceStatus::REFUTED, ordered.code,
-                           representative_reveal, true, actions.size(),
-                           is_replayable(ordered)};
+        memo[key] = Entry{ForceStatus::REFUTED, ordered.code,
+                          representative_reveal, true, actions.size(),
+                          is_replayable(ordered)};
         return ForceStatus::REFUTED;
       }
       has_unknown = has_unknown || action_unknown;
@@ -389,13 +393,37 @@ private:
                                    ? ForceStatus::REFUTED
                                    : ForceStatus::PROVEN;
     representative.status = status;
-    memo_[key] = representative;
+    memo[key] = representative;
     return status;
   }
 
   template <typename Visitor>
-  bool for_each_outcome(Game &game, const OrderedAction &ordered,
-                        Visitor visitor) {
+  bool for_each_search_outcome(Game &game, const OrderedAction &ordered,
+                               Visitor visitor) {
+    if (ordered.oracle_card >= 0 || ordered.oracle_reserve) {
+      const Board previous = game.board;
+      if (!apply_oracle_action(game, ordered))
+        return false;
+      const bool keep_going = visitor(-1);
+      game.board = previous;
+      return keep_going;
+    }
+
+    const Action action = Action::unpack(ordered.code);
+    if (action.type == RESERVE_DECK)
+      return for_each_deck_reserve_outcome(game, action, visitor);
+
+    const Board previous = game.board;
+    if (!game.apply_trusted(action, false))
+      return false;
+    const bool keep_going = visitor(-1);
+    game.board = previous;
+    return keep_going;
+  }
+
+  template <typename Visitor>
+  bool for_each_proof_outcome(Game &game, const OrderedAction &ordered,
+                              Visitor visitor) {
     const Action action = Action::unpack(ordered.code);
     if (action.type == RESERVE_DECK)
       return for_each_deck_reserve_outcome(game, action, visitor);
@@ -713,9 +741,9 @@ private:
            game.current_player() == 1;
   }
 
-  Entry resolve_final_round(Game &game) {
+  Entry resolve_final_round(Game &game, bool exact_refinement) {
     ForceStatus direct_status = ForceStatus::UNKNOWN;
-    if (resolve_final_round_direct(game, direct_status)) {
+    if (resolve_final_round_direct(game, direct_status, exact_refinement)) {
       ++stats_.final_round_direct_resolutions;
       if (direct_status == ForceStatus::PROVEN)
         ++stats_.final_round_score_prunes;
@@ -728,7 +756,8 @@ private:
     }
 
     const int current_player = game.current_player();
-    const std::vector<OrderedAction> actions = ordered_actions(game);
+    const std::vector<OrderedAction> actions =
+        exact_refinement ? proof_ordered_actions(game) : ordered_actions(game);
     stats_.legal_moves += actions.size();
     if (actions.empty())
       return Entry{ForceStatus::REFUTED, 0, -1, false, 0};
@@ -770,7 +799,7 @@ private:
 
   ForceStatus resolve_final_round_noble(Game &game) {
     const int current_player = game.current_player();
-    const std::vector<OrderedAction> actions = ordered_actions(game);
+    const std::vector<OrderedAction> actions = proof_ordered_actions(game);
     stats_.legal_moves += actions.size();
     bool has_unknown = false;
     for (const OrderedAction &ordered : actions) {
@@ -828,9 +857,11 @@ private:
     return max_score;
   }
 
-  bool resolve_final_round_direct(const Game &game, ForceStatus &status) const {
+  bool resolve_final_round_direct(const Game &game, ForceStatus &status,
+                                  bool exact_refinement) const {
     const Board &board = game.board;
     const PlayerState &player = board.players[1];
+    const bool allow_oracle = !exact_refinement && attacker_ != 1;
     bool has_action = false;
     bool has_player0_only_outcomes = true;
     bool has_player1_win = false;
@@ -841,7 +872,7 @@ private:
       has_player1_win = has_player1_win || winner == 1;
     };
 
-    if (has_nonpurchase_action(board)) {
+    if (has_nonpurchase_action(board, allow_oracle)) {
       consider(static_cast<int>(player.points) +
                    max_noble_points(board, player.bonuses),
                player.purchased_count);
@@ -852,6 +883,14 @@ private:
     }
     for (int slot = 0; slot < Board::MAX_RESERVED; ++slot)
       consider_purchase(board, player, player.reserved[slot], consider);
+    if (allow_oracle) {
+      for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
+        if (is_initial_hidden_card(card_id) &&
+            !has_hidden_card_claimed(board, card_id) &&
+            has_blank_slot_at_level(board, get_card(card_id).level - 1))
+          consider_purchase(board, player, card_id, consider);
+      }
+    }
 
     if (!has_action)
       return false;
@@ -877,7 +916,9 @@ private:
             player.purchased_count + 1);
   }
 
-  static bool has_nonpurchase_action(const Board &board) {
+  static bool has_nonpurchase_action(const Board &board, bool allow_oracle) {
+    if (allow_oracle && has_blank_slot(board))
+      return true;
     for (int color = 0; color < 5; ++color) {
       if (board.bank[color] > 0)
         return true;
@@ -889,6 +930,22 @@ private:
         if (is_valid_card_id(board.visible[level][slot]))
           return true;
       }
+    }
+    return false;
+  }
+
+  static bool has_blank_slot(const Board &board) {
+    for (int level = 0; level < 3; ++level) {
+      if (has_blank_slot_at_level(board, level))
+        return true;
+    }
+    return false;
+  }
+
+  static bool has_blank_slot_at_level(const Board &board, int level) {
+    for (int slot = 0; slot < Board::CARDS_PER_LEVEL; ++slot) {
+      if (!is_valid_card_id(board.visible[level][slot]))
+        return true;
     }
     return false;
   }
@@ -936,8 +993,14 @@ private:
 
   std::vector<OrderedAction> ordered_actions(const Game &game) {
     std::vector<OrderedAction> actions = ordinary_ordered_actions(game);
+    if (game.current_player() != attacker_ && !game.board.waiting_noble)
+      add_oracle_actions(game, actions);
     std::sort(actions.begin(), actions.end());
     return actions;
+  }
+
+  static std::vector<OrderedAction> proof_ordered_actions(const Game &game) {
+    return ordinary_ordered_actions(game);
   }
 
   static std::vector<OrderedAction> ordinary_ordered_actions(const Game &game) {
@@ -948,6 +1011,159 @@ private:
     }
     std::sort(actions.begin(), actions.end());
     return actions;
+  }
+
+  void add_oracle_actions(const Game &game,
+                          std::vector<OrderedAction> &actions) {
+    const PlayerState &player = game.board.players[game.current_player()];
+    for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
+      if (!is_initial_hidden_card(card_id) ||
+          has_hidden_card_claimed(game.board, card_id) ||
+          !has_blank_slot_at_level(game.board, get_card(card_id).level - 1))
+        continue;
+      const Card &card = get_card(card_id);
+      if (!player.can_afford(card))
+        continue;
+      std::array<int, 5> effective_cost = {0};
+      for (int color = 0; color < 5; ++color) {
+        effective_cost[color] =
+            std::max(0, static_cast<int>(card.cost[color]) -
+                            static_cast<int>(player.bonuses[color]));
+      }
+      add_oracle_purchase_actions(player, card, effective_cost, 0, 0, {},
+                                  actions);
+    }
+    if (player.can_reserve()) {
+      for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
+        if (!is_initial_hidden_card(card_id) ||
+            has_hidden_card_claimed(game.board, card_id) ||
+            !has_blank_slot_at_level(game.board, get_card(card_id).level - 1))
+          continue;
+        const int total_gems = player.total_gems();
+        if (game.board.bank[GOLD] == 0 || total_gems < Board::MAX_TOKENS) {
+          add_oracle_reserve_action(card_id, -1, actions);
+        } else {
+          for (int color = 0; color < 6; ++color) {
+            if (player.gems[color] > 0 || color == GOLD)
+              add_oracle_reserve_action(card_id, color, actions);
+          }
+        }
+      }
+    }
+  }
+
+  void add_oracle_reserve_action(int card_id, int return_color,
+                                 std::vector<OrderedAction> &actions) {
+    OrderedAction action;
+    action.rank = 1;
+    action.oracle_reserve = true;
+    action.oracle_reserve_card = card_id;
+    action.oracle_return_color = return_color;
+    actions.push_back(action);
+    ++stats_.oracle_reserve_actions;
+  }
+
+  void add_oracle_purchase_actions(
+      const PlayerState &player, const Card &card,
+      const std::array<int, 5> &effective_cost, int color, int gold_used,
+      std::array<uint8_t, 5> gold_as, std::vector<OrderedAction> &actions) {
+    if (color == 5) {
+      OrderedAction action;
+      action.rank = 0;
+      action.neg_points = -static_cast<int>(card.points);
+      action.oracle_card = card.id;
+      action.oracle_gold_as = gold_as;
+      actions.push_back(action);
+      ++stats_.oracle_purchase_actions;
+      return;
+    }
+    const int min_gold =
+        std::max(0, effective_cost[color] - static_cast<int>(player.gems[color]));
+    const int max_gold =
+        std::min(effective_cost[color],
+                 static_cast<int>(player.gems[GOLD]) - gold_used);
+    for (int amount = min_gold; amount <= max_gold; ++amount) {
+      gold_as[color] = amount;
+      add_oracle_purchase_actions(player, card, effective_cost, color + 1,
+                                  gold_used + amount, gold_as, actions);
+    }
+  }
+
+  bool apply_oracle_action(Game &game, const OrderedAction &ordered) const {
+    Board &board = game.board;
+    if (board.is_game_over() || board.waiting_noble ||
+        board.current_player >= Board::NUM_PLAYERS)
+      return false;
+    board.invalidate_hash();
+    PlayerState &player = board.players[board.current_player];
+    if (ordered.oracle_card >= 0) {
+      const Card &card = get_card(ordered.oracle_card);
+      if (!player.can_afford(card))
+        return false;
+      int gold_used = 0;
+      for (int color = 0; color < 5; ++color) {
+        const int cost =
+            std::max(0, static_cast<int>(card.cost[color]) -
+                            static_cast<int>(player.bonuses[color]));
+        const int from_gold = ordered.oracle_gold_as[color];
+        const int from_gems = cost - from_gold;
+        if (from_gold > cost || from_gems > player.gems[color])
+          return false;
+        player.gems[color] -= from_gems;
+        board.bank[color] += from_gems;
+        gold_used += from_gold;
+      }
+      if (gold_used > player.gems[GOLD])
+        return false;
+      player.gems[GOLD] -= gold_used;
+      board.bank[GOLD] += gold_used;
+      player.purchased_cards.push_back(card.id);
+      ++player.purchased_count;
+      ++player.bonuses[card.bonus];
+      player.points += card.points;
+      player.sync_packed();
+    } else if (ordered.oracle_reserve) {
+      if (!player.can_reserve() ||
+          !is_valid_card_id(ordered.oracle_reserve_card) ||
+          !is_initial_hidden_card(ordered.oracle_reserve_card) ||
+          has_hidden_card_claimed(board, ordered.oracle_reserve_card) ||
+          !has_blank_slot_at_level(
+              board, get_card(ordered.oracle_reserve_card).level - 1))
+        return false;
+      player.reserved_is_hidden[player.reserved_count] = true;
+      player.reserved[player.reserved_count++] = ordered.oracle_reserve_card;
+      if (board.bank[GOLD] > 0) {
+        --board.bank[GOLD];
+        ++player.gems[GOLD];
+        if (ordered.oracle_return_color >= 0) {
+          if (player.gems[ordered.oracle_return_color] == 0)
+            return false;
+          --player.gems[ordered.oracle_return_color];
+          ++board.bank[ordered.oracle_return_color];
+        }
+      }
+      player.sync_packed();
+    } else {
+      return false;
+    }
+
+    const auto eligible =
+        MoveGenerator::get_eligible_nobles_fixed(board, board.current_player);
+    if (eligible.size() > 1) {
+      board.waiting_noble = true;
+      return true;
+    }
+    if (eligible.size() == 1)
+      acquire_noble(board, eligible[0]);
+    end_reveal_branch_turn(board);
+    return true;
+  }
+
+  static void acquire_noble(Board &board, int noble_id) {
+    PlayerState &player = board.players[board.current_player];
+    player.points += get_noble(noble_id).points;
+    player.acquired_nobles.push_back(noble_id);
+    board.nobles.remove(noble_id);
   }
 
   static void end_reveal_branch_turn(Board &board) {
@@ -1267,6 +1483,7 @@ private:
   RevealVerifiedProofDag build_proof_dag() {
     RevealVerifiedProofDag dag;
     dag.requested = true;
+    exact_memo_.clear();
     proof_node_ids_.clear();
     proof_terminal_node_ids_.clear();
     proof_nodes_.clear();
@@ -1278,6 +1495,11 @@ private:
       dag.complete = true;
       dag.nodes = std::move(proof_nodes_);
     } catch (const ProofDagBuildAborted &exc) {
+      dag.omitted_reason = exc.what();
+      proof_nodes_.clear();
+      proof_node_ids_.clear();
+      proof_terminal_node_ids_.clear();
+    } catch (const SearchLimitExceeded &exc) {
       dag.omitted_reason = exc.what();
       proof_nodes_.clear();
       proof_node_ids_.clear();
@@ -1321,7 +1543,7 @@ private:
     const size_t id = proof_nodes_.size();
     proof_nodes_.push_back(make_proof_node(id, game, depth));
     const int current_player = game.current_player();
-    const std::vector<OrderedAction> actions = ordered_actions(game);
+    const std::vector<OrderedAction> actions = proof_ordered_actions(game);
     bool proven = current_player != attacker_;
     bool expanded = false;
     for (const OrderedAction &ordered : actions) {
@@ -1356,13 +1578,13 @@ private:
       throw ProofDagBuildAborted(
           "proof DAG cannot expand non-final-round summary");
     const int current_player = game.current_player();
-    const std::vector<OrderedAction> actions = ordered_actions(game);
+    const std::vector<OrderedAction> actions = proof_ordered_actions(game);
     bool proven = current_player != attacker_;
     bool expanded = false;
     for (const OrderedAction &ordered : actions) {
       std::vector<std::pair<int, size_t>> edges;
       bool action_proven = true;
-      const bool completed = for_each_outcome(game, ordered, [&](int reveal) {
+      const bool completed = for_each_proof_outcome(game, ordered, [&](int reveal) {
         size_t child = 0;
         bool child_proven = false;
         if (game.board.waiting_noble) {
@@ -1410,7 +1632,16 @@ private:
     proof_node_ids_[key] = id;
     proof_nodes_.push_back(make_proof_node(id, game, depth));
     auto memo_it = memo_.find(key);
-    if (memo_it == memo_.end() || memo_it->second.status != ForceStatus::PROVEN) {
+    if (memo_it == memo_.end() ||
+        memo_it->second.status != ForceStatus::PROVEN) {
+      std::unordered_set<DepthStateKey, DepthStateKeyHash> path;
+      const ForceStatus refined = forced_win(game, path, depth, false);
+      if (refined != ForceStatus::PROVEN)
+        throw ProofDagBuildAborted("proof DAG reveal refinement failed");
+      memo_it = memo_.find(key);
+    }
+    if (memo_it == memo_.end() ||
+        memo_it->second.status != ForceStatus::PROVEN) {
       throw ProofDagBuildAborted("proof DAG references unmaterialized subtree");
     }
     const Entry &entry = memo_it->second;
@@ -1419,7 +1650,7 @@ private:
       return id;
     }
 
-    std::vector<OrderedAction> actions = ordered_actions(game);
+    std::vector<OrderedAction> actions = proof_ordered_actions(game);
     if (game.current_player() == attacker_) {
       actions = forced_attacker_actions(game, actions, depth, id == 0);
       actions.erase(
@@ -1431,7 +1662,7 @@ private:
     }
     const int current_player = game.current_player();
     for (const OrderedAction &ordered : actions) {
-      for_each_outcome(game, ordered, [&](int reveal_card) {
+      for_each_proof_outcome(game, ordered, [&](int reveal_card) {
         const int next_depth =
             depth - static_cast<int>(current_player == attacker_ &&
                                      game.current_player() != current_player);

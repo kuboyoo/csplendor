@@ -3124,7 +3124,12 @@ def solve_reveal_verified_mate(
     ]
     strict_verification_stats = None
     used_strict_result = False
-    if preferred_attacker_actions and remaining_time > 0.0 and remaining_nodes != 1:
+    if (
+        preferred_attacker_actions
+        and remaining_time > 0.0
+        and remaining_nodes != 1
+        and not include_proof_dag
+    ):
         strict_time = min(remaining_time, max(0.001, remaining_time * 0.25))
         strict_nodes = (
             max(1, int(remaining_nodes * 0.25))
