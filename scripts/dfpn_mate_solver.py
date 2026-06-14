@@ -189,6 +189,8 @@ def proof_dag_to_compact(
             _nullable_int(edge.get("oracle_return_color")),
             gold_as,
         )
+        if key[1] >= 0 or key[2] or key[3] >= 0 or key[4] >= 0:
+            raise ValueError("strategy DAG contains non-replayable oracle edge")
         known = action_ids.get(key)
         if known is not None:
             return known

@@ -145,6 +145,46 @@ def test_compact_strategy_dag_groups_reveals_without_losing_cards():
     assert size["compact_json_bytes"] < size["v1_json_bytes"]
 
 
+def test_compact_strategy_dag_rejects_oracle_edges():
+    v1 = {
+        "format": "strategy_dag_v1",
+        "requested": True,
+        "complete": True,
+        "validated": False,
+        "omitted_reason": None,
+        "root": 0,
+        "nodes": [
+            {
+                "id": 0,
+                "player": 0,
+                "depth": 1,
+                "kind": "state",
+                "resolution": None,
+                "children": [
+                    {
+                        "action_code": 0,
+                        "reveal_card": None,
+                        "oracle_card": 68,
+                        "oracle_reserve": False,
+                        "child": 1,
+                    }
+                ],
+            },
+            {
+                "id": 1,
+                "player": 1,
+                "depth": 0,
+                "kind": "terminal",
+                "resolution": "attacker_win",
+                "children": [],
+            },
+        ],
+    }
+
+    with pytest.raises(ValueError, match="non-replayable oracle edge"):
+        proof_dag_to_compact(v1)
+
+
 def test_dfpn_cli_kifu_output_defaults_to_reveal_verified(tmp_path, capsys, monkeypatch):
     output = tmp_path / "mate.kifu"
     expected_game = load_game_from_usi_text(BENCH_POSITION)
