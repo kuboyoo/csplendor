@@ -1,4 +1,5 @@
 import csplendor as cs
+from scripts.dfpn_mate_solver import compact_proof_dag_to_v1
 from scripts.mate_solver import load_game_from_usi_text
 
 
@@ -71,6 +72,36 @@ def test_reveal_verified_solver_validates_complete_proof_dag():
     assert dag["complete"] is True
     assert dag["validated"] is True
     assert dag["omitted_reason"] is None
+    assert all(
+        edge["oracle_card"] is None and not edge["oracle_reserve"]
+        for node in dag["nodes"]
+        for edge in node["children"]
+    )
+
+
+def test_reveal_verified_solver_can_emit_compact_proof_dag():
+    game = cs.Game(seed=0)
+    game.board.current_player = 1
+    player = game.board.get_player(1)
+    player.points = 14
+    player.bonuses = [10, 10, 10, 10, 10]
+    game.board.set_player(1, player)
+
+    result = cs.solve_reveal_verified_mate_cpp(
+        game,
+        attacker=1,
+        depth=1,
+        include_proof_dag=True,
+        proof_dag_node_limit=1000,
+        proof_dag_edge_limit=5000,
+        proof_dag_format="compact",
+    )
+
+    compact = result["proof_dag"]
+    dag = compact_proof_dag_to_v1(compact)
+    assert compact["format"] == "strategy_dag_compact_v1"
+    assert dag["complete"] is True
+    assert dag["validated"] is True
     assert all(
         edge["oracle_card"] is None and not edge["oracle_reserve"]
         for node in dag["nodes"]

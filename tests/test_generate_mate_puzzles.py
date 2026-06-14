@@ -324,6 +324,7 @@ def test_save_puzzle_writes_depth_grouped_answer_and_complete_strategy(tmp_path)
     assert problem["format"] == "csplendor_mate_problem_v1"
     assert problem["forced_win_depth"] == 3
     assert strategy["format"] == "csplendor_mate_strategy_v1"
+    assert strategy["strategy_dag"]["format"] == "strategy_dag_compact_v1"
     assert strategy["strategy_dag"]["complete"] is True
     assert "bought:[12]" in problem["position"]
     assert strategy["position"] == problem["position"]

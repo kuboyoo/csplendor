@@ -6,6 +6,7 @@ import pytest
 
 import csplendor as cs
 from csplendor.api.usi_kifu import spn_to_game
+from scripts.dfpn_mate_solver import compact_proof_dag_to_v1
 
 
 GENERATED_MATE_PUZZLES2 = Path(__file__).resolve().parents[1] / "generated" / "mate_puzzles2"
@@ -15,7 +16,10 @@ REPRESENTATIVE_PUZZLE_IDS = (
 
 
 def _node_by_id(strategy):
-    return {int(node["id"]): node for node in strategy["strategy_dag"]["nodes"]}
+    dag = strategy["strategy_dag"]
+    if dag.get("format") == "strategy_dag_compact_v1":
+        dag = compact_proof_dag_to_v1(dag)
+    return {int(node["id"]): node for node in dag["nodes"]}
 
 
 def _visible_refill_level_and_slot(game, action):
@@ -69,6 +73,8 @@ def _apply_strategy_edge(game, edge):
 
 def _assert_node_metadata_matches_game(node, game):
     assert int(node["player"]) == int(game.board.current_player)
+    if "scores" not in node:
+        return
     assert [int(v) for v in node["scores"]] == [int(v) for v in game.scores]
     assert int(node["winner"]) == int(game.board.winner)
     assert bool(node["waiting_noble"]) == bool(game.board.waiting_noble)

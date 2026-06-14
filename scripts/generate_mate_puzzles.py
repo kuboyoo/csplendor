@@ -24,9 +24,13 @@ from csplendor.api.usi_kifu import action_to_usi, game_to_spn, now_iso
 from scripts.dfpn_mate_solver import (
     PLAYER0_WIN,
     PLAYER1_WIN,
+    compact_proof_dag_to_v1,
     principal_line_to_kifu_text,
+    proof_dag_to_compact,
     solve_reveal_verified_mate,
     solve_visible_only_winner,
+    strategy_dag_max_children,
+    strategy_dag_node_count,
 )
 from scripts.mate_solver import MATE, SearchResult, SolverOptions
 
@@ -801,7 +805,10 @@ def save_puzzle(
     game_seed: int,
     attempt: int,
     quality: Optional[dict[str, object]] = None,
+    strategy_dag_format: str = "compact",
 ) -> Optional[Path]:
+    if strategy_dag_format not in {"compact", "v1", "both"}:
+        raise ValueError("strategy_dag_format must be compact, v1, or both")
     proof = result.proof_tree or {}
     verification = proof.get("verification")
     dag = verification.get("proof_dag") if isinstance(verification, dict) else None
@@ -841,6 +848,17 @@ def save_puzzle(
     }
     if quality is not None:
         problem["quality"] = quality
+    if strategy_dag_format == "compact":
+        output_dag = proof_dag_to_compact(dag)
+        extra_strategy_fields: dict[str, object] = {}
+    elif strategy_dag_format == "both":
+        output_dag = compact_proof_dag_to_v1(dag)
+        extra_strategy_fields = {
+            "strategy_dag_compact": proof_dag_to_compact(dag),
+        }
+    else:
+        output_dag = compact_proof_dag_to_v1(dag)
+        extra_strategy_fields = {}
     strategy = {
         "format": "csplendor_mate_strategy_v1",
         "problem_id": puzzle_id,
@@ -854,8 +872,9 @@ def save_puzzle(
             "reason": verification.get("reason"),
             "stats": verification.get("stats"),
         },
-        "strategy_dag": dag,
+        "strategy_dag": output_dag,
     }
+    strategy.update(extra_strategy_fields)
     kifu = principal_line_to_kifu_text(
         game,
         line,
@@ -1077,6 +1096,7 @@ def try_save_candidate(
         include_proof_dag=True,
         proof_dag_node_limit=args.proof_dag_node_limit,
         proof_dag_edge_limit=args.proof_dag_edge_limit,
+        proof_dag_format=str(_arg(args, "strategy_dag_format", "compact")),
     )
     if dag_result.status != MATE or dag_result.proof_tree is None:
         stats.unknown += 1
@@ -1089,7 +1109,6 @@ def try_save_candidate(
         return True
 
     scores = [int(score) for score in game.scores]
-    dag_nodes = list(dag.get("nodes", []))
     defender = 1 - int(game.board.current_player)
     puzzle_dir = save_puzzle(
         output_dir,
@@ -1097,6 +1116,7 @@ def try_save_candidate(
         dag_result,
         game_seed=game_seed,
         attempt=attempt,
+        strategy_dag_format=str(_arg(args, "strategy_dag_format", "compact")),
         quality={
             "sample_source": sample_source,
             "sample_ply": sample_ply,
@@ -1112,15 +1132,8 @@ def try_save_candidate(
             "uniqueness_checks": int(uniqueness["checks"]),
             "countermate_blunders": blunders,
             "countermate_blunder_count": len(blunders),
-            "strategy_dag_nodes": len(dag_nodes),
-            "max_defender_responses": max(
-                (
-                    len(node.get("children", []))
-                    for node in dag_nodes
-                    if int(node.get("player", -1)) == defender
-                ),
-                default=0,
-            ),
+            "strategy_dag_nodes": strategy_dag_node_count(dag),
+            "max_defender_responses": strategy_dag_max_children(dag, player=defender),
         },
     )
     if puzzle_dir is None:
@@ -1264,6 +1277,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--time-limit", type=float, default=30.0, help="seconds per candidate")
     parser.add_argument("--proof-dag-node-limit", type=int, default=100000)
     parser.add_argument("--proof-dag-edge-limit", type=int, default=500000)
+    parser.add_argument(
+        "--strategy-dag-format",
+        choices=("compact", "v1", "both"),
+        default="compact",
+        help="strategy DAG encoding saved in strategy.json",
+    )
     parser.add_argument("--min-losing-alternatives", type=int, default=1)
     parser.add_argument("--countermate-action-limit", type=int, default=12, help="0 checks all wrong moves")
     parser.add_argument("--countermate-node-limit", type=int, default=0, help="0 disables the search node limit")

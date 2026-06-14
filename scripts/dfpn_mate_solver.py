@@ -73,6 +73,313 @@ _WORKER_PROGRESS_STRIDE = 0
 _WORKER_PROGRESS_SLOT = -1
 _CARD_INFO_CACHE: Dict[int, Tuple[int, int, int, Tuple[int, int, int, int, int]]] = {}
 _NOBLE_REQ_CACHE: Dict[int, Tuple[int, int, int, int, int]] = {}
+_CARD_MASK_BYTES = 12
+
+
+def _json_size_bytes(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+
+def _cards_to_mask_hex(cards: Sequence[int]) -> str:
+    mask = bytearray(_CARD_MASK_BYTES)
+    for raw_card in cards:
+        card = int(raw_card)
+        if not 0 <= card < _CARD_MASK_BYTES * 8:
+            continue
+        mask[card // 8] |= 1 << (card % 8)
+    return mask.hex()
+
+
+def _mask_hex_to_cards(mask_hex: str) -> List[int]:
+    data = bytes.fromhex(mask_hex)
+    cards: List[int] = []
+    for card in range(min(len(data) * 8, 90)):
+        if data[card // 8] & (1 << (card % 8)):
+            cards.append(card)
+    return cards
+
+
+def _nullable_int(value: Any, default: int = -1) -> int:
+    return default if value is None else int(value)
+
+
+def _optional_int(value: int) -> Optional[int]:
+    return None if int(value) < 0 else int(value)
+
+
+def _compact_card_classes(reveal_cards: Sequence[int]) -> Dict[str, Any]:
+    wanted = {int(card) for card in reveal_cards}
+    classes: Dict[Tuple[int, int, int, Tuple[int, int, int, int, int]], List[int]] = {}
+    for raw_card in cs.get_all_cards():
+        card_id = int(raw_card.id)
+        if wanted and card_id not in wanted:
+            continue
+        key = (
+            int(raw_card.level),
+            int(raw_card.points),
+            int(raw_card.bonus),
+            tuple(int(raw_card.cost[color]) for color in range(5)),
+        )
+        classes.setdefault(key, []).append(card_id)
+    return {
+        "card_class_columns": ["level", "points", "bonus", "cost", "cards_mask"],
+        "card_classes": [
+            [level, points, bonus, list(cost), _cards_to_mask_hex(cards)]
+            for (level, points, bonus, cost), cards in sorted(classes.items())
+        ],
+    }
+
+
+def _strategy_dag_semantics() -> Dict[str, str]:
+    return {
+        "attacker_nodes": "one_proven_action_with_all_nondeterministic_outcomes",
+        "defender_nodes": "all_legal_actions_with_all_nondeterministic_outcomes",
+        "reveal_card": "concrete_card_id_preserved_in_reveal_groups",
+        "oracle_fields": "deprecated_and_always_empty_for_legal_strategy_dag",
+        "shared_states": "referenced_by_node_id",
+        "resolved_leaves": "terminal_results_after_expanded_final_round_responses",
+        "compact_edges": "edge rows reference action templates and exact reveal card bitsets",
+    }
+
+
+def proof_dag_to_compact(
+    proof_dag: Dict[str, Any],
+    *,
+    include_card_classes: bool = False,
+) -> Dict[str, Any]:
+    """Encode a v1 strategy DAG without losing concrete reveal-card coverage."""
+    if proof_dag.get("format") == "strategy_dag_compact_v1":
+        compact = dict(proof_dag)
+        compact.setdefault("semantics", _strategy_dag_semantics())
+        if include_card_classes and "card_classes" not in compact:
+            compact.update(_compact_card_classes([
+                card
+                for mask in compact.get("reveal_groups", [])
+                for card in _mask_hex_to_cards(str(mask))
+            ]))
+        return compact
+
+    kind_ids: Dict[str, int] = {}
+    resolution_ids: Dict[str, int] = {}
+    action_ids: Dict[Tuple[Any, ...], int] = {}
+    reveal_group_ids: Dict[Tuple[int, ...], int] = {}
+    kind_strings: List[str] = []
+    resolution_strings: List[str] = []
+    action_templates: List[List[Any]] = []
+    reveal_groups: List[str] = []
+    nodes: List[List[Any]] = []
+    edges: List[List[int]] = []
+    all_reveal_cards: List[int] = []
+
+    def intern_string(table: Dict[str, int], values: List[str], value: str) -> int:
+        known = table.get(value)
+        if known is not None:
+            return known
+        table[value] = len(values)
+        values.append(value)
+        return table[value]
+
+    def intern_action(edge: Dict[str, Any]) -> int:
+        gold_as = tuple(int(value) for value in edge.get("oracle_gold_as", [0, 0, 0, 0, 0]))
+        key = (
+            int(edge.get("action_code", 0)),
+            _nullable_int(edge.get("oracle_card")),
+            bool(edge.get("oracle_reserve", False)),
+            _nullable_int(edge.get("oracle_reserve_card")),
+            _nullable_int(edge.get("oracle_return_color")),
+            gold_as,
+        )
+        known = action_ids.get(key)
+        if known is not None:
+            return known
+        action_ids[key] = len(action_templates)
+        action_templates.append([
+            key[0],
+            key[1],
+            1 if key[2] else 0,
+            key[3],
+            key[4],
+            list(gold_as),
+        ])
+        return action_ids[key]
+
+    def intern_reveal_group(cards: Sequence[int]) -> int:
+        unique_cards = tuple(sorted({int(card) for card in cards}))
+        known = reveal_group_ids.get(unique_cards)
+        if known is not None:
+            return known
+        reveal_group_ids[unique_cards] = len(reveal_groups)
+        reveal_groups.append(_cards_to_mask_hex(unique_cards))
+        all_reveal_cards.extend(unique_cards)
+        return reveal_group_ids[unique_cards]
+
+    for raw_node in proof_dag.get("nodes", []):
+        node = dict(raw_node)
+        edge_start = len(edges)
+        grouped: Dict[Tuple[int, int, bool], Dict[str, Any]] = {}
+        order: List[Tuple[int, int, bool]] = []
+        for raw_edge in node.get("children", []):
+            edge = dict(raw_edge)
+            action_index = intern_action(edge)
+            child = int(edge.get("child", 0))
+            reveal = edge.get("reveal_card")
+            key = (action_index, child, reveal is not None)
+            if key not in grouped:
+                grouped[key] = {"cards": []}
+                order.append(key)
+            if reveal is not None:
+                grouped[key]["cards"].append(int(reveal))
+        for action_index, child, has_reveal in order:
+            reveal_group = (
+                intern_reveal_group(grouped[(action_index, child, has_reveal)]["cards"])
+                if has_reveal
+                else -1
+            )
+            edges.append([action_index, reveal_group, child])
+
+        kind_index = intern_string(kind_ids, kind_strings, str(node.get("kind", "state")))
+        resolution = node.get("resolution")
+        resolution_index = -1 if resolution is None else intern_string(
+            resolution_ids, resolution_strings, str(resolution)
+        )
+        nodes.append([
+            int(node.get("id", len(nodes))),
+            int(node.get("player", -1)),
+            int(node.get("depth", 0)),
+            kind_index,
+            resolution_index,
+            edge_start,
+            len(edges) - edge_start,
+        ])
+
+    compact = {
+        "format": "strategy_dag_compact_v1",
+        "source_format": proof_dag.get("format", "strategy_dag_v1"),
+        "requested": bool(proof_dag.get("requested", True)),
+        "complete": bool(proof_dag.get("complete", False)),
+        "validated": bool(proof_dag.get("validated", False)),
+        "omitted_reason": proof_dag.get("omitted_reason"),
+        "root": proof_dag.get("root"),
+        "semantics": _strategy_dag_semantics(),
+        "reveal_group_encoding": "card_bitset_le_hex_v1",
+        "node_columns": ["id", "player", "depth", "kind", "resolution", "edge_start", "edge_count"],
+        "edge_columns": ["action", "reveal_group", "child"],
+        "action_template_columns": [
+            "action_code",
+            "oracle_card",
+            "oracle_reserve",
+            "oracle_reserve_card",
+            "oracle_return_color",
+            "oracle_gold_as",
+        ],
+        "kind_strings": kind_strings,
+        "resolution_strings": resolution_strings,
+        "action_templates": action_templates,
+        "reveal_groups": reveal_groups,
+        "nodes": nodes,
+        "edges": edges,
+    }
+    if include_card_classes:
+        compact.update(_compact_card_classes(all_reveal_cards))
+    return compact
+
+
+def compact_proof_dag_to_v1(compact: Dict[str, Any]) -> Dict[str, Any]:
+    """Expand compact rows into the legacy v1 dictionary shape for validators."""
+    if compact.get("format") != "strategy_dag_compact_v1":
+        return dict(compact)
+
+    kind_strings = [str(value) for value in compact.get("kind_strings", [])]
+    resolution_strings = [str(value) for value in compact.get("resolution_strings", [])]
+    action_templates = list(compact.get("action_templates", []))
+    reveal_groups = list(compact.get("reveal_groups", []))
+    edge_rows = list(compact.get("edges", []))
+    nodes: List[Dict[str, Any]] = []
+
+    for raw_node in compact.get("nodes", []):
+        row = list(raw_node)
+        if len(row) < 7:
+            raise ValueError("compact strategy DAG node row is too short")
+        node_id, player, depth, kind_index, resolution_index, edge_start, edge_count = [
+            int(value) for value in row[:7]
+        ]
+        children: List[Dict[str, Any]] = []
+        for raw_edge in edge_rows[edge_start:edge_start + edge_count]:
+            edge_row = [int(value) for value in raw_edge[:3]]
+            action_index, reveal_group_index, child = edge_row
+            action = list(action_templates[action_index])
+            action_code = int(action[0])
+            oracle_card = int(action[1])
+            oracle_reserve = bool(int(action[2]))
+            oracle_reserve_card = int(action[3])
+            oracle_return_color = int(action[4])
+            oracle_gold_as = [int(value) for value in action[5]]
+            reveal_cards: List[Optional[int]]
+            if reveal_group_index < 0:
+                reveal_cards = [None]
+            else:
+                reveal_cards = _mask_hex_to_cards(str(reveal_groups[reveal_group_index]))
+            for reveal_card in reveal_cards:
+                children.append({
+                    "action_code": action_code,
+                    "reveal_card": reveal_card,
+                    "oracle_card": _optional_int(oracle_card),
+                    "oracle_reserve": oracle_reserve,
+                    "oracle_reserve_card": _optional_int(oracle_reserve_card),
+                    "oracle_return_color": _optional_int(oracle_return_color),
+                    "oracle_gold_as": oracle_gold_as,
+                    "child": child,
+                })
+        nodes.append({
+            "id": node_id,
+            "player": player,
+            "depth": depth,
+            "kind": kind_strings[kind_index] if 0 <= kind_index < len(kind_strings) else "state",
+            "resolution": (
+                resolution_strings[resolution_index]
+                if 0 <= resolution_index < len(resolution_strings)
+                else None
+            ),
+            "children": children,
+        })
+
+    return {
+        "format": "strategy_dag_v1",
+        "requested": bool(compact.get("requested", True)),
+        "complete": bool(compact.get("complete", False)),
+        "validated": bool(compact.get("validated", False)),
+        "omitted_reason": compact.get("omitted_reason"),
+        "root": compact.get("root"),
+        "nodes": nodes,
+        "semantics": compact.get("semantics"),
+    }
+
+
+def strategy_dag_size_report(v1_dag: Dict[str, Any], compact_dag: Dict[str, Any]) -> Dict[str, Any]:
+    v1_bytes = _json_size_bytes(v1_dag)
+    compact_bytes = _json_size_bytes(compact_dag)
+    return {
+        "v1_json_bytes": v1_bytes,
+        "compact_json_bytes": compact_bytes,
+        "compression_ratio": (compact_bytes / v1_bytes) if v1_bytes else None,
+        "saved_bytes": max(0, v1_bytes - compact_bytes),
+    }
+
+
+def strategy_dag_node_count(dag: Dict[str, Any]) -> int:
+    return len(dag.get("nodes", [])) if isinstance(dag, dict) else 0
+
+
+def strategy_dag_max_children(dag: Dict[str, Any], *, player: Optional[int] = None) -> int:
+    v1 = compact_proof_dag_to_v1(dag) if dag.get("format") == "strategy_dag_compact_v1" else dag
+    return max(
+        (
+            len(node.get("children", []))
+            for node in v1.get("nodes", [])
+            if player is None or int(node.get("player", -1)) == int(player)
+        ),
+        default=0,
+    )
 
 
 @dataclass
@@ -3070,8 +3377,11 @@ def solve_reveal_verified_mate(
     include_proof_dag: bool = False,
     proof_dag_node_limit: int = 100000,
     proof_dag_edge_limit: int = 500000,
+    proof_dag_format: str = "v1",
 ) -> SearchResult:
     options = options or SolverOptions()
+    if proof_dag_format not in {"v1", "compact", "both"}:
+        raise ValueError("proof_dag_format must be 'v1', 'compact', or 'both'")
     if attacker != int(game.board.current_player):
         raise ValueError("reveal-verified mate requires attacker to be the current player")
     if not hasattr(cs, "solve_reveal_verified_mate_cpp"):
@@ -3155,6 +3465,7 @@ def solve_reveal_verified_mate(
                 proof_dag_node_limit=max(0, int(proof_dag_node_limit)),
                 proof_dag_edge_limit=max(0, int(proof_dag_edge_limit)),
                 strict_preferred_attacker_prefix=int(strict_prefix),
+                proof_dag_format="v1",
             )
             for key, value in dict(strict_raw["stats"]).items():
                 if isinstance(value, (int, float)):
@@ -3193,6 +3504,11 @@ def solve_reveal_verified_mate(
                 include_proof_dag=bool(include_proof_dag),
                 proof_dag_node_limit=max(0, int(proof_dag_node_limit)),
                 proof_dag_edge_limit=max(0, int(proof_dag_edge_limit)),
+                proof_dag_format=(
+                    "compact"
+                    if include_proof_dag and proof_dag_format == "compact"
+                    else "v1"
+                ),
             )
     else:
         raw = cs.solve_reveal_verified_mate_cpp(
@@ -3205,6 +3521,11 @@ def solve_reveal_verified_mate(
             include_proof_dag=bool(include_proof_dag),
             proof_dag_node_limit=max(0, int(proof_dag_node_limit)),
             proof_dag_edge_limit=max(0, int(proof_dag_edge_limit)),
+            proof_dag_format=(
+                "compact"
+                if include_proof_dag and proof_dag_format == "compact"
+                else "v1"
+            ),
         )
     verification_stats = raw["stats"]
     if strict_verification_stats is not None and not used_strict_result:
@@ -3245,16 +3566,24 @@ def solve_reveal_verified_mate(
     }
     if include_proof_dag:
         proof_dag = dict(raw["proof_dag"])
-        proof_dag["format"] = "strategy_dag_v1"
-        proof_dag["semantics"] = {
-            "attacker_nodes": "one_proven_action_with_all_nondeterministic_outcomes",
-            "defender_nodes": "all_legal_actions_with_all_nondeterministic_outcomes",
-            "reveal_card": "concrete_card_id_revealed_by_purchase_or_reserve",
-            "oracle_fields": "deprecated_and_always_empty_for_legal_strategy_dag",
-            "shared_states": "referenced_by_node_id",
-            "resolved_leaves": "terminal_results_after_expanded_final_round_responses",
-        }
-        verification["proof_dag"] = proof_dag
+        if proof_dag.get("format") == "strategy_dag_compact_v1":
+            proof_dag.setdefault("semantics", _strategy_dag_semantics())
+            verification["proof_dag"] = proof_dag
+        else:
+            proof_dag["format"] = "strategy_dag_v1"
+            proof_dag["semantics"] = _strategy_dag_semantics()
+            if proof_dag_format == "compact":
+                verification["proof_dag"] = proof_dag_to_compact(proof_dag)
+            elif proof_dag_format == "both":
+                compact_dag = proof_dag_to_compact(proof_dag)
+                verification["proof_dag"] = proof_dag
+                verification["proof_dag_compact"] = compact_dag
+                verification["proof_dag_size"] = strategy_dag_size_report(
+                    proof_dag,
+                    compact_dag,
+                )
+            else:
+                verification["proof_dag"] = proof_dag
     proof = {
         "mode": "reveal_verified_mate",
         "attacker": int(attacker),
@@ -3491,6 +3820,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="maximum edges emitted by --reveal-proof-dag; 0 disables the limit",
     )
     parser.add_argument(
+        "--proof-dag-format",
+        choices=("compact", "v1", "both"),
+        default="compact",
+        help="strategy DAG encoding emitted by --reveal-proof-dag",
+    )
+    parser.add_argument(
         "--jobs",
         type=int,
         default=1,
@@ -3627,6 +3962,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 include_proof_dag=args.reveal_proof_dag,
                 proof_dag_node_limit=args.proof_dag_node_limit,
                 proof_dag_edge_limit=args.proof_dag_edge_limit,
+                proof_dag_format=args.proof_dag_format,
             )
             if args.kifu_output:
                 if result.status != MATE or result.proof_tree is None:

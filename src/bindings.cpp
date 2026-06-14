@@ -19,8 +19,250 @@
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <algorithm>
+#include <array>
+#include <iomanip>
+#include <map>
+#include <sstream>
+#include <string>
+#include <stdexcept>
+#include <unordered_map>
 
 namespace py = pybind11;
+
+namespace {
+
+constexpr size_t kProofDagCardMaskBytes = (CARD_COUNT + 7) / 8;
+
+std::string proof_dag_card_mask_hex(const std::vector<int> &cards) {
+  std::array<uint8_t, kProofDagCardMaskBytes> mask = {0};
+  for (int card : cards) {
+    if (card < 0 || card >= CARD_COUNT)
+      continue;
+    mask[static_cast<size_t>(card) / 8] |=
+        static_cast<uint8_t>(1u << (static_cast<size_t>(card) % 8));
+  }
+
+  std::ostringstream out;
+  out << std::hex << std::setfill('0');
+  for (uint8_t byte : mask)
+    out << std::setw(2) << static_cast<int>(byte);
+  return out.str();
+}
+
+std::string proof_dag_action_key(const RevealVerifiedProofEdge &edge) {
+  std::ostringstream out;
+  out << edge.action_code << "|" << edge.oracle_card << "|"
+      << edge.oracle_reserve << "|" << edge.oracle_reserve_card << "|"
+      << edge.oracle_return_color;
+  for (uint8_t value : edge.oracle_gold_as)
+    out << "|" << static_cast<int>(value);
+  return out.str();
+}
+
+size_t intern_proof_dag_string(std::map<std::string, size_t> &ids,
+                               py::list &values,
+                               const std::string &value) {
+  auto known = ids.find(value);
+  if (known != ids.end())
+    return known->second;
+  const size_t index = ids.size();
+  ids.emplace(value, index);
+  values.append(value);
+  return index;
+}
+
+size_t intern_proof_dag_action(
+    std::unordered_map<std::string, size_t> &ids, py::list &actions,
+    const RevealVerifiedProofEdge &edge) {
+  const std::string key = proof_dag_action_key(edge);
+  auto known = ids.find(key);
+  if (known != ids.end())
+    return known->second;
+  const size_t index = ids.size();
+  ids.emplace(key, index);
+
+  py::list gold_as;
+  for (uint8_t value : edge.oracle_gold_as)
+    gold_as.append(static_cast<int>(value));
+
+  py::list item;
+  item.append(edge.action_code);
+  item.append(edge.oracle_card);
+  item.append(edge.oracle_reserve ? 1 : 0);
+  item.append(edge.oracle_reserve_card);
+  item.append(edge.oracle_return_color);
+  item.append(gold_as);
+  actions.append(item);
+  return index;
+}
+
+size_t intern_proof_dag_reveal_group(
+    std::unordered_map<std::string, size_t> &ids, py::list &groups,
+    std::vector<int> cards) {
+  std::sort(cards.begin(), cards.end());
+  cards.erase(std::unique(cards.begin(), cards.end()), cards.end());
+  const std::string key = proof_dag_card_mask_hex(cards);
+  auto known = ids.find(key);
+  if (known != ids.end())
+    return known->second;
+  const size_t index = ids.size();
+  ids.emplace(key, index);
+  groups.append(key);
+  return index;
+}
+
+py::dict proof_dag_to_py_v1(const RevealVerifiedProofDag &dag) {
+  py::dict proof_dag;
+  proof_dag["requested"] = dag.requested;
+  proof_dag["complete"] = dag.complete;
+  proof_dag["validated"] = dag.validated;
+  proof_dag["omitted_reason"] =
+      dag.omitted_reason.empty() ? py::none() : py::cast(dag.omitted_reason);
+  proof_dag["root"] = dag.complete ? py::cast(dag.root) : py::none();
+  py::list proof_nodes;
+  for (const RevealVerifiedProofNode &node : dag.nodes) {
+    py::dict item;
+    item["id"] = node.id;
+    item["player"] = node.player;
+    item["depth"] = node.depth;
+    item["kind"] = node.kind;
+    item["scores"] = node.scores;
+    item["winner"] = node.winner;
+    item["waiting_noble"] = node.waiting_noble;
+    item["nobles"] = node.nobles;
+    item["acquired_nobles"] = node.acquired_nobles;
+    item["resolution"] =
+        node.resolution.empty() ? py::none() : py::cast(node.resolution);
+    py::list children;
+    for (const RevealVerifiedProofEdge &edge : node.children) {
+      py::dict child;
+      child["action_code"] = edge.action_code;
+      child["reveal_card"] =
+          edge.reveal_card < 0 ? py::none() : py::cast(edge.reveal_card);
+      child["oracle_card"] =
+          edge.oracle_card < 0 ? py::none() : py::cast(edge.oracle_card);
+      child["oracle_reserve"] = edge.oracle_reserve;
+      child["oracle_reserve_card"] =
+          edge.oracle_reserve_card < 0 ? py::none()
+                                       : py::cast(edge.oracle_reserve_card);
+      child["oracle_return_color"] =
+          edge.oracle_return_color < 0 ? py::none()
+                                       : py::cast(edge.oracle_return_color);
+      child["oracle_gold_as"] = edge.oracle_gold_as;
+      child["child"] = edge.child;
+      children.append(child);
+    }
+    item["children"] = children;
+    proof_nodes.append(item);
+  }
+  proof_dag["nodes"] = proof_nodes;
+  return proof_dag;
+}
+
+py::dict proof_dag_to_py_compact(const RevealVerifiedProofDag &dag) {
+  py::dict compact;
+  compact["format"] = "strategy_dag_compact_v1";
+  compact["requested"] = dag.requested;
+  compact["complete"] = dag.complete;
+  compact["validated"] = dag.validated;
+  compact["omitted_reason"] =
+      dag.omitted_reason.empty() ? py::none() : py::cast(dag.omitted_reason);
+  compact["root"] = dag.complete ? py::cast(dag.root) : py::none();
+  compact["reveal_group_encoding"] = "card_bitset_le_hex_v1";
+
+  compact["node_columns"] =
+      py::make_tuple("id", "player", "depth", "kind", "resolution",
+                     "edge_start", "edge_count");
+  compact["edge_columns"] = py::make_tuple("action", "reveal_group", "child");
+  compact["action_template_columns"] =
+      py::make_tuple("action_code", "oracle_card", "oracle_reserve",
+                     "oracle_reserve_card", "oracle_return_color",
+                     "oracle_gold_as");
+
+  py::list kind_strings;
+  py::list resolution_strings;
+  py::list action_templates;
+  py::list reveal_groups;
+  py::list nodes;
+  py::list edges;
+  std::map<std::string, size_t> kind_ids;
+  std::map<std::string, size_t> resolution_ids;
+  std::unordered_map<std::string, size_t> action_ids;
+  std::unordered_map<std::string, size_t> reveal_group_ids;
+
+  size_t edge_count = 0;
+  for (const RevealVerifiedProofNode &node : dag.nodes) {
+    const size_t edge_start = edge_count;
+    struct LocalGroup {
+      size_t action = 0;
+      int reveal_group = -1;
+      size_t child = 0;
+      bool has_reveal = false;
+      std::vector<int> reveal_cards;
+    };
+
+    std::vector<LocalGroup> groups;
+    std::unordered_map<std::string, size_t> group_ids;
+    for (const RevealVerifiedProofEdge &edge : node.children) {
+      const size_t action_index =
+          intern_proof_dag_action(action_ids, action_templates, edge);
+      const bool has_reveal = edge.reveal_card >= 0;
+      std::ostringstream key;
+      key << action_index << "|" << edge.child << "|" << has_reveal;
+      const std::string key_text = key.str();
+      auto known = group_ids.find(key_text);
+      if (known == group_ids.end()) {
+        known = group_ids.emplace(key_text, groups.size()).first;
+        groups.push_back(LocalGroup{action_index, -1, edge.child, has_reveal,
+                                    {}});
+      }
+      if (has_reveal)
+        groups[known->second].reveal_cards.push_back(edge.reveal_card);
+    }
+
+    for (LocalGroup &group : groups) {
+      int reveal_group = -1;
+      if (group.has_reveal) {
+        reveal_group = static_cast<int>(intern_proof_dag_reveal_group(
+            reveal_group_ids, reveal_groups, group.reveal_cards));
+      }
+      py::list item;
+      item.append(group.action);
+      item.append(reveal_group);
+      item.append(group.child);
+      edges.append(item);
+      ++edge_count;
+    }
+
+    const int kind_index = static_cast<int>(
+        intern_proof_dag_string(kind_ids, kind_strings, node.kind));
+    const int resolution_index =
+        node.resolution.empty()
+            ? -1
+            : static_cast<int>(intern_proof_dag_string(
+                  resolution_ids, resolution_strings, node.resolution));
+    py::list item;
+    item.append(node.id);
+    item.append(node.player);
+    item.append(node.depth);
+    item.append(kind_index);
+    item.append(resolution_index);
+    item.append(edge_start);
+    item.append(edge_count - edge_start);
+    nodes.append(item);
+  }
+
+  compact["kind_strings"] = kind_strings;
+  compact["resolution_strings"] = resolution_strings;
+  compact["action_templates"] = action_templates;
+  compact["reveal_groups"] = reveal_groups;
+  compact["nodes"] = nodes;
+  compact["edges"] = edges;
+  return compact;
+}
+
+} // namespace
 
 // Python callback featurizer
 class PyFeaturizer : public IFeaturizer {
@@ -417,7 +659,12 @@ PYBIND11_MODULE(_csplendor, m) {
          bool include_proof_dag, size_t proof_dag_node_limit,
          size_t proof_dag_edge_limit, uint64_t required_root_action,
          bool strict_preferred_attacker_actions,
-         size_t strict_preferred_attacker_prefix) {
+         size_t strict_preferred_attacker_prefix,
+         const std::string &proof_dag_format) {
+        if (proof_dag_format != "v1" && proof_dag_format != "compact") {
+          throw std::invalid_argument(
+              "proof_dag_format must be 'v1' or 'compact'");
+        }
         RevealVerifiedSearchResult result;
         {
           py::gil_scoped_release release;
@@ -475,57 +722,10 @@ PYBIND11_MODULE(_csplendor, m) {
         payload["memoized_states"] = result.memoized_states;
         payload["stats"] = stats;
         payload["line"] = line;
-        py::dict proof_dag;
-        proof_dag["requested"] = result.proof_dag.requested;
-        proof_dag["complete"] = result.proof_dag.complete;
-        proof_dag["validated"] = result.proof_dag.validated;
-        proof_dag["omitted_reason"] =
-            result.proof_dag.omitted_reason.empty()
-                ? py::none()
-                : py::cast(result.proof_dag.omitted_reason);
-        proof_dag["root"] =
-            result.proof_dag.complete ? py::cast(result.proof_dag.root)
-                                      : py::none();
-        py::list proof_nodes;
-        for (const RevealVerifiedProofNode &node : result.proof_dag.nodes) {
-          py::dict item;
-          item["id"] = node.id;
-          item["player"] = node.player;
-          item["depth"] = node.depth;
-          item["kind"] = node.kind;
-          item["scores"] = node.scores;
-          item["winner"] = node.winner;
-          item["waiting_noble"] = node.waiting_noble;
-          item["nobles"] = node.nobles;
-          item["acquired_nobles"] = node.acquired_nobles;
-          item["resolution"] =
-              node.resolution.empty() ? py::none() : py::cast(node.resolution);
-          py::list children;
-          for (const RevealVerifiedProofEdge &edge : node.children) {
-            py::dict child;
-            child["action_code"] = edge.action_code;
-            child["reveal_card"] =
-                edge.reveal_card < 0 ? py::none() : py::cast(edge.reveal_card);
-            child["oracle_card"] =
-                edge.oracle_card < 0 ? py::none() : py::cast(edge.oracle_card);
-            child["oracle_reserve"] = edge.oracle_reserve;
-            child["oracle_reserve_card"] =
-                edge.oracle_reserve_card < 0
-                    ? py::none()
-                    : py::cast(edge.oracle_reserve_card);
-            child["oracle_return_color"] =
-                edge.oracle_return_color < 0
-                    ? py::none()
-                    : py::cast(edge.oracle_return_color);
-            child["oracle_gold_as"] = edge.oracle_gold_as;
-            child["child"] = edge.child;
-            children.append(child);
-          }
-          item["children"] = children;
-          proof_nodes.append(item);
-        }
-        proof_dag["nodes"] = proof_nodes;
-        payload["proof_dag"] = proof_dag;
+        payload["proof_dag"] =
+            proof_dag_format == "compact"
+                ? proof_dag_to_py_compact(result.proof_dag)
+                : proof_dag_to_py_v1(result.proof_dag);
         return payload;
       },
       py::arg("game"), py::arg("attacker"), py::arg("depth"),
@@ -536,7 +736,8 @@ PYBIND11_MODULE(_csplendor, m) {
       py::arg("proof_dag_edge_limit") = 500000,
       py::arg("required_root_action") = UINT64_MAX,
       py::arg("strict_preferred_attacker_actions") = false,
-      py::arg("strict_preferred_attacker_prefix") = 0);
+      py::arg("strict_preferred_attacker_prefix") = 0,
+      py::arg("proof_dag_format") = "v1");
 
   m.def("get_card", &get_card, py::arg("id"));
   m.def("get_noble", &get_noble, py::arg("id"));

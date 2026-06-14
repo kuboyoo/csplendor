@@ -4,11 +4,14 @@ from csplendor.api.usi_kifu import action_to_usi, game_to_spn, parse_kifu_text
 
 from scripts.dfpn_mate_solver import (
     DFPNMateSolver,
+    compact_proof_dag_to_v1,
     principal_line_to_kifu_text,
+    proof_dag_to_compact,
     proof_tree_to_kifu_text,
     solve_game_dfpn,
     solve_reveal_verified_mate,
     solve_visible_only_winner,
+    strategy_dag_size_report,
 )
 from scripts import dfpn_mate_solver
 from scripts.mate_solver import (
@@ -83,6 +86,65 @@ def test_solver_line_serializes_kifu_moves():
     assert parsed["moves"] == [{"player": 0, "usi": usi}]
 
 
+def test_compact_strategy_dag_groups_reveals_without_losing_cards():
+    reveal_edges = [
+        {"action_code": 123, "reveal_card": card, "child": 1}
+        for card in range(40)
+    ]
+    v1 = {
+        "format": "strategy_dag_v1",
+        "requested": True,
+        "complete": True,
+        "validated": True,
+        "omitted_reason": None,
+        "root": 0,
+        "nodes": [
+            {
+                "id": 0,
+                "player": 0,
+                "depth": 3,
+                "kind": "state",
+                "resolution": None,
+                "children": reveal_edges + [
+                    {"action_code": 456, "reveal_card": None, "child": 2}
+                ],
+            },
+            {
+                "id": 1,
+                "player": 1,
+                "depth": 2,
+                "kind": "terminal",
+                "resolution": "attacker_win",
+                "children": [],
+            },
+            {
+                "id": 2,
+                "player": 1,
+                "depth": 2,
+                "kind": "terminal",
+                "resolution": "attacker_win",
+                "children": [],
+            },
+        ],
+    }
+
+    compact = proof_dag_to_compact(v1)
+    expanded = compact_proof_dag_to_v1(compact)
+    size = strategy_dag_size_report(v1, compact)
+
+    root_edges = expanded["nodes"][0]["children"]
+    recovered_reveals = sorted(
+        edge["reveal_card"]
+        for edge in root_edges
+        if edge["action_code"] == 123
+    )
+    assert compact["format"] == "strategy_dag_compact_v1"
+    assert len(compact["edges"]) == 2
+    assert recovered_reveals == list(range(40))
+    assert any(edge["reveal_card"] is None for edge in root_edges)
+    assert size["compact_json_bytes"] < size["v1_json_bytes"]
+
+
 def test_dfpn_cli_kifu_output_defaults_to_reveal_verified(tmp_path, capsys, monkeypatch):
     output = tmp_path / "mate.kifu"
     expected_game = load_game_from_usi_text(BENCH_POSITION)
@@ -126,7 +188,12 @@ def test_dfpn_cli_kifu_output_defaults_to_reveal_verified(tmp_path, capsys, monk
     parsed = parse_kifu_text(output.read_text(encoding="utf-8"))
     assert code == 0
     assert '"status": "Mate"' in capsys.readouterr().out
-    assert calls == [(0, {"include_proof_dag": False, "proof_dag_node_limit": 100000, "proof_dag_edge_limit": 500000})]
+    assert calls == [(0, {
+        "include_proof_dag": False,
+        "proof_dag_node_limit": 100000,
+        "proof_dag_edge_limit": 500000,
+        "proof_dag_format": "compact",
+    })]
     assert [move["usi"] for move in parsed["moves"]] == [expected_usi]
     assert parsed["total_turns"] == 1
 
