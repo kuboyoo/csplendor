@@ -2,7 +2,6 @@ import csplendor as cs
 from scripts.dfpn_mate_solver import compact_proof_dag_to_v1
 from scripts.mate_solver import load_game_from_usi_text
 
-
 BENCH_POSITION = (
     "position bank:W1U3G3R3K0D4 | "
     "visible:L1[35,33,20,24]L2[46,61,51,66]L3[80,86,87,88] | "

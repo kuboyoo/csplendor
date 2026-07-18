@@ -1,3 +1,5 @@
+import pytest
+
 from csplendor import Game
 from csplendor.api.app import _build_replay_from_kifu_text
 from csplendor.api.usi_kifu import (
@@ -9,7 +11,6 @@ from csplendor.api.usi_kifu import (
     position_to_game,
     spn_to_game,
 )
-import pytest
 
 
 def _signature(action):

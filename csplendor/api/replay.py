@@ -9,21 +9,162 @@ This module decodes the ori board matrix back into a ``GameStateSchema``
 that the frontend ``GameBoard`` component can render.
 """
 
-from fastapi import APIRouter, HTTPException
-from typing import Dict, List, Optional
-from pydantic import BaseModel
-import os
 import glob
+import math
+import os
 import pickle
+import stat
 import uuid
+from typing import Dict, List, Optional
 
 import numpy as np
-
-from .schemas import (
-    GameStateSchema, BoardSchema, PlayerSchema, ActionSchema,
-)
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 replay_router = APIRouter(prefix="/replay", tags=["replay"])
+
+_MAX_REPLAY_BYTES = 512 * 1024 * 1024
+_MAX_REPLAY_EXAMPLES = 1_000_000
+
+
+def _replay_data_dir() -> str:
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+    return os.path.realpath(os.path.join(base_dir, "alphazero-deepsets", "data"))
+
+
+def _resolve_replay_path(path: str) -> str:
+    """Resolve a server-owned replay file without allowing path traversal.
+
+    Pickle is safe only for trusted local files. The HTTP API therefore never
+    opens a caller-selected file outside its configured replay directory.
+    """
+
+    if not isinstance(path, str) or not path.strip():
+        raise HTTPException(status_code=400, detail="Replay filename is required")
+    if "\0" in path:
+        raise HTTPException(status_code=400, detail="Invalid replay filename")
+
+    data_dir = os.path.realpath(_replay_data_dir())
+    try:
+        candidate = path if os.path.isabs(path) else os.path.join(data_dir, path)
+        candidate = os.path.realpath(candidate)
+    except (OSError, ValueError) as error:
+        raise HTTPException(
+            status_code=400, detail="Invalid replay filename"
+        ) from error
+    try:
+        contained = os.path.commonpath([data_dir, candidate]) == data_dir
+    except ValueError:
+        contained = False
+    if not contained:
+        raise HTTPException(
+            status_code=400,
+            detail="Replay path must stay inside the configured data directory",
+        )
+    if not candidate.endswith(".pkl"):
+        raise HTTPException(status_code=400, detail="Only .pkl files are supported")
+    try:
+        if not os.path.isfile(candidate):
+            raise HTTPException(status_code=404, detail="Replay file not found")
+        if os.path.getsize(candidate) > _MAX_REPLAY_BYTES:
+            raise HTTPException(status_code=413, detail="Replay file is too large")
+    except HTTPException:
+        raise
+    except OSError as error:
+        raise HTTPException(status_code=404, detail="Replay file not found") from error
+    return candidate
+
+
+def _coerce_replay_int(value, *, field: str, minimum: int = 0) -> int:
+    """Convert an integer-like replay scalar without silently truncating it."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise HTTPException(status_code=400, detail=f"Invalid replay {field}")
+    if isinstance(value, (int, np.integer)):
+        converted = int(value)
+    elif isinstance(value, (float, np.floating)):
+        converted_float = float(value)
+        if not math.isfinite(converted_float) or not converted_float.is_integer():
+            raise HTTPException(status_code=400, detail=f"Invalid replay {field}")
+        converted = int(converted_float)
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid replay {field}")
+
+    if converted < minimum or converted > np.iinfo(np.int64).max:
+        raise HTTPException(status_code=400, detail=f"Invalid replay {field}")
+    return converted
+
+
+def _coerce_replay_float(value, *, field: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise HTTPException(status_code=400, detail=f"Invalid replay {field}")
+    try:
+        converted = float(value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid replay {field}"
+        ) from error
+    if not math.isfinite(converted):
+        raise HTTPException(status_code=400, detail=f"Invalid replay {field}")
+    return converted
+
+
+def _validate_replay_examples(data) -> list:
+    if not isinstance(data, list) or not data:
+        raise HTTPException(status_code=400, detail="Invalid pkl format")
+    if len(data) > _MAX_REPLAY_EXAMPLES:
+        raise HTTPException(status_code=413, detail="Replay contains too many steps")
+
+    required = {"board_ori", "policy_406", "player", "turn"}
+    normalized = []
+    for example in data:
+        if not isinstance(example, dict) or not required.issubset(example):
+            raise HTTPException(status_code=400, detail="Invalid replay example")
+        board = example["board_ori"]
+        policy = example["policy_406"]
+        if not isinstance(board, np.ndarray) or board.shape != (56, 7):
+            raise HTTPException(status_code=400, detail="Invalid replay board shape")
+        if (
+            np.issubdtype(board.dtype, np.bool_)
+            or not np.issubdtype(board.dtype, np.integer)
+            or not np.can_cast(board.dtype, np.dtype(np.int64), casting="safe")
+        ):
+            raise HTTPException(status_code=400, detail="Invalid replay board dtype")
+        if not isinstance(policy, np.ndarray) or policy.shape != (406,):
+            raise HTTPException(status_code=400, detail="Invalid replay policy shape")
+        if (
+            np.issubdtype(policy.dtype, np.bool_)
+            or not (
+                np.issubdtype(policy.dtype, np.integer)
+                or np.issubdtype(policy.dtype, np.floating)
+            )
+            or not bool(np.isfinite(policy).all())
+        ):
+            raise HTTPException(status_code=400, detail="Invalid replay policy dtype")
+
+        player = _coerce_replay_int(example["player"], field="player")
+        if player not in (0, 1):
+            raise HTTPException(status_code=400, detail="Invalid replay player")
+        turn = _coerce_replay_int(example["turn"], field="turn")
+        final_turn = _coerce_replay_int(
+            example.get("final_turn", 9999), field="final_turn"
+        )
+        value_target = _coerce_replay_float(
+            example.get("value_target", 0.0), field="value_target"
+        )
+
+        # ReplaySession groups by turn before the step endpoint performs any
+        # conversions. Keep the validated representation canonical here.
+        normalized_example = dict(example)
+        normalized_example.update(
+            player=player,
+            turn=turn,
+            final_turn=final_turn,
+            value_target=value_target,
+        )
+        normalized.append(normalized_example)
+    return normalized
+
 
 # ── Card / Noble lookup tables ──────────────────────────────────────────
 # These replicate the card data from the frontend's gameData.ts so that we
@@ -169,6 +310,7 @@ for n in _NOBLES:
 
 # ── In-memory replay sessions ──────────────────────────────────────────
 
+
 class ReplaySession:
     """Stores a loaded replay."""
 
@@ -196,6 +338,7 @@ _sessions: Dict[str, ReplaySession] = {}
 
 # ── Board decoder ───────────────────────────────────────────────────────
 
+
 def _card_id_from_ori(row0: np.ndarray, row1: np.ndarray) -> int:
     """
     Given two rows from the ori state (card cost row + card bonus row),
@@ -214,7 +357,9 @@ def _card_id_from_ori(row0: np.ndarray, row1: np.ndarray) -> int:
     # ori:      White=0  Blue=1  Green=2  Red=3  Black=4
     # gameData: Diamond=0 Sapphire=1 Emerald=2 Ruby=3 Onyx=4
     # Mapping: same indices!
-    points = int(row0[6]) if int(row0[6]) > 0 else (int(row1[6]) if int(row1[6]) > 0 else 0)
+    points = (
+        int(row0[6]) if int(row0[6]) > 0 else (int(row1[6]) if int(row1[6]) > 0 else 0)
+    )
     key = (cost, bonus, points)
     return _card_lookup.get(key, -1)
 
@@ -340,7 +485,7 @@ def _decode_board_ori(
     players[opponent_p] = p_opponent
 
     # ── Determine game state ──
-    game_over = (turn >= final_turn)
+    game_over = turn >= final_turn
     winner = -1
     if game_over:
         if value_target > 0:
@@ -369,11 +514,13 @@ def _decode_board_ori(
 
 # ── Pydantic response models ───────────────────────────────────────────
 
+
 class ReplayFileInfo(BaseModel):
     filename: str
     path: str
-    num_examples: int
+    num_examples: Optional[int]
     size_mb: float
+
 
 class ReplaySessionInfo(BaseModel):
     session_id: str
@@ -381,6 +528,7 @@ class ReplaySessionInfo(BaseModel):
     num_games: int
     total_steps: int
     game_lengths: List[int]
+
 
 class ReplayStepResponse(BaseModel):
     state: dict  # GameState-compatible
@@ -395,52 +543,78 @@ class ReplayStepResponse(BaseModel):
 
 # ── Endpoints ───────────────────────────────────────────────────────────
 
+
 @replay_router.get("/files")
 async def list_replay_files() -> Dict[str, List[ReplayFileInfo]]:
     """List available .pkl files under alphazero-deepsets/data/."""
-    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-    data_dir = os.path.join(base_dir, "alphazero-deepsets", "data")
+    data_dir = os.path.realpath(_replay_data_dir())
 
     files = []
     if os.path.isdir(data_dir):
         for pkl_path in sorted(glob.glob(os.path.join(data_dir, "*.pkl"))):
-            size_bytes = os.path.getsize(pkl_path)
-            # Quick count without fully loading
             try:
-                with open(pkl_path, "rb") as f:
-                    data = pickle.load(f)
-                num_examples = len(data) if isinstance(data, list) else 0
-            except Exception:
-                num_examples = 0
-            files.append(ReplayFileInfo(
-                filename=os.path.basename(pkl_path),
-                path=pkl_path,
-                num_examples=num_examples,
-                size_mb=round(size_bytes / 1024 / 1024, 2),
-            ))
+                resolved_path = os.path.realpath(pkl_path)
+                if os.path.commonpath([data_dir, resolved_path]) != data_dir:
+                    continue
+                if not os.path.isfile(resolved_path):
+                    continue
+                size_bytes = os.path.getsize(resolved_path)
+            except (OSError, ValueError):
+                # A replay may disappear while the directory is being listed,
+                # and an untrusted symlink must never be followed outside it.
+                continue
+            files.append(
+                ReplayFileInfo(
+                    filename=os.path.basename(pkl_path),
+                    # Never expose an absolute server filesystem path. The load
+                    # endpoint accepts this directory-local filename.
+                    path=os.path.basename(pkl_path),
+                    # Listing must not unpickle files merely to count examples.
+                    num_examples=None,
+                    size_mb=round(size_bytes / 1024 / 1024, 2),
+                )
+            )
 
     return {"files": files}
 
 
 @replay_router.post("/load")
 async def load_replay(path: str) -> ReplaySessionInfo:
-    """Load a .pkl file and create a replay session."""
-    if not os.path.isfile(path):
-        raise HTTPException(status_code=404, detail=f"File not found: {path}")
-    if not path.endswith(".pkl"):
-        raise HTTPException(status_code=400, detail="Only .pkl files are supported")
+    """Load a trusted, configured-directory .pkl replay."""
+    resolved_path = _resolve_replay_path(path)
 
+    fd = None
     try:
-        with open(path, "rb") as f:
-            data = pickle.load(f)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to load pkl: {e}")
-
-    if not isinstance(data, list) or len(data) == 0:
-        raise HTTPException(status_code=400, detail="Invalid pkl format")
+        flags = os.O_RDONLY
+        flags |= getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_CLOEXEC", 0)
+        # Resolve first for compatibility with in-directory symlinks, then
+        # refuse a final-component symlink introduced by a concurrent swap.
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(resolved_path, flags)
+        with os.fdopen(fd, "rb") as f:
+            fd = None
+            file_stat = os.fstat(f.fileno())
+            if not stat.S_ISREG(file_stat.st_mode):
+                raise HTTPException(status_code=400, detail="Invalid replay file")
+            if file_stat.st_size > _MAX_REPLAY_BYTES:
+                raise HTTPException(status_code=413, detail="Replay file is too large")
+            # The directory and file are administrator-controlled; see the
+            # module documentation and doc/web_api.md for this trust boundary.
+            data = pickle.load(f)  # noqa: S301
+    except HTTPException:
+        raise
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Replay file not found") from error
+    except Exception as error:
+        raise HTTPException(status_code=400, detail="Failed to load replay") from error
+    finally:
+        if fd is not None:
+            os.close(fd)
+    data = _validate_replay_examples(data)
 
     session_id = str(uuid.uuid4())
-    session = ReplaySession(os.path.basename(path), data)
+    session = ReplaySession(os.path.basename(resolved_path), data)
     _sessions[session_id] = session
 
     return ReplaySessionInfo(

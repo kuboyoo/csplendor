@@ -5,7 +5,6 @@ import pytest
 
 from csplendor import ActionEncoderV2, ActionEncoderV3, ActionType, Game
 
-
 EXCHANGE_TYPES = {
     ActionType.TAKE_DIFFERENT,
     ActionType.TAKE_SAME,

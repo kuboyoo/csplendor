@@ -67,3 +67,19 @@ def test_clone_light_keeps_state_but_drops_history():
     assert light_clone.board_hash() == game.board_hash()
     assert full_clone.undo() is True
     assert light_clone.undo() is False
+
+
+def test_multiple_undos_restore_each_history_snapshot():
+    game = cs.Game(seed=23)
+    snapshots = [(game.board_hash(), repr(game.board))]
+
+    for _ in range(3):
+        assert game.apply(game.legal_actions[0]) is True
+        snapshots.append((game.board_hash(), repr(game.board)))
+
+    for expected_hash, expected_repr in reversed(snapshots[:-1]):
+        assert game.undo() is True
+        assert game.board_hash() == expected_hash
+        assert repr(game.board) == expected_repr
+
+    assert game.undo() is False

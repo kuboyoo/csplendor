@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import re
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .. import ActionType as CoreActionType
-from .. import Game
-from .. import get_card
+from .. import Game, get_card
 
 # USI gem letters in canonical order:
 # W=Diamond(White), U=Sapphire(Blue), G=Emerald(Green), R=Ruby(Red), K=Onyx(Black), D=Gold
@@ -256,7 +255,10 @@ def find_legal_action_index_by_usi(game, usi_move: str) -> int:
     parsed = parse_usi_move(usi_move)
 
     if parsed.kind == "pass":
-        return -1 if len(legal_actions) == 0 else -1
+        for i, action in enumerate(legal_actions):
+            if action.type == CoreActionType.PASS:
+                return i
+        raise ValueError(f"pass is not legal in current state: {usi_move}")
 
     if parsed.kind == "take":
         for i, action in enumerate(legal_actions):

@@ -4,6 +4,7 @@
 #include "card_data.h"
 #include "noble_data.h"
 #include "player.h"
+#include "portable_rng.h"
 #include "types.h"
 #include "zobrist.h"
 #include <algorithm>
@@ -207,6 +208,14 @@ public:
       return cached_hash;
     }
 
+    cached_hash = compute_hash_uncached();
+    hash_valid = true;
+    return cached_hash;
+  }
+
+  // Pure full-information position-hash computation.  Caching belongs in
+  // hash(), so callers can use this as a validation oracle.
+  uint64_t compute_hash_uncached() const {
     const auto &z = Zobrist::get_instance();
     uint64_t h = 0;
 
@@ -214,6 +223,8 @@ public:
     for (int i = 0; i < 6; ++i) {
       if (bank[i] < 13)
         h ^= z.bank_gems[i][bank[i]];
+      else
+        h ^= hash_out_of_range_value(0x100 + i, bank[i]);
     }
 
     // Visible cards
@@ -226,26 +237,54 @@ public:
     }
 
     // Nobles
-    for (uint8_t n_id : nobles) {
+    for (size_t slot = 0; slot < nobles.size(); ++slot) {
+      const uint8_t n_id = nobles[slot];
       if (is_valid_noble_id(n_id))
-        h ^= z.nobles_on_board[n_id];
+        h ^= z.nobles_on_board[slot][n_id];
+    }
+
+    // Deck order determines which cards can be revealed next.  Hash every
+    // occupied stack position, rather than only the deck size.
+    for (int l = 0; l < 3; ++l) {
+      for (size_t s = 0; s < decks[l].size(); ++s) {
+        const uint8_t card_id = decks[l][s];
+        if (is_valid_card_id(card_id))
+          h ^= z.deck_cards[l][s][card_id];
+      }
     }
 
     // Players
     for (int i = 0; i < 2; ++i) {
       const auto &p = players[i];
+      h ^= z.player_points[i][p.points];
+      if (p.reserved_count <= MAX_RESERVED)
+        h ^= z.player_reserved_count[i][p.reserved_count];
+      else
+        h ^= hash_out_of_range_value(0x200 + i, p.reserved_count);
+      if (p.purchased_count <= CARD_COUNT)
+        h ^= z.player_purchased_count[i][p.purchased_count];
+      else
+        h ^= hash_out_of_range_value(0x210 + i, p.purchased_count);
       for (int g = 0; g < 6; ++g) {
         if (p.gems[g] < 13)
           h ^= z.player_gems[i][g][p.gems[g]];
+        else
+          h ^= hash_out_of_range_value(0x300 + i * 8 + g, p.gems[g]);
       }
       for (int b = 0; b < 5; ++b) {
         if (p.bonuses[b] < 16)
           h ^= z.player_bonuses[i][b][p.bonuses[b]];
+        else
+          h ^= hash_out_of_range_value(0x400 + i * 8 + b, p.bonuses[b]);
       }
       for (int r = 0; r < 3; ++r) {
         int card_idx = static_cast<int>(p.reserved[r]) + 1;
         if (card_idx >= 0 && card_idx <= CARD_COUNT)
           h ^= z.cards_reserved[i][r][card_idx];
+        else
+          h ^= hash_out_of_range_value(
+              0x500 + i * 4 + r, static_cast<uint8_t>(p.reserved[r]));
+        h ^= z.reserved_is_hidden[i][r][p.reserved_is_hidden[r] ? 1 : 0];
       }
     }
 
@@ -254,18 +293,20 @@ public:
       h ^= z.current_player[current_player];
     if (waiting_noble && current_player < NUM_PLAYERS)
       h ^= z.waiting_noble[current_player];
-
-    // Cache the result
-    cached_hash = h;
-    hash_valid = true;
+    h ^= z.final_round[final_round ? 1 : 0];
+    if (winner >= -2 && winner <= 1)
+      h ^= z.winner[winner + 2];
+    h ^= z.turn[turn];
 
     return h;
   }
 
   // Compute hash from scratch (for debugging/validation)
   uint64_t recompute_hash() const {
-    hash_valid = false;
-    return hash();
+    const uint64_t recomputed = compute_hash_uncached();
+    cached_hash = recomputed;
+    hash_valid = true;
+    return recomputed;
   }
 
   // Observable hash - only includes information visible to the observer
@@ -278,6 +319,8 @@ public:
     for (int i = 0; i < 6; ++i) {
       if (bank[i] < 13)
         h ^= z.bank_gems[i][bank[i]];
+      else
+        h ^= hash_out_of_range_value(0x100 + i, bank[i]);
     }
 
     // Visible cards - always visible
@@ -291,26 +334,39 @@ public:
 
     // Deck sizes only (not contents) - visible information
     for (int l = 0; l < 3; ++l) {
-      // Use deck size as a proxy (XOR with a unique value per size)
-      h ^= z.bank_gems[l][std::min((int)decks[l].size(), 12)];
+      h ^= z.deck_sizes[l][decks[l].size()];
     }
 
     // Nobles - always visible
-    for (uint8_t n_id : nobles) {
+    for (size_t slot = 0; slot < nobles.size(); ++slot) {
+      const uint8_t n_id = nobles[slot];
       if (is_valid_noble_id(n_id))
-        h ^= z.nobles_on_board[n_id];
+        h ^= z.nobles_on_board[slot][n_id];
     }
 
     // Players
     for (int i = 0; i < 2; ++i) {
       const auto &p = players[i];
+      h ^= z.player_points[i][p.points];
+      if (p.reserved_count <= MAX_RESERVED)
+        h ^= z.player_reserved_count[i][p.reserved_count];
+      else
+        h ^= hash_out_of_range_value(0x200 + i, p.reserved_count);
+      if (p.purchased_count <= CARD_COUNT)
+        h ^= z.player_purchased_count[i][p.purchased_count];
+      else
+        h ^= hash_out_of_range_value(0x210 + i, p.purchased_count);
       for (int g = 0; g < 6; ++g) {
         if (p.gems[g] < 13)
           h ^= z.player_gems[i][g][p.gems[g]];
+        else
+          h ^= hash_out_of_range_value(0x300 + i * 8 + g, p.gems[g]);
       }
       for (int b = 0; b < 5; ++b) {
         if (p.bonuses[b] < 16)
           h ^= z.player_bonuses[i][b][p.bonuses[b]];
+        else
+          h ^= hash_out_of_range_value(0x400 + i * 8 + b, p.bonuses[b]);
       }
       // Reserved cards - only include if visible to observer
       for (int r = 0; r < 3; ++r) {
@@ -319,10 +375,20 @@ public:
           int card_idx = static_cast<int>(p.reserved[r]) + 1;
           if (card_idx >= 0 && card_idx <= CARD_COUNT)
             h ^= z.cards_reserved[i][r][card_idx];
+          else
+            h ^= hash_out_of_range_value(
+                0x500 + i * 4 + r, static_cast<uint8_t>(p.reserved[r]));
         } else {
-          // Hidden reserved cards - just mark as "something reserved"
+          // The hidden card ID is private, while the tier is public and is
+          // also present in StateEncoder.  Hash the slot/tier signature so two
+          // different public information sets cannot alias in the MCTS tree.
           if (p.reserved[r] != -1) {
             h ^= z.cards_reserved[i][r][CARD_COUNT + 1];
+            if (is_valid_card_id(p.reserved[r])) {
+              const int level = get_card(p.reserved[r]).level;
+              if (level >= 1 && level <= 3)
+                h ^= z.hidden_reserved_level[i][r][level - 1];
+            }
           }
         }
       }
@@ -333,15 +399,38 @@ public:
       h ^= z.current_player[current_player];
     if (waiting_noble && current_player < NUM_PLAYERS)
       h ^= z.waiting_noble[current_player];
+    h ^= z.final_round[final_round ? 1 : 0];
+    if (winner >= -2 && winner <= 1)
+      h ^= z.winner[winner + 2];
+    h ^= z.turn[turn];
 
     return h;
   }
 
   void randomize_hidden_information(uint8_t observer_player, uint64_t seed) {
+    std::mt19937 rng(seed);
+    randomize_hidden_information_impl(
+        observer_player, [&rng](auto first, auto last) {
+          std::shuffle(first, last, rng);
+        });
+  }
+
+  void randomize_hidden_information_portable(uint8_t observer_player,
+                                              uint64_t seed) {
+    PortableRng rng(seed);
+    randomize_hidden_information_impl(
+        observer_player, [&rng](auto first, auto last) {
+          portable_shuffle(first, last, rng);
+        });
+  }
+
+private:
+  template <typename Shuffle>
+  void randomize_hidden_information_impl(uint8_t observer_player,
+                                         Shuffle shuffle) {
     if (observer_player >= NUM_PLAYERS)
       return;
 
-    std::mt19937 rng(seed);
     uint8_t opponent = 1 - observer_player;
     auto &p_opp = players[opponent];
 
@@ -368,7 +457,7 @@ public:
         continue;
 
       // Shuffle the pool
-      std::shuffle(pool.begin(), pool.end(), rng);
+      shuffle(pool.begin(), pool.end());
 
       // Redistribute
       for (int ri = 0; ri < reserved_count; ++ri) {
@@ -386,6 +475,18 @@ public:
 
     // Invalidate hash since state changed
     hash_valid = false;
+  }
+  // Canonical reachable values keep their existing Zobrist tables.  Python's
+  // public editor accepts the wider uint8_t domain, so values outside those
+  // tables need a field-tagged fallback instead of silently contributing no
+  // salt.  SplitMix64's avalanche keeps the fallback deterministic and avoids
+  // consuming/changing the canonical Zobrist RNG stream.
+  static uint64_t hash_out_of_range_value(uint64_t tag, uint64_t value) {
+    uint64_t x = 0x9e3779b97f4a7c15ULL ^
+                 (tag * 0xbf58476d1ce4e5b9ULL) ^ value;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+    return x ^ (x >> 31);
   }
 };
 

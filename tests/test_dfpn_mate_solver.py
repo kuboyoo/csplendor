@@ -1,7 +1,8 @@
-import csplendor as cs
 import pytest
-from csplendor.api.usi_kifu import action_to_usi, game_to_spn, parse_kifu_text
 
+import csplendor as cs
+from csplendor.api.usi_kifu import action_to_usi, game_to_spn, parse_kifu_text
+from scripts import dfpn_mate_solver
 from scripts.dfpn_mate_solver import (
     DFPNMateSolver,
     compact_proof_dag_to_v1,
@@ -9,11 +10,9 @@ from scripts.dfpn_mate_solver import (
     proof_dag_to_compact,
     proof_tree_to_kifu_text,
     solve_game_dfpn,
-    solve_reveal_verified_mate,
     solve_visible_only_winner,
     strategy_dag_size_report,
 )
-from scripts import dfpn_mate_solver
 from scripts.mate_solver import (
     MATE,
     NO_MATE,
@@ -22,7 +21,6 @@ from scripts.mate_solver import (
     load_game_from_usi_text,
     solve_game,
 )
-
 
 BENCH_POSITION = (
     "position bank:W1U3G3R3K0D4 | "
@@ -370,6 +368,38 @@ def test_dfpn_splits_root_action_tasks_by_reveal_outcome():
     assert all(task["group_index"] == 0 for task in tasks)
 
 
+def test_dfpn_root_parallel_materializes_omitted_defender_actions(monkeypatch):
+    game = cs.Game(seed=1)
+    state = SolverState.from_game(game)
+    solver = DFPNMateSolver(attacker=0, max_depth=1, options=_fast_options())
+    solver.use_lazy_reveal_pruning = False
+    root_action = solver._helper._legal_actions(state)[0]
+    defender_game = game.clone_light()
+    defender_game.board.current_player = 1
+    defender_state = SolverState.from_game(defender_game)
+    defender_actions = solver._helper._legal_actions(defender_state)
+    assert len(defender_actions) >= 2
+
+    monkeypatch.setattr(
+        solver,
+        "_transition_outcomes",
+        lambda state, action: [dfpn_mate_solver._Outcome(None, None, (defender_state,))],
+    )
+    monkeypatch.setattr(
+        solver,
+        "_ordered_actions_with_omissions",
+        lambda state, actions, depth: ([defender_actions[0]], [defender_actions[1]]),
+    )
+    action_child = solver._action_node(state, 1, root_action, actor_is_attacker=True)
+
+    tasks = solver._root_tasks_from_child(0, action_child)
+
+    assert {task["defender_action_code"] for task in tasks} == {
+        int(defender_actions[0].pack()),
+        int(defender_actions[1].pack()),
+    }
+
+
 def test_dfpn_lazy_reveal_starts_with_blank_then_refines():
     game = cs.Game(seed=1)
     state = SolverState.from_game(game)
@@ -634,8 +664,11 @@ def test_visible_only_winner_ignores_depth_and_decks():
     assert result.proof_tree["mode"] == "visible_only_winner"
     assert result.proof_tree["assumptions"]["hidden_decks_ignored"] is True
     assert result.proof_tree["assumptions"]["max_depth_ignored"] is True
-    assert result.proof_tree["assumptions"]["policy"] == "full_legal_minimax_with_cycle_score_adjudication"
+    assert result.proof_tree["assumptions"]["policy"] == "bounded_forced_win_with_all_defender_responses"
+    assert result.proof_tree["assumptions"]["mate_proof"] is True
+    assert result.proof_tree["assumptions"]["attacker_candidate_policy"] == "heuristic_subset_for_bounded_proof"
     assert result.proof_tree["assumptions"]["all_visible_only_responses_read"] is True
+    assert result.proof_tree["forced_win_depth"] == 1
     assert result.proof_tree["line"]
 
 

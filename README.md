@@ -1,22 +1,110 @@
-[English](README.en.md)
+[English](https://github.com/kuboyoo/csplendor/blob/main/README.en.md)
 
 # csplendor: 高性能 Splendor エンジン
 
 `csplendor` は、ボードゲーム Splendor 向けの高速な C++ ベースのエンジンです。2人対戦と機械学習の学習用途に最適化されています。
 
 ## 特長
-- **高速なロジック**: C++17 実装により、Python の `legal_actions` 取得は約 20,000 回/秒、C++ 内部の合法手カウントは約 330,000 回/秒、C++ 内部適用の自己対戦は約 160,000 moves/sec で動作します。
+- **高速なロジック**: C++17 実装により、合法手250件の中盤局面で Python の `legal_actions` 取得は約 26,000 回/秒、C++ 内部の合法手カウントは約 980,000 回/秒、C++ 内部適用の自己対戦は約 740,000 moves/sec で動作します（測定条件は下記）。
 - **Python バインディング**: `pybind11` によりシームレスに連携できます。
 - **機械学習対応**: 状態の特徴量化と行動空間のエンコードを内蔵しています。
 - **Web API**: GUI 開発向けの FastAPI 連携を備えています。
+
+### 性能目安
+
+2026-07-13 に Ryzen 9 7900X、GCC 13.3、Release build、Python 3.12.1、
+CPU 1論理コア固定で測定した値です。代表値は `tests/test_perf.py` と同じseed 42・
+12手・合法手250件の中盤局面で、best-of-5を7回測定した中央値です。自己対戦行は
+seed 0--9の10 gameを30標本測定した別workloadです。
+
+| 処理 | リファクタ前 | Phase 0--7 後 | 高速化 |
+|---|---:|---:|---:|
+| Python `legal_actions` | 21,473 回/秒 | 26,586 回/秒 | 1.24倍 |
+| C++ `legal_action_codes` | 61,313 回/秒 | 118,594 回/秒 | 1.93倍 |
+| C++ `legal_action_count` | 316,991 回/秒 | 981,149 回/秒 | 3.10倍 |
+| C++ 内部自己対戦 | 160,545 moves/sec | 740,538 moves/sec | 4.61倍 |
+
+同じ250件局面の30-pair sustained A/Bでは、`legal_actions` は約1.19倍（95% CI:
+1.11--1.19倍）、codesは約1.97倍、countは約3.11倍でした。一方、合法手5件の
+固定中盤局面では固定長buffer初期化の削減が強く効き、`legal_actions` は5.07倍、
+codesは9.17倍、countは9.62倍です。したがって合法手生成が一律5倍になったわけではなく、
+Python Action object生成の割合と合法手数で倍率が変わります。
+
+旧README掲載値との単純比較は、`legal_actions` が20,000から26,586回/秒で1.33倍、
+countが330,000から981,149回/秒で2.97倍、自己対戦が160,000から740,538
+moves/secで4.63倍です。リファクタリング効果の評価には、測定条件を揃えた上表または
+paired A/Bの倍率を用いてください。
+
+NN推論を除いた256 simulationのnative MCTS synthetic searchでは、非決定化が
+70,690から94,427 simulations/sec（1.34倍）、決定化ありが65,001から108,441
+simulations/sec（1.67倍）でした。履歴200・決定化ありのcopy中心microbenchmarkは
+14.7倍ですが、履歴0ではほぼ同速です。実モデル込みの速度向上はNN推論時間の割合に
+依存します。詳細と注意点は[リファクタリング計画の最終計測](https://github.com/kuboyoo/csplendor/blob/main/doc/refactoring_plan/README.md#phase-0--7-%E6%9C%80%E7%B5%82%E6%80%A7%E8%83%BD%E5%86%8D%E8%A8%882026-07-13)を参照してください。
+
+### 実験的な並列MCTS
+
+共有tree並列探索はStage Bのexperimental opt-inです。既定の`num_threads=1`はworker queueを
+作らない低overheadなserial pathで、`num_threads>=2`のときだけnative traversal workerと単一の
+inference coordinatorを使います。Python evaluator callbackは常に同期的・非並行に呼ばれます。
+
+```python
+import numpy as np
+import csplendor as cs
+
+game = cs.Game(seed=42)
+mcts = cs.MCTS(cs.MCTSConfig())
+
+options = cs.ParallelSearchOptions()
+options.num_threads = 4
+options.num_simulations = 800
+options.max_tree_nodes = 50_000
+options.tree_backend = cs.ParallelTreeBackend.SHARDED
+options.mode = cs.ParallelSearchMode.THROUGHPUT
+options.search_nonce = 1
+
+def evaluator(requests):
+    results = []
+    for request in requests:
+        policy = request["valid_actions"].astype(np.float32)
+        policy /= policy.sum()
+        results.append({
+            "policy": policy,
+            "value": np.zeros(2, dtype=np.float32),
+        })
+    return results
+
+result = cs.mcts_search_parallel_native(
+    mcts, game, options, evaluator, 1.0
+)
+```
+
+`DETERMINISTIC_EPOCH`は単一coordinatorがtraversal、callback、commitを決定順で実行する
+trace/replay oracleです。このmodeの`num_threads`は結果互換性の入力であり、並列completionの
+reorderを発生させません。root-parallel APIで正の探索budgetを使う場合は、workerのseed範囲を
+固定する明示`search_nonce`が必須です。また`timeout_ms`はcallback境界で観測するsoft timeoutで、
+block中のevaluatorを強制中断しません。
+
+`max_tree_nodes`の既定値50,000はshared-treeでは単一tree上限、root-parallelでは全active worker
+treeの合計上限です。capacity到達後もrootが展開済みならpartial resultを返し、visitが0の場合は
+legal action上で正規化したprior（設定時はroot noiseを混合）を使います。root未展開なら
+`TreeCapacityReachedError`です。Python root-parallel callbackは直列化され、mutex待機後にも
+timeout/cancelを再検査するため、期限切れのcallback backlogを流しません。
+
+複数threadをstable/defaultへ昇格するには、scheduled sanitizer/soak、可変scheduler seed、
+実NN、fixed-time探索品質に加え、展開済みnodeの二次feature signature照合gateが残っています。
+現在のfeature digest検査は同一pendingへdeduplicateされたowner/waiter間です。問題時はlegacy API
+または`num_threads=1`へ戻せます。
+詳細は[並列探索の実装状況](https://github.com/kuboyoo/csplendor/blob/main/doc/parallel_search_plan/implementation_status.md)を参照してください。
 
 ## インストールとビルド
 
 ### 前提条件
 - C++17 対応コンパイラ (例: GCC 9+)
-- CMake 3.12+
+- CMake 3.13+
 - Python 3.8+
-- `pybind11`, `numpy`, `fastapi`, `uvicorn`
+
+build依存とNumPyはpackage metadataから導入されます。FastAPIはoptionalなので、
+Web service利用時は `pip install "csplendor[web]"` を使ってください。
 
 ### ソースからのビルド
 C++ ソースファイルを変更した場合は、拡張モジュールを再ビルドする必要があります。
@@ -65,8 +153,21 @@ features = featurizer.featurize(game) # numpy array (196,)
 ## Web API の実行
 GUI と連携する FastAPI サーバーを起動するには、次を実行します。
 ```bash
+pip install "csplendor[web]"
 uvicorn csplendor.api:app --reload
 ```
+
+game/session/replay endpointは単体で動作します。旧`/ai_move` bridgeは互換用の
+optional integrationで、torchと外部`dlsplendor` packageを遅延loadします。
+modelやNN探索コードはcsplendorへ同梱しません。外部stackがない場合はHTTP 503を返し、
+ルールエンジンと他のWeb endpointには影響しません。
+
+旧`.pkl` replay viewerはpickleを読み込むため、設定済みreplay data directoryへ
+server管理者が配置した信頼済みローカルファイルだけを対象にしてください。
+`/replay/load`はrealpathがdirectory内にある`.pkl`だけを受理し、directory外の
+任意path、path traversal、directory外を指すsymlinkを拒否します。`/replay/files`は
+絶対pathを公開せず、一覧取得のためにunpickleもしません。uploadや外部入力をそのまま
+配置しないでください。
 
 ## 詰み探索
 
@@ -125,11 +226,12 @@ python scripts/generate_mate_puzzles.py \
 
 ## ドキュメント
 詳細な仕様は `doc/` ディレクトリを参照してください。
-- [技術概要](doc/overview.md)
-- [エンジン仕様](doc/engine_specs.md)
-- [Python API リファレンス](doc/api_ref.md)
-- [ML 連携ガイド](doc/ml_integration.md)
-- [Web API リファレンス](doc/web_api.md)
+- [技術概要](https://github.com/kuboyoo/csplendor/blob/main/doc/overview.md)
+- [エンジン仕様](https://github.com/kuboyoo/csplendor/blob/main/doc/engine_specs.md)
+- [Python API リファレンス](https://github.com/kuboyoo/csplendor/blob/main/doc/api_ref.md)
+- [ML 連携ガイド](https://github.com/kuboyoo/csplendor/blob/main/doc/ml_integration.md)
+- [Web API リファレンス](https://github.com/kuboyoo/csplendor/blob/main/doc/web_api.md)
+- [リリース検証記録](https://github.com/kuboyoo/csplendor/blob/main/doc/release_validation.md)
 
 ## テスト
 通常のテストは次で実行します。
@@ -184,3 +286,9 @@ python -m pytest -m performance
 - **ActionEncoderCpp**: 48 actions, return/payment variants なしの圧縮表現。
 - **ActionEncoderV2**: 4869 actions, return/payment variants をすべて含むスロットベース表現。
 - **ActionEncoderV3**: 3133 actions, 現行推奨のカードIDベース表現。
+- **強制パス**: 通常手がない場合だけ `Game.legal_actions` は
+  `ActionType.PASS` を1件返します。48枠MCTS policyには強制手の枠を増やさず、
+  その局面をroot探索する前に `Game.apply_forced_pass()` を呼びます。
+- **seedの移植性**: `Game(seed)` は同じC++標準library実装内では再現可能ですが、
+  初期配置/deck shuffleがlibstdc++・libc++・MSVC間で一致することは保証しません。
+  native並列MCTSは別途version管理されたportable RNG契約を使います。

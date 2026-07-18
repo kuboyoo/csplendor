@@ -1,0 +1,8 @@
+include CMakeLists.txt
+include CONTRIBUTING.md
+include LICENSE
+include README.md
+include README.en.md
+recursive-include src *.cpp *.h
+recursive-include tests *.cpp *.py CMakeLists.txt
+include scripts/benchmark_mcts_parallel.cpp

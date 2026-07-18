@@ -2,6 +2,7 @@
 #define CSPLENDOR_ACTION_ENCODER_V3_H
 
 #include "action.h"
+#include "action_encoder_common.h"
 #include "card_data.h"
 #include "game.h"
 #include "types.h"
@@ -36,18 +37,11 @@ class ActionEncoderV3 {
 public:
   // ─── Multiset coefficient table H(n,k) = C(n+k-1, k) ───
   // Used for return encoding (same as V2)
-  static constexpr int H[7][6] = {
-      {1, 0, 0, 0, 0, 0},      // n=0
-      {1, 1, 1, 1, 1, 1},      // n=1
-      {1, 2, 3, 4, 5, 6},      // n=2
-      {1, 3, 6, 10, 15, 21},   // n=3
-      {1, 4, 10, 20, 35, 56},  // n=4
-      {1, 5, 15, 35, 70, 126}, // n=5
-      {1, 6, 21, 56, 126, 252},// n=6
-  };
+  static constexpr const int (&H)[7][6] = action_encoder_detail::ReturnCodec::H;
 
   // Cumulative offset for return sum s (6 colors)
-  static constexpr int RETURN_OFFSET[4] = {0, 1, 7, 28};
+  static constexpr const int (&RETURN_OFFSET)[4] =
+      action_encoder_detail::ReturnCodec::OFFSET;
 
   // ─── Pattern counts per action type ───
   static constexpr int TAKE_DIFF_RETURN_PATTERNS = 84;  // ret 0-3, 6 colors
@@ -120,72 +114,17 @@ public:
   };
 
   // ─── Take Different Combinations (C(5,3) = 10) ───
-  static constexpr std::array<std::array<uint8_t, 3>, 10> TAKE_DIFF_COMBOS = {{
-      {0, 1, 2},
-      {0, 1, 3},
-      {0, 1, 4},
-      {0, 2, 3},
-      {0, 2, 4},
-      {0, 3, 4},
-      {1, 2, 3},
-      {1, 2, 4},
-      {1, 3, 4},
-      {2, 3, 4},
-  }};
+  static constexpr const std::array<std::array<uint8_t, 3>, 10>
+      &TAKE_DIFF_COMBOS = action_encoder_detail::TakeDifferentCodec::COMBINATIONS;
 
   // ─── Return encoding (6 colors, max sum 3) — same as V2 ───
 
   static int encode_return(const std::array<uint8_t, 6> &ret) {
-    int s = 0;
-    for (int i = 0; i < 6; ++i)
-      s += ret[i];
-    if (s == 0)
-      return 0;
-    if (s < 0 || s > 3)
-      return -1;
-
-    int rank = 0;
-    int remaining = s;
-    for (int i = 0; i < 5; ++i) {
-      for (int v = remaining; v > static_cast<int>(ret[i]); --v) {
-        rank += H[5 - i][remaining - v];
-      }
-      remaining -= ret[i];
-    }
-    return RETURN_OFFSET[s] + rank;
+    return action_encoder_detail::ReturnCodec::encode(ret);
   }
 
   static std::array<uint8_t, 6> decode_return(int pattern) {
-    std::array<uint8_t, 6> ret = {0, 0, 0, 0, 0, 0};
-    if (pattern == 0)
-      return ret;
-
-    int s;
-    if (pattern < RETURN_OFFSET[1])
-      s = 0;
-    else if (pattern < RETURN_OFFSET[2])
-      s = 1;
-    else if (pattern < RETURN_OFFSET[3])
-      s = 2;
-    else
-      s = 3;
-
-    int local_rank = pattern - RETURN_OFFSET[s];
-    int remaining_s = s;
-
-    for (int i = 0; i < 5; ++i) {
-      for (int v = remaining_s; v >= 0; --v) {
-        int count = H[5 - i][remaining_s - v];
-        if (local_rank < count) {
-          ret[i] = static_cast<uint8_t>(v);
-          remaining_s -= v;
-          break;
-        }
-        local_rank -= count;
-      }
-    }
-    ret[5] = static_cast<uint8_t>(remaining_s);
-    return ret;
+    return action_encoder_detail::ReturnCodec::decode(pattern);
   }
 
   // ─── Card-specific payment encoding (constrained, graded lex) ───
@@ -211,8 +150,11 @@ public:
       return -1;
     const auto &cost = CARDS[card_id].cost;
     int s = 0;
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < 5; ++i) {
+      if (gold_as[i] > cost[i])
+        return -1;
       s += gold_as[i];
+    }
     if (s < 0 || s > MAX_GOLD)
       return -1;
 
@@ -281,23 +223,7 @@ public:
   // ─── Helper functions ───
 
   static int find_take_diff_index(const std::array<uint8_t, 5> &take) {
-    uint8_t colors[3];
-    int idx = 0;
-    for (int i = 0; i < 5 && idx < 3; ++i) {
-      if (take[i] > 0)
-        colors[idx++] = i;
-    }
-    if (idx != 3)
-      return -1;
-
-    for (int i = 0; i < 10; ++i) {
-      if (TAKE_DIFF_COMBOS[i][0] == colors[0] &&
-          TAKE_DIFF_COMBOS[i][1] == colors[1] &&
-          TAKE_DIFF_COMBOS[i][2] == colors[2]) {
-        return i;
-      }
-    }
-    return -1;
+    return action_encoder_detail::TakeDifferentCodec::find_index(take);
   }
 
   static int find_take_same_color(const std::array<uint8_t, 5> &take) {
@@ -309,23 +235,11 @@ public:
   }
 
   static int find_visible_slot(int8_t card_id, const Board &board) {
-    for (int level = 0; level < 3; ++level) {
-      for (int slot = 0; slot < 4; ++slot) {
-        if (board.visible[level][slot] == card_id) {
-          return level * 4 + slot;
-        }
-      }
-    }
-    return -1;
+    return action_encoder_detail::find_visible_slot(card_id, board);
   }
 
   static int find_reserved_slot(int8_t card_id, const PlayerState &player) {
-    for (int i = 0; i < 3; ++i) {
-      if (player.reserved[i] == card_id) {
-        return i;
-      }
-    }
-    return -1;
+    return action_encoder_detail::find_reserved_slot(card_id, player);
   }
 
   static bool is_in_reserved(int8_t card_id, const PlayerState &player) {
@@ -413,9 +327,10 @@ public:
         return -1;
       return OFFSET_VISIT_NOBLE + action.noble_choice;
     }
-
-    default:
+    case PASS:
       return OFFSET_PASS;
+    default:
+      return -1;
     }
   }
 
@@ -497,7 +412,7 @@ public:
       action.noble_choice = noble_id;
 
     } else {
-      action.type = ACTION_TYPE_COUNT;
+      action.type = PASS;
     }
 
     return action;
@@ -505,15 +420,14 @@ public:
 
   static std::array<uint8_t, ACTION_SIZE> get_action_mask(const Game &game) {
     std::array<uint8_t, ACTION_SIZE> mask = {};
-    MoveList legal_actions =
-        MoveGenerator::generate_all_fixed(game.board, game.simple_payment_mode);
-
-    for (const auto &action : legal_actions) {
+    auto sink = [&game, &mask](const Action &action) {
       int id = encode(action, game);
-      if (id >= 0 && id < ACTION_SIZE) {
+      if (id >= 0 && id < ACTION_SIZE)
         mask[id] = 1;
-      }
-    }
+      return true;
+    };
+    MoveGenerator::consume_all_capped(game.board, game.simple_payment_mode,
+                                      sink);
 
     bool has_action = false;
     for (int i = 0; i < OFFSET_PASS; ++i) {
@@ -522,7 +436,7 @@ public:
         break;
       }
     }
-    if (!has_action) {
+    if (!has_action && game.requires_forced_pass()) {
       mask[OFFSET_PASS] = 1;
     }
 
@@ -530,16 +444,11 @@ public:
   }
 
   static Action decode_and_match(int action_id, const Game &game) {
-    MoveList legal_actions =
-        MoveGenerator::generate_all_fixed(game.board, game.simple_payment_mode);
-
-    for (const auto &legal : legal_actions) {
-      if (encode(legal, game) == action_id) {
-        return legal;
-      }
-    }
-
-    return decode(action_id, game);
+    return action_encoder_detail::decode_and_match_first<ActionEncoderV3>(
+        action_id, game, [&game](auto &sink) {
+          MoveGenerator::consume_all_capped(game.board,
+                                            game.simple_payment_mode, sink);
+        });
   }
 
   // Compute the number of valid payment patterns for a card (for verification)

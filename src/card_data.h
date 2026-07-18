@@ -2,6 +2,7 @@
 #define CSPLENDOR_CARD_DATA_H
 
 #include "types.h"
+#include "resource_bundle.h"
 #include <stdexcept>
 
 static constexpr int CARD_COUNT = 90;
@@ -129,6 +130,17 @@ constexpr Card CARDS[CARD_COUNT] = {
     {87, 3, 4, EMERALD, {0, 7, 0, 0, 0}, 28672ULL},
     {88, 3, 4, EMERALD, {3, 6, 3, 0, 0}, 50356227ULL},
     {89, 3, 5, EMERALD, {0, 7, 3, 0, 0}, 50360320ULL}};
+
+constexpr bool card_packed_costs_match_arrays() {
+  for (int i = 0; i < CARD_COUNT; ++i) {
+    if (cli::ResourceBundle::pack(CARDS[i].cost) != CARDS[i].packed_cost)
+      return false;
+  }
+  return true;
+}
+
+static_assert(card_packed_costs_match_arrays(),
+              "every card packed_cost must match its cost array");
 
 inline bool is_valid_card_id(int id) { return id >= 0 && id < CARD_COUNT; }
 

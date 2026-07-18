@@ -3,6 +3,7 @@
 
 #include "action.h"
 #include "game.h"
+#include "rule_transition.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -713,20 +714,16 @@ private:
     board.invalidate_hash();
     if (!remove_card_from_deck(board, action.deck_level, card_id))
       return false;
-    player.reserved_is_hidden[player.reserved_count] = true;
-    player.reserved[player.reserved_count++] = card_id;
-    if (board.bank[GOLD] > 0) {
-      --board.bank[GOLD];
-      ++player.gems[GOLD];
-    }
-    for (int color = 0; color < 6; ++color) {
-      if (action.return_gems[color] > player.gems[color])
-        return false;
-      player.gems[color] -= action.return_gems[color];
-      board.bank[color] += action.return_gems[color];
-    }
-    player.sync_packed();
-    end_reveal_branch_turn(board);
+    csplendor::detail::reserve_card_unchecked(board, card_id, true);
+    csplendor::detail::grant_reserve_gold(board);
+    if (!csplendor::detail::return_gems_checked(board,
+                                                 action.return_gems))
+      return false;
+    // Match Game even for editor-created inputs that were already noble
+    // eligible before reserving. Reserving cannot create eligibility in a
+    // normally reached state, but the public solver also accepts arbitrary
+    // Board snapshots.
+    csplendor::detail::finish_standard_action(board);
     return true;
   }
 
@@ -1102,28 +1099,9 @@ private:
       const Card &card = get_card(ordered.oracle_card);
       if (!player.can_afford(card))
         return false;
-      int gold_used = 0;
-      for (int color = 0; color < 5; ++color) {
-        const int cost =
-            std::max(0, static_cast<int>(card.cost[color]) -
-                            static_cast<int>(player.bonuses[color]));
-        const int from_gold = ordered.oracle_gold_as[color];
-        const int from_gems = cost - from_gold;
-        if (from_gold > cost || from_gems > player.gems[color])
-          return false;
-        player.gems[color] -= from_gems;
-        board.bank[color] += from_gems;
-        gold_used += from_gold;
-      }
-      if (gold_used > player.gems[GOLD])
+      if (!csplendor::detail::purchase_card<true>(
+              board, card, ordered.oracle_gold_as))
         return false;
-      player.gems[GOLD] -= gold_used;
-      board.bank[GOLD] += gold_used;
-      player.purchased_cards.push_back(card.id);
-      ++player.purchased_count;
-      ++player.bonuses[card.bonus];
-      player.points += card.points;
-      player.sync_packed();
     } else if (ordered.oracle_reserve) {
       if (!player.can_reserve() ||
           !is_valid_card_id(ordered.oracle_reserve_card) ||
@@ -1132,61 +1110,20 @@ private:
           !has_blank_slot_at_level(
               board, get_card(ordered.oracle_reserve_card).level - 1))
         return false;
-      player.reserved_is_hidden[player.reserved_count] = true;
-      player.reserved[player.reserved_count++] = ordered.oracle_reserve_card;
-      if (board.bank[GOLD] > 0) {
-        --board.bank[GOLD];
-        ++player.gems[GOLD];
-        if (ordered.oracle_return_color >= 0) {
-          if (player.gems[ordered.oracle_return_color] == 0)
-            return false;
-          --player.gems[ordered.oracle_return_color];
-          ++board.bank[ordered.oracle_return_color];
-        }
-      }
-      player.sync_packed();
+      csplendor::detail::reserve_card_unchecked(
+          board, ordered.oracle_reserve_card, true);
+      const bool granted_gold = csplendor::detail::grant_reserve_gold(board);
+      std::array<uint8_t, 6> returned = {0};
+      if (granted_gold && ordered.oracle_return_color >= 0)
+        returned[ordered.oracle_return_color] = 1;
+      if (!csplendor::detail::return_gems_checked(board, returned))
+        return false;
     } else {
       return false;
     }
 
-    const auto eligible =
-        MoveGenerator::get_eligible_nobles_fixed(board, board.current_player);
-    if (eligible.size() > 1) {
-      board.waiting_noble = true;
-      return true;
-    }
-    if (eligible.size() == 1)
-      acquire_noble(board, eligible[0]);
-    end_reveal_branch_turn(board);
+    csplendor::detail::finish_standard_action(board);
     return true;
-  }
-
-  static void acquire_noble(Board &board, int noble_id) {
-    PlayerState &player = board.players[board.current_player];
-    player.points += get_noble(noble_id).points;
-    player.acquired_nobles.push_back(noble_id);
-    board.nobles.remove(noble_id);
-  }
-
-  static void end_reveal_branch_turn(Board &board) {
-    if (!board.final_round && board.players[board.current_player].points >= 15)
-      board.final_round = true;
-    board.current_player = 1 - board.current_player;
-    if (board.current_player != 0)
-      return;
-    ++board.turn;
-    if (!board.final_round)
-      return;
-    const int points0 = board.players[0].points;
-    const int points1 = board.players[1].points;
-    if (points0 != points1) {
-      board.winner = points0 > points1 ? 0 : 1;
-      return;
-    }
-    const int purchased0 = board.players[0].purchased_count;
-    const int purchased1 = board.players[1].purchased_count;
-    board.winner =
-        purchased0 == purchased1 ? -2 : purchased0 < purchased1 ? 0 : 1;
   }
 
   static bool has_player_purchased_card(const PlayerState &player,

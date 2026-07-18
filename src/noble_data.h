@@ -2,6 +2,7 @@
 #define CSPLENDOR_NOBLE_DATA_H
 
 #include "types.h"
+#include "resource_bundle.h"
 #include <stdexcept>
 
 static constexpr int NOBLE_COUNT = 12;
@@ -22,6 +23,18 @@ constexpr Noble NOBLES[NOBLE_COUNT] = {
     {10, 3, {3, 3, 0, 0, 3}, 844424930144259ULL}, // White, Blue, Black
     {11, 3, {0, 3, 3, 0, 3}, 844424980475904ULL}  // Blue, Green, Black
 };
+
+constexpr bool noble_packed_requirements_match_arrays() {
+  for (int i = 0; i < NOBLE_COUNT; ++i) {
+    if (cli::ResourceBundle::pack(NOBLES[i].requirement) !=
+        NOBLES[i].packed_requirement)
+      return false;
+  }
+  return true;
+}
+
+static_assert(noble_packed_requirements_match_arrays(),
+              "every noble packed_requirement must match its requirement array");
 
 inline bool is_valid_noble_id(int id) { return id >= 0 && id < NOBLE_COUNT; }
 

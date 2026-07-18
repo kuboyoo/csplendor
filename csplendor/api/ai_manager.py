@@ -1,36 +1,80 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+import glob
 import os
 import sys
-import glob
-from typing import Optional, Literal, Dict, Any
 import time
+from typing import Any, Dict, Literal, Optional
+
 import numpy as np
-
-# Add dlsplendor to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../dlsplendor")))
-
-from dlsplendor.config import Config
-from dlsplendor.network.model import SplendorNetwork
-from dlsplendor.network.encoder import StateEncoder
-from dlsplendor.search.mcts import MCTS, IterativeDeepening
-from dlsplendor.search.pondering import PonderingEngine
-from dlsplendor.search.greedy_ai import GreedyAI
 
 AIType = Literal["mcts", "greedy", "genbu", "alphazero", "deepsets", "set_transformer", "nnue"]
 
+
+class AIIntegrationUnavailable(RuntimeError):
+    """Raised when an optional external AI stack is not installed."""
+
+
+def _load_base_ai_dependencies():
+    """Load the external dlsplendor stack only when the AI endpoint is used.
+
+    The rule engine and web replay API are valid PyPI features without torch or
+    a sibling dlsplendor checkout. Keeping this import lazy prevents an
+    optional integration from making the module itself unimportable.
+    """
+
+    dlsplendor_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../../dlsplendor")
+    )
+    if dlsplendor_path not in sys.path:
+        sys.path.append(dlsplendor_path)
+
+    try:
+        import torch as torch_module
+        from dlsplendor.config import Config
+        from dlsplendor.network.encoder import StateEncoder
+        from dlsplendor.network.model import SplendorNetwork
+        from dlsplendor.search.greedy_ai import GreedyAI
+        from dlsplendor.search.mcts import MCTS, IterativeDeepening
+        from dlsplendor.search.pondering import PonderingEngine
+    except (ImportError, OSError) as error:
+        raise AIIntegrationUnavailable(
+            "Optional AI integration is unavailable. Install torch and "
+            "provide the external dlsplendor package; the csplendor rule "
+            "engine and replay API do not require them."
+        ) from error
+
+    return (
+        torch_module,
+        Config,
+        SplendorNetwork,
+        StateEncoder,
+        MCTS,
+        IterativeDeepening,
+        PonderingEngine,
+        GreedyAI,
+    )
+
 class AIManager:
     _instance = None
-    
+
     def __init__(self, model_path: str):
+        global torch
+        (
+            torch,
+            Config,
+            SplendorNetwork,
+            StateEncoder,
+            MCTS,
+            IterativeDeepening,
+            PonderingEngine,
+            GreedyAI,
+        ) = _load_base_ai_dependencies()
         self.model_path = model_path
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.config = Config.from_preset("thorough") 
-        
+        self.config = Config.from_preset("thorough")
+
         self.encoder = StateEncoder(self.config.game)
         self.network = SplendorNetwork(self.encoder.get_state_dim(), 2000, self.config.model).to(self.device)
-        
+
         if os.path.exists(model_path):
             try:
                 checkpoint = torch.load(model_path, map_location=self.device)
@@ -41,12 +85,12 @@ class AIManager:
                 print(f"Loaded AI model from {model_path}")
             except Exception as e:
                 print(f"ERROR: Failed to load model: {e}")
-        
+
         self.network.eval()
         self.mcts = MCTS(self.network, self.encoder, self.config.search)
         self.id_search = IterativeDeepening(self.mcts)
         self.ponderer = PonderingEngine(self.mcts)
-        
+
         # Greedy AI (rule-based, no learning required)
         self.greedy_ai = GreedyAI()
 
@@ -95,7 +139,7 @@ class AIManager:
                 else:
                     # Try relative to models/ directory
                     model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../", model_env))
-                
+
                 if os.path.exists(model_path):
                     print(f"DEBUG: Using model from environment variable: {model_path}")
                 else:
@@ -111,7 +155,7 @@ class AIManager:
                 if os.path.exists(az_best):
                     model_path = az_best
                     print(f"DEBUG: Found AlphaZero best model: {model_path}")
-                
+
             if not model_path:
                 models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../models"))
                 common_names = [
@@ -135,7 +179,7 @@ class AIManager:
             cls._instance = cls(model_path)
         return cls._instance
 
-    def get_best_action(self, game, ai_type: AIType = "mcts", time_limit: float = 2.0, use_determinization: bool = False, num_simulations: Optional[int] = None, az_options: Optional[dict] = None) -> int:
+    def get_best_action(self, game, ai_type: AIType = "mcts", time_limit: float = 2.0, use_determinization: bool = True, num_simulations: Optional[int] = None, az_options: Optional[dict] = None) -> int:
         """
         Get the best action for the current game state.
 
@@ -199,16 +243,16 @@ class AIManager:
             )
         else:
             return self._get_mcts_action(game, time_limit=time_limit, use_determinization=use_determinization)
-    
-    def _get_mcts_action(self, game, time_limit: float = 2.0, use_determinization: bool = False) -> int:
+
+    def _get_mcts_action(self, game, time_limit: float = 2.0, use_determinization: bool = True) -> int:
         """Get action using MCTS with neural network."""
         print(f"AI (MCTS) is thinking ({time_limit}s, determinization={use_determinization})...")
-        
+
         # Configure MCTS for determinization
         self.mcts.config.use_determinization = use_determinization
-        
+
         action_idx, info = self.id_search.search(game, int(time_limit * 1000))
-        
+
         value = info.get('value', 0.0)
         sims = info.get('simulations', 0)
         print(f"AI Move: {action_idx} (Val: {value:.3f}, Sims: {sims})")
@@ -218,12 +262,12 @@ class AIManager:
             "actual_simulations": int(sims),
         }
         return action_idx
-    
+
     def _get_greedy_action(self, game) -> int:
         """Get action using rule-based greedy AI."""
         print("AI (Greedy) is thinking...")
         action = self.greedy_ai.select_action(game)
-        
+
         # Find action index
         legals = game.legal_actions
         for i, a in enumerate(legals):
@@ -235,7 +279,7 @@ class AIManager:
                     "actual_simulations": None,
                 }
                 return i
-        
+
         # Fallback
         print("AI Move: 0 (Greedy fallback)")
         self._last_action_debug = {
@@ -244,7 +288,7 @@ class AIManager:
             "actual_simulations": None,
         }
         return 0
-    
+
     def _init_genbu(self):
         """Initialize Genbu (ori AlphaZero) components from alphazero-general."""
         if self._genbu_initialized:
@@ -255,11 +299,12 @@ class AIManager:
             sys.path.insert(0, az_path)
 
         try:
+            import argparse
+
+            from MCTS import MCTS as AZMCTS
             from OriAdapterGame import OriAdapterGame
             from OriNNet import OriNNetWrapper
             from SplendorGame import SplendorGameProxy
-            from MCTS import MCTS as AZMCTS
-            import argparse
 
             self._genbu_proxy_cls = SplendorGameProxy
 
@@ -404,34 +449,36 @@ class AIManager:
                 return
 
         print(f"Initializing AlphaZero components with model: {target_model}")
-        
+
         # Add alphazero-general to path
         az_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../alphazero-general"))
         if az_path not in sys.path:
             sys.path.insert(0, az_path)
-            
+
         try:
+            import argparse
+
+            from MCTS import MCTS as AZMCTS
+            from NNet import NNetWrapper as AZNNet
             from SplendorGame import SplendorGame as AZGame
             from SplendorGame import SplendorGameProxy
-            from NNet import NNetWrapper as AZNNet
-            from MCTS import MCTS as AZMCTS
+
             import csplendor
-            import argparse
-            
+
             self._az_game_cls = AZGame
             self._az_proxy_cls = SplendorGameProxy
             self._csplendor = csplendor
-            
+
             # Initialize Game wrapper
             self._az_game = AZGame()
-            
+
             # Initialize NNet
             nn_args = dict(
                 lr=0.001, dropout=0.3, epochs=1, batch_size=64,
                 vl_weight=1.0, nn_version=1, cuda=torch.cuda.is_available()
             )
             self._az_nnet = AZNNet(self._az_game, nn_args)
-            
+
             # Load weights
             # Use target_model (from parameter or self.model_path)
             if target_model and os.path.exists(target_model):
@@ -444,7 +491,7 @@ class AIManager:
                 test_game = self._az_game.getInitBoard()
                 test_valids = self._az_game.getValidMoves(test_game, 0)
                 test_policy, test_value = self._az_nnet.predict(test_game, test_valids)
-                print(f"  DEBUG Test prediction:")
+                print("  DEBUG Test prediction:")
                 print(f"    Value: {test_value}")
                 print(f"    Top 5 policy: {sorted(enumerate(test_policy), key=lambda x: -x[1])[:5]}")
             else:
@@ -468,10 +515,10 @@ class AIManager:
                 temperature=[0.1, 0.1],  # Low for deterministic play (was [1.25, 0.8] in training)
                 no_mem_optim=False
             )
-            
+
             # Create MCTS instance
             self._az_mcts = AZMCTS(self._az_game, self._az_nnet, self._az_mcts_args, dirichlet_noise=False)
-            
+
             self._az_initialized = True
 
         except ImportError as e:
@@ -521,6 +568,7 @@ class AIManager:
             cpp_config.forced_playouts = az_options['forced_playouts']
         if 'dirichletAlpha' in az_options:
             cpp_config.dirichlet_alpha = az_options['dirichletAlpha']
+        self._az_mcts.cpp_mcts.set_config(cpp_config)
 
         print(f"  Applied AZ options: cpuct={cpp_config.cpuct}, fpu={cpp_config.fpu}, "
               f"forced_playouts={cpp_config.forced_playouts}")
@@ -540,7 +588,7 @@ class AIManager:
             print(f"AI (AlphaZero Direct) is thinking (Search {time_limit}s)...")
 
         # DEBUG: Print game state info
-        print(f"  DEBUG Game State:")
+        print("  DEBUG Game State:")
         print(f"    simple_payment_mode: {game.simple_payment_mode}")
         print(f"    current_player: {game.current_player}")
         print(f"    turn: {game.turn}")
@@ -614,7 +662,7 @@ class AIManager:
             prior_probs = list(root_node.prior)
             q_values = list(root_node.Q)
             valid = list(root_node.valid_actions)
-            print(f"  DEBUG Root Node:")
+            print("  DEBUG Root Node:")
             print(f"    Total visits: {root_node.total_visits}")
             top_actions = sorted([(i, visit_counts[i], prior_probs[i], q_values[i])
                                  for i in range(len(visit_counts)) if valid[i] and visit_counts[i] > 0],
@@ -622,13 +670,13 @@ class AIManager:
             for idx, n, p, q in top_actions:
                 print(f"    Action {idx}: N={n}, P={p:.4f}, Q={q:.4f}")
         else:
-            print(f"  WARNING: Root node not found in tree!")
+            print("  WARNING: Root node not found in tree!")
 
         # 4. Decode Canonical Action -> csplendor.Action
         # The ActionEncoderCpp.decode needs the game context to decode properly
         action = self._csplendor.ActionEncoderCpp.decode(best_canonical_idx, game)
         print(f"  Decoded Action: type={action.type}, card_id={action.card_id}")
-        
+
         # 5. Match against legal_actions to find correct index
         legals = game.legal_actions
         for i, legal_action in enumerate(legals):
@@ -640,10 +688,10 @@ class AIManager:
                     "actual_simulations": int(total_sims),
                 }
                 return i
-                
+
         print(f"ERROR: AlphaZero selected action {action} is not in legal actions!")
         print(f"Legal actions: {[str(a) for a in legals]}")
-        
+
         # Fallback to greedy if AZ picks illegal (should rare/impossible if MCTS works)
         return self._get_greedy_action(game)
 
@@ -751,8 +799,8 @@ class AIManager:
             sys.path.insert(0, ds_path)
 
         try:
-            from model.factory import load_model_from_checkpoint
             from encoder.state_encoder import encode_state
+            from model.factory import load_model_from_checkpoint
             from search.mcts import DeepSetsMCTS
 
             self._ds_device = self.device
@@ -812,12 +860,9 @@ class AIManager:
         legals = game.legal_actions
         legal_v3_to_idx = {}
         for i, legal_action in enumerate(legals):
-            try:
-                legal_v3 = int(_cs.ActionEncoderV3.encode(legal_action, game))
-                if legal_v3 not in legal_v3_to_idx:
-                    legal_v3_to_idx[legal_v3] = i
-            except Exception:
-                continue
+            legal_v3 = int(_cs.ActionEncoderV3.encode(legal_action, game))
+            if legal_v3 not in legal_v3_to_idx:
+                legal_v3_to_idx[legal_v3] = i
 
         # Extract MCTS params from ds_options
         cpuct = ds_options.get('cpuct', 1.5) if ds_options else 1.5
@@ -882,7 +927,7 @@ class AIManager:
 
         selected_idx = legal_v3_to_idx.get(int(best_v3_idx))
         if selected_idx is not None:
-            print(f"AI Move: {selected_idx} ({model_label}{'+ MCTS' if use_mcts else ''}, v3={best_v3_idx})")
+            print(f"AI Move: {selected_idx} ({model_label}{'+ MCTS' if use_search else ''}, v3={best_v3_idx})")
             return selected_idx
 
         # Decode V3 action → csplendor.Action
@@ -892,11 +937,11 @@ class AIManager:
         # Match against legal_actions
         for i, legal_action in enumerate(legals):
             if self._actions_equal(legal_action, action):
-                print(f"AI Move: {i} ({model_label}{'+ MCTS' if use_mcts else ''})")
+                print(f"AI Move: {i} ({model_label}{'+ MCTS' if use_search else ''})")
                 return i
 
         # Fallback: try top policy actions
-        if not use_mcts:
+        if not use_search:
             v3_mask = np.array(_cs.ActionEncoderV3.get_action_mask(game), dtype=np.uint8)
             top_indices = np.argsort(policy)[::-1]
             for v3_idx in top_indices[:10]:
@@ -1025,12 +1070,9 @@ class AIManager:
         legals = game.legal_actions
         legal_v3_to_idx = {}
         for i, legal_action in enumerate(legals):
-            try:
-                legal_v3 = int(_cs.ActionEncoderV3.encode(legal_action, game))
-                if legal_v3 not in legal_v3_to_idx:
-                    legal_v3_to_idx[legal_v3] = i
-            except Exception:
-                continue
+            legal_v3 = int(_cs.ActionEncoderV3.encode(legal_action, game))
+            if legal_v3 not in legal_v3_to_idx:
+                legal_v3_to_idx[legal_v3] = i
 
         cpuct = nnue_options.get('cpuct', 1.5) if nnue_options else 1.5
         fpu = nnue_options.get('fpu', 0.0) if nnue_options else 0.0

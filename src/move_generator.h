@@ -6,6 +6,11 @@
 #include <array>
 #include <vector>
 
+class Game;
+class ActionEncoderCpp;
+class ActionEncoderV2;
+class ActionEncoderV3;
+
 class MoveGenerator {
 public:
   struct EligibleNobles {
@@ -25,70 +30,88 @@ public:
   };
 
   // Fixed-size version - no heap allocations
-  static MoveList generate_all_fixed(const Board &board, bool simple_payment_mode = false) {
+  static MoveList generate_all_fixed(const Board &board,
+                                     bool simple_payment_mode = false) {
     MoveList result;
-    if (board.current_player >= Board::NUM_PLAYERS)
-      return result;
-
-    if (board.waiting_noble) {
-      generate_noble_visit_choices_fixed(board, result);
-      return result;
-    }
-
-    MoveList actions;
-    generate_take_different_fixed(board, actions);
-    generate_take_same_fixed(board, actions);
-    generate_reserve_visible_fixed(board, actions);
-    generate_reserve_deck_fixed(board, actions);
-    generate_purchase_fixed(board, actions, simple_payment_mode);
-
-    // Expand actions with all possible gem returns if needed
-    for (size_t i = 0; i < actions.size(); ++i) {
-      expand_with_returns_fixed(board, actions[i], result);
-    }
+    auto sink = [&result](const Action &action) {
+      result.push_back(action);
+      return true;
+    };
+    consume_all_capped(board, simple_payment_mode, sink);
     return result;
   }
 
-  static uint16_t count_all_fixed(const Board &board, bool simple_payment_mode = false) {
-    if (board.current_player >= Board::NUM_PLAYERS)
+  static uint16_t count_all_fixed(const Board &board,
+                                  bool simple_payment_mode = false) {
+    if (board.current_player >= Board::NUM_PLAYERS || board.is_game_over())
       return 0;
-
-    if (board.waiting_noble) {
+    if (board.waiting_noble)
       return get_eligible_nobles_fixed(board, board.current_player).count;
-    }
 
-    MoveList actions;
-    generate_take_different_fixed(board, actions);
-    generate_take_same_fixed(board, actions);
-    generate_reserve_visible_fixed(board, actions);
-    generate_reserve_deck_fixed(board, actions);
-    generate_purchase_fixed(board, actions, simple_payment_mode);
+    validate_purchase_source_ids(board);
 
-    uint32_t count = 0;
-    for (size_t i = 0; i < actions.size(); ++i) {
-      count += count_with_returns_fixed(board, actions[i]);
-      if (count >= MAX_MOVES)
-        return MAX_MOVES;
-    }
-    return static_cast<uint16_t>(count);
+    uint16_t count = 0;
+    uint16_t base_count = 0;
+    auto sink = [&board, &count, &base_count](const Action &action) {
+      if (base_count >= MAX_MOVES)
+        return false;
+      ++base_count;
+      uint16_t remaining = static_cast<uint16_t>(MAX_MOVES - count);
+      count += count_with_returns(board, action, remaining);
+      return count < MAX_MOVES && base_count < MAX_MOVES;
+    };
+    emit_base_actions(board, simple_payment_mode, sink);
+    // PASS is a forced rule transition. It is emitted only when the player
+    // has no ordinary action, so the fixed 48-slot policy mapping remains
+    // unchanged while the public legal-action APIs stay total.
+    return base_count == 0 ? 1 : count;
+  }
+
+  static bool requires_forced_pass(const Board &board,
+                                   bool simple_payment_mode = false) {
+    if (board.current_player >= Board::NUM_PLAYERS || board.is_game_over() ||
+        board.waiting_noble)
+      return false;
+
+    validate_purchase_source_ids(board);
+    bool has_ordinary_action = false;
+    auto sink = [&has_ordinary_action](const Action &) {
+      has_ordinary_action = true;
+      return false;
+    };
+    emit_base_actions(board, simple_payment_mode, sink);
+    return !has_ordinary_action;
   }
 
   // Legacy vector version for compatibility
-  static std::vector<Action> generate_all(const Board &board, bool simple_payment_mode = false) {
-    MoveList fixed = generate_all_fixed(board, simple_payment_mode);
-    return std::vector<Action>(fixed.begin(), fixed.end());
+  static std::vector<Action> generate_all(const Board &board,
+                                          bool simple_payment_mode = false) {
+    std::vector<Action> result;
+    result.reserve(count_all_fixed(board, simple_payment_mode));
+    auto sink = [&result](const Action &action) {
+      result.push_back(action);
+      return true;
+    };
+    consume_all_capped(board, simple_payment_mode, sink);
+    return result;
   }
 
-  static std::vector<Action> generate_base(const Board &board, bool simple_payment_mode = false) {
+  static std::vector<Action> generate_base(const Board &board,
+                                           bool simple_payment_mode = false) {
     std::vector<Action> actions;
     if (board.current_player >= Board::NUM_PLAYERS)
       return actions;
 
-    generate_take_different(board, actions);
-    generate_take_same(board, actions);
-    generate_reserve_visible(board, actions);
-    generate_reserve_deck(board, actions);
-    generate_purchase(board, actions, simple_payment_mode);
+    auto sink = [&actions](const Action &action) {
+      actions.push_back(action);
+      return true;
+    };
+    emit_base_actions(board, simple_payment_mode, sink);
+    if (actions.empty() && !board.is_game_over() && !board.waiting_noble) {
+      Action pass;
+      pass.type = PASS;
+      actions.push_back(pass);
+    }
     return actions;
   }
 
@@ -106,14 +129,13 @@ public:
 
     const auto &p = board.players[player_idx];
 
-    // Use cached eligibility mask for fast lookup
+    // Use cached eligibility mask for fast lookup.
     uint16_t mask = p.noble_eligibility_mask;
 
-    // Check only nobles on board that player is eligible for
+    // Check only nobles on board that player is eligible for.
     for (size_t i = 0; i < board.nobles.size(); ++i) {
       uint8_t noble_id = board.nobles[i];
-      if (is_valid_noble_id(noble_id) &&
-          (mask & (uint16_t(1) << noble_id))) {
+      if (is_valid_noble_id(noble_id) && (mask & (uint16_t(1) << noble_id))) {
         eligible.push_back(noble_id);
       }
     }
@@ -121,530 +143,376 @@ public:
   }
 
 private:
-  static void generate_take_different(const Board &b,
-                                      std::vector<Action> &out) {
-    std::vector<int> available_colors;
-    for (int i = 0; i < 5; ++i)
-      if (b.bank[i] > 0)
-        available_colors.push_back(i);
+  friend class Game;
+  friend class ActionEncoderCpp;
+  friend class ActionEncoderV2;
+  friend class ActionEncoderV3;
 
-    if (available_colors.size() >= 3) {
-      // Combinations of 3
-      for (size_t i = 0; i < available_colors.size(); ++i) {
-        for (size_t j = i + 1; j < available_colors.size(); ++j) {
-          for (size_t k = j + 1; k < available_colors.size(); ++k) {
-            Action a;
-            a.type = TAKE_DIFFERENT;
-            a.take[available_colors[i]] = 1;
-            a.take[available_colors[j]] = 1;
-            a.take[available_colors[k]] = 1;
-            out.push_back(a);
-          }
-        }
-      }
-    } else if (available_colors.size() > 0) {
-      // Take all available if less than 3
-      Action a;
-      a.type = TAKE_DIFFERENT;
-      for (int c : available_colors)
-        a.take[c] = 1;
-      out.push_back(a);
+  // All existing full-action APIs retain both legacy limits: at most the
+  // first MAX_MOVES base actions are expanded and at most the first MAX_MOVES
+  // final actions are observable. The emitter beneath this wrapper is
+  // uncapped so generate_base() keeps its existing vector semantics.
+  template <typename Sink>
+  static bool consume_all_capped(const Board &board, bool simple_payment_mode,
+                                 Sink &sink) {
+    if (board.current_player >= Board::NUM_PLAYERS || board.is_game_over())
+      return true;
+
+    uint16_t emitted_count = 0;
+    auto final_sink = [&sink, &emitted_count](const Action &action) {
+      if (emitted_count >= MAX_MOVES)
+        return false;
+      ++emitted_count;
+      return sink(action) && emitted_count < MAX_MOVES;
+    };
+
+    if (board.waiting_noble)
+      return emit_noble_visit_choices(board, final_sink);
+
+    validate_purchase_source_ids(board);
+
+    uint16_t base_count = 0;
+    auto base_sink = [&board, &base_count, &final_sink](const Action &action) {
+      if (base_count >= MAX_MOVES)
+        return false;
+      ++base_count;
+      if (!emit_with_returns(board, action, final_sink))
+        return false;
+      return base_count < MAX_MOVES;
+    };
+    const bool completed =
+        emit_base_actions(board, simple_payment_mode, base_sink);
+    if (completed && base_count == 0) {
+      Action pass;
+      pass.type = PASS;
+      return final_sink(pass);
     }
+    return completed;
   }
 
-  static void generate_take_same(const Board &b, std::vector<Action> &out) {
-    for (int i = 0; i < 5; ++i) {
-      if (b.bank[i] >= 4) {
-        Action a;
-        a.type = TAKE_SAME;
-        a.take[i] = 2;
-        out.push_back(a);
-      }
-    }
-  }
-
-  static void generate_reserve_visible(const Board &b,
-                                       std::vector<Action> &out) {
-    if (!b.players[b.current_player].can_reserve())
-      return;
-    for (int l = 0; l < 3; ++l) {
-      for (int s = 0; s < 4; ++s) {
-        if (b.visible[l][s] != -1) {
-          Action a;
-          a.type = RESERVE_VISIBLE;
-          a.card_id = b.visible[l][s];
-          out.push_back(a);
-        }
-      }
-    }
-  }
-
-  static void generate_reserve_deck(const Board &b, std::vector<Action> &out) {
-    if (!b.players[b.current_player].can_reserve())
-      return;
-    for (int l = 0; l < 3; ++l) {
-      if (!b.decks[l].empty()) {
-        Action a;
-        a.type = RESERVE_DECK;
-        a.deck_level = l;
-        out.push_back(a);
-      }
-    }
-  }
-
-  static void generate_purchase(const Board &b, std::vector<Action> &out, bool simple_payment_mode = false) {
-    const auto &p = b.players[b.current_player];
-
-    // From board
-    for (int l = 0; l < 3; ++l) {
-      for (int s = 0; s < 4; ++s) {
-        if (b.visible[l][s] != -1) {
-          generate_purchase_options(p, b.visible[l][s], false, out, simple_payment_mode);
-        }
+  static void validate_purchase_source_ids(const Board &board) {
+    for (int level = 0; level < 3; ++level) {
+      for (int slot = 0; slot < 4; ++slot) {
+        int8_t card_id = board.visible[level][slot];
+        if (card_id != -1 && !is_valid_card_id(card_id))
+          (void)get_card(card_id);
       }
     }
 
-    // From reserved
-    for (int i = 0; i < 3; ++i) {
-      if (p.reserved[i] != -1) {
-        generate_purchase_options(p, p.reserved[i], true, out, simple_payment_mode);
-      }
+    const auto &player = board.players[board.current_player];
+    for (int slot = 0; slot < 3; ++slot) {
+      int8_t card_id = player.reserved[slot];
+      if (card_id != -1 && !is_valid_card_id(card_id))
+        (void)get_card(card_id);
     }
   }
 
-  // Generate all valid payment combinations for a single card
-  static void generate_purchase_options(const PlayerState &p, int8_t card_id,
-                                        bool from_reserved,
-                                        std::vector<Action> &out,
-                                        bool simple_payment_mode = false) {
-    const auto &card = get_card(card_id);
-
-    // Calculate effective cost (cost - bonuses)
-    std::array<int, 5> effective_cost;
-    for (int i = 0; i < 5; ++i) {
-      effective_cost[i] = std::max(0, (int)card.cost[i] - (int)p.bonuses[i]);
-    }
-
-    // Calculate minimum gold needed using packed representation
-    int min_gold = cli::ResourceBundle::needed_gold(
-        card.packed_cost, p.packed_bonuses, p.packed_gems);
-
-    if (min_gold > p.gems[GOLD]) {
-      return; // Can't afford this card at all
-    }
-
-    // Generate all valid gold_as combinations
-    std::array<uint8_t, 5> gold_as = {0, 0, 0, 0, 0};
-    generate_gold_as_combinations(p, effective_cost, 0, 0, gold_as, card_id,
-                                  from_reserved, out, simple_payment_mode);
+  template <typename Sink>
+  static bool emit_base_actions(const Board &board, bool simple_payment_mode,
+                                Sink &sink) {
+    return emit_take_different(board, sink) && emit_take_same(board, sink) &&
+           emit_reserve_visible(board, sink) &&
+           emit_reserve_deck(board, sink) &&
+           emit_purchase(board, simple_payment_mode, sink);
   }
 
-  // Recursively generate all valid gold_as combinations
-  static void generate_gold_as_combinations(
-      const PlayerState &p, const std::array<int, 5> &effective_cost,
-      int color_idx, int gold_used, std::array<uint8_t, 5> gold_as,
-      int8_t card_id, bool from_reserved, std::vector<Action> &out,
-      bool simple_payment_mode = false) {
-    if (color_idx == 5) {
-      // All colors processed, create an action
-      Action a;
-      a.type = PURCHASE;
-      a.card_id = card_id;
-      a.from_reserved = from_reserved;
-      a.gold_as = gold_as;
-      out.push_back(a);
-      return;
-    }
-
-    int cost = effective_cost[color_idx];
-    int player_gems = p.gems[color_idx];
-    int remaining_gold = p.gems[GOLD] - gold_used;
-
-    // Calculate min and max gold usage for this color
-    // min: if player has enough gems, 0. Otherwise, cost - gems.
-    // max: minimum of (cost, remaining_gold)
-    int min_gold_for_color = std::max(0, cost - player_gems);
-    int max_gold_for_color = std::min(cost, remaining_gold);
-
-    if (min_gold_for_color > max_gold_for_color) {
-      return; // Invalid branch, can't afford
-    }
-
-    if (simple_payment_mode) {
-      // Simple mode: only use minimum gold (maximize gem usage)
-      gold_as[color_idx] = min_gold_for_color;
-      generate_gold_as_combinations(p, effective_cost, color_idx + 1,
-                                    gold_used + min_gold_for_color, gold_as, card_id,
-                                    from_reserved, out, simple_payment_mode);
-    } else {
-      // Full mode: generate all valid payment combinations
-      for (int g = min_gold_for_color; g <= max_gold_for_color; ++g) {
-        gold_as[color_idx] = g;
-        generate_gold_as_combinations(p, effective_cost, color_idx + 1,
-                                      gold_used + g, gold_as, card_id,
-                                      from_reserved, out, simple_payment_mode);
-      }
-    }
-  }
-
-  static void expand_with_returns(const Board &b, Action action,
-                                  std::vector<Action> &out) {
-    const auto &p = b.players[b.current_player];
-    uint8_t next_gems[6];
-    for (int i = 0; i < 6; ++i)
-      next_gems[i] = p.gems[i];
-
-    // Simulate gem changes
-    if (action.type == TAKE_DIFFERENT || action.type == TAKE_SAME) {
-      for (int i = 0; i < 5; ++i)
-        next_gems[i] += action.take[i];
-    } else if (action.type == RESERVE_VISIBLE || action.type == RESERVE_DECK) {
-      if (b.bank[GOLD] > 0)
-        next_gems[GOLD]++;
-    } else if (action.type == PURCHASE) {
-      const auto &card = get_card(action.card_id);
-      int gold_used = 0;
-      for (int i = 0; i < 5; ++i) {
-        int cost = std::max(0, (int)card.cost[i] - (int)p.bonuses[i]);
-        int from_gems = std::min((int)next_gems[i], cost);
-        next_gems[i] -= from_gems;
-        gold_used += (cost - from_gems);
-      }
-      next_gems[GOLD] -= gold_used;
-    }
-
-    int total = 0;
-    for (int i = 0; i < 6; ++i)
-      total += next_gems[i];
-
-    int excess = std::max(0, total - Board::MAX_TOKENS);
-
-    if (excess > 0) {
-      auto return_options = generate_return_combinations(next_gems, excess);
-      for (const auto &opt : return_options) {
-        Action a_ret = action;
-        for (int i = 0; i < 6; ++i) {
-          a_ret.return_gems[i] = opt[i];
-        }
-        out.push_back(a_ret);
-      }
-    } else {
-      out.push_back(action);
-    }
-  }
-
-  static void generate_noble_visit_choices(const Board &b,
-                                           std::vector<Action> &out) {
-    auto eligible = get_eligible_nobles(b, b.current_player);
-    for (uint8_t noble_id : eligible) {
-      Action a;
-      a.type = VISIT_NOBLE;
-      a.noble_choice = noble_id;
-      out.push_back(a);
-    }
-  }
-
-  static std::vector<std::array<uint8_t, 6>>
-  generate_return_combinations(const uint8_t current[6], int count) {
-    std::vector<std::array<uint8_t, 6>> result;
-    std::array<uint8_t, 6> current_return = {0, 0, 0, 0, 0, 0};
-    recursive_return(current, count, 0, current_return, result);
-    return result;
-  }
-
-  static void recursive_return(const uint8_t available[6], int remaining,
-                               int color_idx,
-                               std::array<uint8_t, 6> current_return,
-                               std::vector<std::array<uint8_t, 6>> &result) {
-    if (remaining == 0) {
-      result.push_back(current_return);
-      return;
-    }
-    if (color_idx == 6)
-      return;
-
-    for (int i = 0; i <= std::min(remaining, (int)available[color_idx]); ++i) {
-      current_return[color_idx] = i;
-      recursive_return(available, remaining - i, color_idx + 1, current_return,
-                       result);
-    }
-  }
-
-  // ========== Fixed-size versions (no heap allocations) ==========
-
-  static void generate_take_different_fixed(const Board &b, MoveList &out) {
+  template <typename Sink>
+  static bool emit_take_different(const Board &board, Sink &sink) {
     std::array<int, 5> available_colors;
     int num_available = 0;
-    for (int i = 0; i < 5; ++i)
-      if (b.bank[i] > 0)
-        available_colors[num_available++] = i;
+    for (int color = 0; color < 5; ++color) {
+      if (board.bank[color] > 0)
+        available_colors[num_available++] = color;
+    }
 
     if (num_available >= 3) {
       for (int i = 0; i < num_available; ++i) {
         for (int j = i + 1; j < num_available; ++j) {
           for (int k = j + 1; k < num_available; ++k) {
-            Action a;
-            a.type = TAKE_DIFFERENT;
-            a.take[available_colors[i]] = 1;
-            a.take[available_colors[j]] = 1;
-            a.take[available_colors[k]] = 1;
-            out.push_back(a);
+            Action action;
+            action.type = TAKE_DIFFERENT;
+            action.take[available_colors[i]] = 1;
+            action.take[available_colors[j]] = 1;
+            action.take[available_colors[k]] = 1;
+            if (!sink(action))
+              return false;
           }
         }
       }
     } else if (num_available > 0) {
-      Action a;
-      a.type = TAKE_DIFFERENT;
+      Action action;
+      action.type = TAKE_DIFFERENT;
       for (int i = 0; i < num_available; ++i)
-        a.take[available_colors[i]] = 1;
-      out.push_back(a);
+        action.take[available_colors[i]] = 1;
+      if (!sink(action))
+        return false;
     }
+    return true;
   }
 
-  static void generate_take_same_fixed(const Board &b, MoveList &out) {
-    for (int i = 0; i < 5; ++i) {
-      if (b.bank[i] >= 4) {
-        Action a;
-        a.type = TAKE_SAME;
-        a.take[i] = 2;
-        out.push_back(a);
+  template <typename Sink>
+  static bool emit_take_same(const Board &board, Sink &sink) {
+    for (int color = 0; color < 5; ++color) {
+      if (board.bank[color] >= 4) {
+        Action action;
+        action.type = TAKE_SAME;
+        action.take[color] = 2;
+        if (!sink(action))
+          return false;
       }
     }
+    return true;
   }
 
-  static void generate_reserve_visible_fixed(const Board &b, MoveList &out) {
-    if (!b.players[b.current_player].can_reserve())
-      return;
-    for (int l = 0; l < 3; ++l) {
-      for (int s = 0; s < 4; ++s) {
-        if (b.visible[l][s] != -1) {
-          Action a;
-          a.type = RESERVE_VISIBLE;
-          a.card_id = b.visible[l][s];
-          out.push_back(a);
+  template <typename Sink>
+  static bool emit_reserve_visible(const Board &board, Sink &sink) {
+    if (!board.players[board.current_player].can_reserve())
+      return true;
+    for (int level = 0; level < 3; ++level) {
+      for (int slot = 0; slot < 4; ++slot) {
+        if (board.visible[level][slot] != -1) {
+          Action action;
+          action.type = RESERVE_VISIBLE;
+          action.card_id = board.visible[level][slot];
+          if (!sink(action))
+            return false;
         }
       }
     }
+    return true;
   }
 
-  static void generate_reserve_deck_fixed(const Board &b, MoveList &out) {
-    if (!b.players[b.current_player].can_reserve())
-      return;
-    for (int l = 0; l < 3; ++l) {
-      if (!b.decks[l].empty()) {
-        Action a;
-        a.type = RESERVE_DECK;
-        a.deck_level = l;
-        out.push_back(a);
+  template <typename Sink>
+  static bool emit_reserve_deck(const Board &board, Sink &sink) {
+    if (!board.players[board.current_player].can_reserve())
+      return true;
+    for (int level = 0; level < 3; ++level) {
+      if (!board.decks[level].empty()) {
+        Action action;
+        action.type = RESERVE_DECK;
+        action.deck_level = level;
+        if (!sink(action))
+          return false;
       }
     }
+    return true;
   }
 
-  static void generate_purchase_fixed(const Board &b, MoveList &out, bool simple_payment_mode = false) {
-    const auto &p = b.players[b.current_player];
+  template <typename Sink>
+  static bool emit_purchase(const Board &board, bool simple_payment_mode,
+                            Sink &sink) {
+    const auto &player = board.players[board.current_player];
 
-    // From board
-    for (int l = 0; l < 3; ++l) {
-      for (int s = 0; s < 4; ++s) {
-        if (b.visible[l][s] != -1) {
-          generate_purchase_options_fixed(p, b.visible[l][s], false, out, simple_payment_mode);
+    for (int level = 0; level < 3; ++level) {
+      for (int slot = 0; slot < 4; ++slot) {
+        if (board.visible[level][slot] != -1 &&
+            !emit_purchase_options(player, board.visible[level][slot], false,
+                                   simple_payment_mode, sink)) {
+          return false;
         }
       }
     }
 
-    // From reserved
-    for (int i = 0; i < 3; ++i) {
-      if (p.reserved[i] != -1) {
-        generate_purchase_options_fixed(p, p.reserved[i], true, out, simple_payment_mode);
+    for (int slot = 0; slot < 3; ++slot) {
+      if (player.reserved[slot] != -1 &&
+          !emit_purchase_options(player, player.reserved[slot], true,
+                                 simple_payment_mode, sink)) {
+        return false;
       }
     }
+    return true;
   }
 
-  static void generate_purchase_options_fixed(const PlayerState &p,
-                                              int8_t card_id, bool from_reserved,
-                                              MoveList &out, bool simple_payment_mode = false) {
+  template <typename Sink>
+  static bool emit_purchase_options(const PlayerState &player, int8_t card_id,
+                                    bool from_reserved,
+                                    bool simple_payment_mode, Sink &sink) {
     const auto &card = get_card(card_id);
-
     std::array<int, 5> effective_cost;
-    for (int i = 0; i < 5; ++i) {
-      effective_cost[i] = std::max(0, (int)card.cost[i] - (int)p.bonuses[i]);
+    for (int color = 0; color < 5; ++color) {
+      effective_cost[color] =
+          std::max(0, static_cast<int>(card.cost[color]) -
+                          static_cast<int>(player.bonuses[color]));
     }
 
-    int min_gold = cli::ResourceBundle::needed_gold(card.packed_cost,
-                                                    p.packed_bonuses, p.packed_gems);
-
-    if (min_gold > p.gems[GOLD]) {
-      return;
-    }
+    int min_gold = cli::ResourceBundle::needed_gold(
+        card.packed_cost, player.packed_bonuses, player.packed_gems);
+    if (min_gold > player.gems[GOLD])
+      return true;
 
     std::array<uint8_t, 5> gold_as = {0, 0, 0, 0, 0};
-    generate_gold_as_combinations_fixed(p, effective_cost, 0, 0, gold_as,
-                                        card_id, from_reserved, out, simple_payment_mode);
+    return emit_gold_as_combinations(player, effective_cost, 0, 0, gold_as,
+                                     card_id, from_reserved,
+                                     simple_payment_mode, sink);
   }
 
-  static void generate_gold_as_combinations_fixed(
-      const PlayerState &p, const std::array<int, 5> &effective_cost,
+  template <typename Sink>
+  static bool emit_gold_as_combinations(
+      const PlayerState &player, const std::array<int, 5> &effective_cost,
       int color_idx, int gold_used, std::array<uint8_t, 5> gold_as,
-      int8_t card_id, bool from_reserved, MoveList &out, bool simple_payment_mode = false) {
+      int8_t card_id, bool from_reserved, bool simple_payment_mode,
+      Sink &sink) {
     if (color_idx == 5) {
-      Action a;
-      a.type = PURCHASE;
-      a.card_id = card_id;
-      a.from_reserved = from_reserved;
-      a.gold_as = gold_as;
-      out.push_back(a);
-      return;
+      Action action;
+      action.type = PURCHASE;
+      action.card_id = card_id;
+      action.from_reserved = from_reserved;
+      action.gold_as = gold_as;
+      return sink(action);
     }
 
     int cost = effective_cost[color_idx];
-    int player_gems = p.gems[color_idx];
-    int remaining_gold = p.gems[GOLD] - gold_used;
-
+    int player_gems = player.gems[color_idx];
+    int remaining_gold = player.gems[GOLD] - gold_used;
     int min_gold_for_color = std::max(0, cost - player_gems);
     int max_gold_for_color = std::min(cost, remaining_gold);
-
-    if (min_gold_for_color > max_gold_for_color) {
-      return;
-    }
+    if (min_gold_for_color > max_gold_for_color)
+      return true;
 
     if (simple_payment_mode) {
-      // Simple mode: only use minimum gold (maximize gem usage)
-      gold_as[color_idx] = min_gold_for_color;
-      generate_gold_as_combinations_fixed(p, effective_cost, color_idx + 1,
-                                          gold_used + min_gold_for_color, gold_as, card_id,
-                                          from_reserved, out, simple_payment_mode);
-    } else {
-      // Full mode: generate all valid payment combinations
-      for (int g = min_gold_for_color; g <= max_gold_for_color; ++g) {
-        gold_as[color_idx] = g;
-        generate_gold_as_combinations_fixed(p, effective_cost, color_idx + 1,
-                                            gold_used + g, gold_as, card_id,
-                                            from_reserved, out, simple_payment_mode);
+      gold_as[color_idx] = static_cast<uint8_t>(min_gold_for_color);
+      return emit_gold_as_combinations(
+          player, effective_cost, color_idx + 1, gold_used + min_gold_for_color,
+          gold_as, card_id, from_reserved, simple_payment_mode, sink);
+    }
+
+    for (int gold = min_gold_for_color; gold <= max_gold_for_color; ++gold) {
+      gold_as[color_idx] = static_cast<uint8_t>(gold);
+      if (!emit_gold_as_combinations(
+              player, effective_cost, color_idx + 1, gold_used + gold, gold_as,
+              card_id, from_reserved, simple_payment_mode, sink)) {
+        return false;
       }
     }
+    return true;
   }
 
-  static void expand_with_returns_fixed(const Board &b, Action action,
-                                        MoveList &out) {
-    const auto &p = b.players[b.current_player];
-    uint8_t next_gems[6];
-    for (int i = 0; i < 6; ++i)
-      next_gems[i] = p.gems[i];
+  static std::array<uint8_t, 6> gems_after_action(const Board &board,
+                                                  const Action &action) {
+    const auto &player = board.players[board.current_player];
+    std::array<uint8_t, 6> next_gems = player.gems;
 
     if (action.type == TAKE_DIFFERENT || action.type == TAKE_SAME) {
-      for (int i = 0; i < 5; ++i)
-        next_gems[i] += action.take[i];
+      for (int color = 0; color < 5; ++color)
+        next_gems[color] += action.take[color];
     } else if (action.type == RESERVE_VISIBLE || action.type == RESERVE_DECK) {
-      if (b.bank[GOLD] > 0)
-        next_gems[GOLD]++;
+      if (board.bank[GOLD] > 0)
+        ++next_gems[GOLD];
     } else if (action.type == PURCHASE) {
       const auto &card = get_card(action.card_id);
       int gold_used = 0;
-      for (int i = 0; i < 5; ++i) {
-        int cost = std::max(0, (int)card.cost[i] - (int)p.bonuses[i]);
-        int from_gems = std::min((int)next_gems[i], cost);
-        next_gems[i] -= from_gems;
-        gold_used += (cost - from_gems);
+      for (int color = 0; color < 5; ++color) {
+        int cost = std::max(0, static_cast<int>(card.cost[color]) -
+                                   static_cast<int>(player.bonuses[color]));
+        int from_gems = std::min(static_cast<int>(next_gems[color]), cost);
+        next_gems[color] -= static_cast<uint8_t>(from_gems);
+        gold_used += cost - from_gems;
       }
-      next_gems[GOLD] -= gold_used;
+      next_gems[GOLD] -= static_cast<uint8_t>(gold_used);
     }
-
-    int total = 0;
-    for (int i = 0; i < 6; ++i)
-      total += next_gems[i];
-
-    int excess = std::max(0, total - Board::MAX_TOKENS);
-
-    if (excess > 0) {
-      // Generate return combinations directly into MoveList
-      std::array<uint8_t, 6> current_return = {0, 0, 0, 0, 0, 0};
-      recursive_return_fixed(next_gems, excess, 0, current_return, action, out);
-    } else {
-      out.push_back(action);
-    }
+    return next_gems;
   }
 
-  static uint16_t count_with_returns_fixed(const Board &b,
-                                           const Action &action) {
-    const auto &p = b.players[b.current_player];
-    uint8_t next_gems[6];
-    for (int i = 0; i < 6; ++i)
-      next_gems[i] = p.gems[i];
+  template <typename Sink>
+  static bool emit_with_returns(const Board &board, const Action &action,
+                                Sink &sink) {
+    // Purchases can only spend gems; unlike take/reserve actions they never
+    // permit an explicit token return.  This also keeps generator/apply
+    // parity for public editor states that start above the ten-token limit.
+    if (action.type == PURCHASE)
+      return sink(action);
 
-    if (action.type == TAKE_DIFFERENT || action.type == TAKE_SAME) {
-      for (int i = 0; i < 5; ++i)
-        next_gems[i] += action.take[i];
-    } else if (action.type == RESERVE_VISIBLE || action.type == RESERVE_DECK) {
-      if (b.bank[GOLD] > 0)
-        next_gems[GOLD]++;
-    } else if (action.type == PURCHASE) {
-      const auto &card = get_card(action.card_id);
-      int gold_used = 0;
-      for (int i = 0; i < 5; ++i) {
-        int cost = std::max(0, (int)card.cost[i] - (int)p.bonuses[i]);
-        int from_gems = std::min((int)next_gems[i], cost);
-        next_gems[i] -= from_gems;
-        gold_used += (cost - from_gems);
-      }
-      next_gems[GOLD] -= gold_used;
-    }
-
+    std::array<uint8_t, 6> next_gems = gems_after_action(board, action);
     int total = 0;
-    for (int i = 0; i < 6; ++i)
-      total += next_gems[i];
+    for (uint8_t gems : next_gems)
+      total += gems;
 
     int excess = std::max(0, total - Board::MAX_TOKENS);
     if (excess <= 0)
-      return 1;
+      return sink(action);
 
-    return count_return_combinations_fixed(next_gems, excess, 0);
+    std::array<uint8_t, 6> current_return = {0, 0, 0, 0, 0, 0};
+    return emit_return_combinations(next_gems, excess, 0, current_return,
+                                    action, sink);
   }
 
-  static uint16_t count_return_combinations_fixed(const uint8_t available[6],
-                                                  int remaining,
-                                                  int color_idx) {
+  static uint16_t count_with_returns(const Board &board, const Action &action,
+                                     uint16_t limit) {
+    if (action.type == PURCHASE)
+      return std::min<uint16_t>(1, limit);
+
+    std::array<uint8_t, 6> next_gems = gems_after_action(board, action);
+    int total = 0;
+    for (uint8_t gems : next_gems)
+      total += gems;
+
+    int excess = std::max(0, total - Board::MAX_TOKENS);
+    if (excess <= 0)
+      return std::min<uint16_t>(1, limit);
+    return count_return_combinations(next_gems, excess, 0, limit);
+  }
+
+  static uint16_t
+  count_return_combinations(const std::array<uint8_t, 6> &available,
+                            int remaining, int color_idx, uint16_t limit) {
+    if (limit == 0)
+      return 0;
     if (remaining == 0)
       return 1;
     if (color_idx == 6)
       return 0;
 
     uint16_t count = 0;
-    int max_return = std::min(remaining, (int)available[color_idx]);
-    for (int i = 0; i <= max_return; ++i) {
-      count += count_return_combinations_fixed(available, remaining - i,
-                                               color_idx + 1);
+    int max_return =
+        std::min(remaining, static_cast<int>(available[color_idx]));
+    for (int amount = 0; amount <= max_return; ++amount) {
+      uint16_t branch_limit = static_cast<uint16_t>(limit - count);
+      count += count_return_combinations(available, remaining - amount,
+                                         color_idx + 1, branch_limit);
+      if (count >= limit)
+        return limit;
     }
     return count;
   }
 
-  static void recursive_return_fixed(const uint8_t available[6], int remaining,
-                                     int color_idx,
-                                     std::array<uint8_t, 6> current_return,
-                                     Action base_action, MoveList &out) {
+  template <typename Sink>
+  static bool emit_return_combinations(const std::array<uint8_t, 6> &available,
+                                       int remaining, int color_idx,
+                                       std::array<uint8_t, 6> current_return,
+                                       const Action &base_action, Sink &sink) {
     if (remaining == 0) {
-      Action a_ret = base_action;
-      a_ret.return_gems = current_return;
-      out.push_back(a_ret);
-      return;
+      Action action = base_action;
+      action.return_gems = current_return;
+      return sink(action);
     }
     if (color_idx == 6)
-      return;
+      return true;
 
-    for (int i = 0; i <= std::min(remaining, (int)available[color_idx]); ++i) {
-      current_return[color_idx] = i;
-      recursive_return_fixed(available, remaining - i, color_idx + 1,
-                             current_return, base_action, out);
+    int max_return =
+        std::min(remaining, static_cast<int>(available[color_idx]));
+    for (int amount = 0; amount <= max_return; ++amount) {
+      current_return[color_idx] = static_cast<uint8_t>(amount);
+      if (!emit_return_combinations(available, remaining - amount,
+                                    color_idx + 1, current_return, base_action,
+                                    sink)) {
+        return false;
+      }
     }
+    return true;
   }
 
-  static void generate_noble_visit_choices_fixed(const Board &b, MoveList &out) {
-    auto eligible = get_eligible_nobles_fixed(b, b.current_player);
+  template <typename Sink>
+  static bool emit_noble_visit_choices(const Board &board, Sink &sink) {
+    EligibleNobles eligible =
+        get_eligible_nobles_fixed(board, board.current_player);
     for (size_t i = 0; i < eligible.size(); ++i) {
-      Action a;
-      a.type = VISIT_NOBLE;
-      a.noble_choice = eligible[i];
-      out.push_back(a);
+      Action action;
+      action.type = VISIT_NOBLE;
+      action.noble_choice = eligible[i];
+      if (!sink(action))
+        return false;
     }
+    return true;
   }
 };
 

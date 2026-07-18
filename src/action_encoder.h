@@ -163,17 +163,14 @@ public:
    */
   static std::array<uint8_t, BASE_ACTION_COUNT> get_action_mask(const Game &game) {
     std::array<uint8_t, BASE_ACTION_COUNT> mask = {0};
-
-    MoveList legal_actions =
-        MoveGenerator::generate_all_fixed(game.board, game.simple_payment_mode);
-
-    // Encode each legal action and mark in mask
-    for (const Action &action : legal_actions) {
+    auto sink = [&game, &mask](const Action &action) {
       int idx = encode(action, game);
-      if (idx >= 0 && idx < BASE_ACTION_COUNT) {
+      if (idx >= 0 && idx < BASE_ACTION_COUNT)
         mask[idx] = 1;
-      }
-    }
+      return true;
+    };
+    MoveGenerator::consume_all_capped(game.board, game.simple_payment_mode,
+                                      sink);
 
     return mask;
   }
@@ -285,13 +282,10 @@ public:
 
     const Board &board = game.board;
     const PlayerState &player = board.players[board.current_player];
-    MoveList legal_actions =
-        MoveGenerator::generate_all_fixed(game.board, game.simple_payment_mode);
-
-    for (const Action &action : legal_actions) {
+    auto sink = [&game, &mask, &scores, &player](const Action &action) {
       int idx = encode(action, game);
       if (idx < 0 || idx >= BASE_ACTION_COUNT)
-        continue;
+        return true;
 
       mask[idx] = 1;
 
@@ -319,7 +313,10 @@ public:
         scores[idx] = 0.1f;
         break;
       }
-    }
+      return true;
+    };
+    MoveGenerator::consume_all_capped(game.board, game.simple_payment_mode,
+                                      sink);
 
     return {mask, scores};
   }

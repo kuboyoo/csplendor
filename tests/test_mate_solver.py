@@ -1,6 +1,5 @@
 import csplendor as cs
 from csplendor.api.usi_kifu import game_to_spn
-
 from scripts.mate_solver import (
     MATE,
     NO_MATE,

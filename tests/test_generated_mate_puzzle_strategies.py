@@ -8,7 +8,6 @@ import csplendor as cs
 from csplendor.api.usi_kifu import spn_to_game
 from scripts.dfpn_mate_solver import compact_proof_dag_to_v1
 
-
 GENERATED_MATE_PUZZLES2 = Path(__file__).resolve().parents[1] / "generated" / "mate_puzzles2"
 REPRESENTATIVE_PUZZLE_IDS = (
     "6e5729c524acbd3b",

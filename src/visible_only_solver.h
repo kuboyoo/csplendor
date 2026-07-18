@@ -53,6 +53,7 @@ public:
     game.blank_refill_mode = true;
     for (int level = 0; level < 3; ++level)
       game.board.decks[level].clear();
+    game.board.invalidate_hash();
     root_ = game.clone_light();
 
     VisibleOnlySearchResult result;

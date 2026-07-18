@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
-from typing import List, Optional
 from enum import IntEnum
+from typing import List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class GemType(IntEnum):
@@ -19,6 +20,7 @@ class ActionType(IntEnum):
     RESERVE_DECK = 3
     PURCHASE = 4
     VISIT_NOBLE = 5
+    PASS = 6
 
 
 class CardSchema(BaseModel):

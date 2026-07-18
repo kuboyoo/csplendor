@@ -3,13 +3,12 @@ from itertools import islice
 from types import SimpleNamespace
 
 import csplendor as cs
-from csplendor.api.usi_kifu import action_to_usi, parse_kifu_text, spn_to_game
-
 import scripts.generate_mate_puzzles as generate_mate_puzzles
+from csplendor.api.usi_kifu import action_to_usi, parse_kifu_text, spn_to_game
 from scripts.generate_mate_puzzles import (
+    GenerationStats,
     ProgressReporter,
     RankedCandidate,
-    GenerationStats,
     build_parser,
     candidate_rank_score,
     find_countermate_blunders,
@@ -17,8 +16,8 @@ from scripts.generate_mate_puzzles import (
     generate_candidate_position,
     generate_candidate_positions,
     generate_ranked_candidate_positions,
-    is_tactical_candidate,
     is_suspicious_position,
+    is_tactical_candidate,
     report_rejected_position,
     save_puzzle,
     threat_summary,
