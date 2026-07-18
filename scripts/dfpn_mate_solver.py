@@ -844,9 +844,9 @@ class DFPNMateSolver:
             for future in active:
                 future.cancel()
             try:
-                executor.shutdown(wait=False, cancel_futures=True)
+                executor.shutdown(wait=True, cancel_futures=True)
             except TypeError:
-                executor.shutdown(wait=False)
+                executor.shutdown(wait=True)
 
     def _merge_worker_stats(self, stats: Dict[str, Any]) -> None:
         self.stats.nodes += int(stats.get("nodes", 0))
