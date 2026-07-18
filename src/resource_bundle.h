@@ -1,6 +1,7 @@
 #ifndef CSPLENDOR_RESOURCE_BUNDLE_H
 #define CSPLENDOR_RESOURCE_BUNDLE_H
 
+#include <array>
 #include <cstdint>
 
 namespace cli {
@@ -23,12 +24,16 @@ struct ResourceBundle {
   ResourceBundle() : data(0) {}
   explicit ResourceBundle(uint64_t d) : data(d) {}
 
+  static constexpr uint64_t pack(const std::array<uint8_t, 5> &arr) {
+    uint64_t packed = 0;
+    for (int i = 0; i < 5; ++i)
+      packed |= uint64_t(arr[i]) << (i * 12);
+    return packed;
+  }
+
   static ResourceBundle from_array(const uint8_t arr[5]) {
-    uint64_t d = 0;
-    for (int i = 0; i < 5; ++i) {
-      d |= (uint64_t(arr[i]) << (i * 12));
-    }
-    return ResourceBundle(d);
+    std::array<uint8_t, 5> values = {arr[0], arr[1], arr[2], arr[3], arr[4]};
+    return ResourceBundle(pack(values));
   }
 
   void to_array(uint8_t arr[5]) const {
@@ -49,8 +54,6 @@ struct ResourceBundle {
     // (0x8xx). If (cost - bonus - gems) <= 0, the 11th bit becomes 0 (0x7xx or
     // less).
 
-    // Create a mask for fields where bit 11 is set.
-    uint64_t mask = temp & BIT_11;
     // Propagate the 11th bit to the lower 11 bits of each field.
     // A simple way is: (mask >> 11) * 0x7FF, but multiplication is slow.
     // We can use: ((mask >> 11) | (mask >> 10) | ... | (mask >> 1)) is also

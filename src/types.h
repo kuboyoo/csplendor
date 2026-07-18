@@ -40,7 +40,8 @@ enum ActionType : uint8_t {
   RESERVE_DECK = 3,
   PURCHASE = 4,
   VISIT_NOBLE = 5,
-  ACTION_TYPE_COUNT = 6
+  PASS = 6,
+  ACTION_TYPE_COUNT = 7
 };
 
 #endif // CSPLENDOR_TYPES_H

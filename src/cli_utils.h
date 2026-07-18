@@ -65,8 +65,8 @@ inline void print_card_line(int8_t card_id, int line) {
       if (card.cost[i] > 0)
         cost_indices.push_back(i);
 
-    if (line - 1 < cost_indices.size()) {
-      int c_idx = cost_indices[line - 1];
+    if (line > 0 && static_cast<size_t>(line - 1) < cost_indices.size()) {
+      int c_idx = cost_indices[static_cast<size_t>(line - 1)];
       std::cout << " " << gem_bg(c_idx) << " " << (int)card.cost[c_idx] << " "
                 << bg << "     ";
     } else {
@@ -129,7 +129,7 @@ inline void print_board(const Board &board) {
 
   std::cout << "         ";
   for (int p = 0; p < 2; ++p) {
-    for (uint8_t n_id : board.players[p].acquired_nobles) {
+    for (size_t i = 0; i < board.players[p].acquired_nobles.size(); ++i) {
       std::cout << "  < " << BOLD << "3" << RESET << " >  ";
     }
     for (size_t i = board.players[p].acquired_nobles.size(); i < 3; ++i)

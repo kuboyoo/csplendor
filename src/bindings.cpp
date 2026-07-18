@@ -7,6 +7,8 @@
 #include "cli_utils.h"
 #include "game.h"
 #include "mcts.h"
+#include "mcts_parallel_searcher.h"
+#include "mcts_root_parallel.h"
 #include "mcts_searcher.h"
 #include "move_generator.h"
 #include "noble_data.h"
@@ -19,8 +21,321 @@
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <iomanip>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <stdexcept>
+#include <unordered_map>
 
 namespace py = pybind11;
+
+namespace {
+
+template <typename T, size_t N>
+py::array_t<T> owning_array_copy(const std::array<T, N> &source) {
+  py::array_t<T> result(N);
+  std::memcpy(result.mutable_data(), source.data(), N * sizeof(T));
+  return result;
+}
+
+mcts_parallel::ParallelInferenceFunction
+make_python_parallel_inference(py::function &inference_fn) {
+  return [&inference_fn](
+             const std::vector<mcts_parallel::ParallelInferenceRequest>
+                 &requests) {
+    // Root-parallel serialization is owned by its native runner. It locks
+    // before acquiring the GIL and can therefore re-check timeout/cancel after
+    // waiting instead of draining stale Python callback work.
+    py::gil_scoped_acquire acquire;
+    py::list python_requests(requests.size());
+    for (size_t index = 0; index < requests.size(); ++index) {
+      const auto &request = requests[index];
+      py::dict key;
+      key["position_hash"] = request.key.position_hash;
+      key["key_version"] = request.key.key_version;
+      key["observer"] = request.key.observer;
+      key["domain"] = static_cast<uint8_t>(request.key.domain);
+      key["mode_bits"] = request.key.mode_bits;
+      py::dict item;
+      item["pending_id"] = request.pending_id;
+      item["simulation_id"] = request.owner_simulation_id;
+      item["tree_key"] = std::move(key);
+      // Callbacks may retain these arrays after returning. Every request owns
+      // independent contiguous storage.
+      item["features"] = owning_array_copy(request.features);
+      item["valid_actions"] = owning_array_copy(request.owner_world_mask);
+      python_requests[index] = std::move(item);
+    }
+
+    py::object callback_result = inference_fn(python_requests);
+    py::sequence sequence = callback_result.cast<py::sequence>();
+    if (py::len(sequence) != requests.size())
+      throw py::value_error(
+          "parallel inference result count does not match requests");
+    std::vector<mcts_parallel::ParallelInferenceResult> results;
+    results.reserve(requests.size());
+    for (size_t index = 0; index < requests.size(); ++index) {
+      py::dict item = sequence[index].cast<py::dict>();
+      if (!item.contains("policy") || !item.contains("value"))
+        throw py::value_error(
+            "parallel inference result requires policy and value");
+      py::array_t<float, py::array::c_style | py::array::forcecast> policy =
+          item["policy"].cast<py::array_t<
+              float, py::array::c_style | py::array::forcecast>>();
+      py::array_t<float, py::array::c_style | py::array::forcecast> value =
+          item["value"].cast<py::array_t<
+              float, py::array::c_style | py::array::forcecast>>();
+      if (policy.ndim() != 1 || value.ndim() != 1 ||
+          policy.shape(0) < static_cast<ssize_t>(MAX_ACTIONS) ||
+          value.shape(0) < static_cast<ssize_t>(NUM_PLAYERS))
+        throw py::value_error(
+            "parallel policy/value arrays have invalid shape");
+      mcts_parallel::ParallelInferenceResult result;
+      std::copy_n(policy.data(), MAX_ACTIONS, result.policy.begin());
+      std::copy_n(value.data(), NUM_PLAYERS, result.value.begin());
+      results.push_back(result);
+    }
+    return results;
+  };
+}
+
+constexpr size_t kProofDagCardMaskBytes = (CARD_COUNT + 7) / 8;
+
+std::string proof_dag_card_mask_hex(const std::vector<int> &cards) {
+  std::array<uint8_t, kProofDagCardMaskBytes> mask = {0};
+  for (int card : cards) {
+    if (card < 0 || card >= CARD_COUNT)
+      continue;
+    mask[static_cast<size_t>(card) / 8] |=
+        static_cast<uint8_t>(1u << (static_cast<size_t>(card) % 8));
+  }
+
+  std::ostringstream out;
+  out << std::hex << std::setfill('0');
+  for (uint8_t byte : mask)
+    out << std::setw(2) << static_cast<int>(byte);
+  return out.str();
+}
+
+std::string proof_dag_action_key(const RevealVerifiedProofEdge &edge) {
+  std::ostringstream out;
+  out << edge.action_code << "|" << edge.oracle_card << "|"
+      << edge.oracle_reserve << "|" << edge.oracle_reserve_card << "|"
+      << edge.oracle_return_color;
+  for (uint8_t value : edge.oracle_gold_as)
+    out << "|" << static_cast<int>(value);
+  return out.str();
+}
+
+size_t intern_proof_dag_string(std::map<std::string, size_t> &ids,
+                               py::list &values,
+                               const std::string &value) {
+  auto known = ids.find(value);
+  if (known != ids.end())
+    return known->second;
+  const size_t index = ids.size();
+  ids.emplace(value, index);
+  values.append(value);
+  return index;
+}
+
+size_t intern_proof_dag_action(
+    std::unordered_map<std::string, size_t> &ids, py::list &actions,
+    const RevealVerifiedProofEdge &edge) {
+  const std::string key = proof_dag_action_key(edge);
+  auto known = ids.find(key);
+  if (known != ids.end())
+    return known->second;
+  const size_t index = ids.size();
+  ids.emplace(key, index);
+
+  py::list gold_as;
+  for (uint8_t value : edge.oracle_gold_as)
+    gold_as.append(static_cast<int>(value));
+
+  py::list item;
+  item.append(edge.action_code);
+  item.append(edge.oracle_card);
+  item.append(edge.oracle_reserve ? 1 : 0);
+  item.append(edge.oracle_reserve_card);
+  item.append(edge.oracle_return_color);
+  item.append(gold_as);
+  actions.append(item);
+  return index;
+}
+
+size_t intern_proof_dag_reveal_group(
+    std::unordered_map<std::string, size_t> &ids, py::list &groups,
+    std::vector<int> cards) {
+  std::sort(cards.begin(), cards.end());
+  cards.erase(std::unique(cards.begin(), cards.end()), cards.end());
+  const std::string key = proof_dag_card_mask_hex(cards);
+  auto known = ids.find(key);
+  if (known != ids.end())
+    return known->second;
+  const size_t index = ids.size();
+  ids.emplace(key, index);
+  groups.append(key);
+  return index;
+}
+
+py::dict proof_dag_to_py_v1(const RevealVerifiedProofDag &dag) {
+  py::dict proof_dag;
+  proof_dag["requested"] = dag.requested;
+  proof_dag["complete"] = dag.complete;
+  proof_dag["validated"] = dag.validated;
+  proof_dag["omitted_reason"] =
+      dag.omitted_reason.empty() ? py::none() : py::cast(dag.omitted_reason);
+  proof_dag["root"] = dag.complete ? py::cast(dag.root) : py::none();
+  py::list proof_nodes;
+  for (const RevealVerifiedProofNode &node : dag.nodes) {
+    py::dict item;
+    item["id"] = node.id;
+    item["player"] = node.player;
+    item["depth"] = node.depth;
+    item["kind"] = node.kind;
+    item["scores"] = node.scores;
+    item["winner"] = node.winner;
+    item["waiting_noble"] = node.waiting_noble;
+    item["nobles"] = node.nobles;
+    item["acquired_nobles"] = node.acquired_nobles;
+    item["resolution"] =
+        node.resolution.empty() ? py::none() : py::cast(node.resolution);
+    py::list children;
+    for (const RevealVerifiedProofEdge &edge : node.children) {
+      py::dict child;
+      child["action_code"] = edge.action_code;
+      child["reveal_card"] =
+          edge.reveal_card < 0 ? py::none() : py::cast(edge.reveal_card);
+      child["oracle_card"] =
+          edge.oracle_card < 0 ? py::none() : py::cast(edge.oracle_card);
+      child["oracle_reserve"] = edge.oracle_reserve;
+      child["oracle_reserve_card"] =
+          edge.oracle_reserve_card < 0 ? py::none()
+                                       : py::cast(edge.oracle_reserve_card);
+      child["oracle_return_color"] =
+          edge.oracle_return_color < 0 ? py::none()
+                                       : py::cast(edge.oracle_return_color);
+      child["oracle_gold_as"] = edge.oracle_gold_as;
+      child["child"] = edge.child;
+      children.append(child);
+    }
+    item["children"] = children;
+    proof_nodes.append(item);
+  }
+  proof_dag["nodes"] = proof_nodes;
+  return proof_dag;
+}
+
+py::dict proof_dag_to_py_compact(const RevealVerifiedProofDag &dag) {
+  py::dict compact;
+  compact["format"] = "strategy_dag_compact_v1";
+  compact["requested"] = dag.requested;
+  compact["complete"] = dag.complete;
+  compact["validated"] = dag.validated;
+  compact["omitted_reason"] =
+      dag.omitted_reason.empty() ? py::none() : py::cast(dag.omitted_reason);
+  compact["root"] = dag.complete ? py::cast(dag.root) : py::none();
+  compact["reveal_group_encoding"] = "card_bitset_le_hex_v1";
+
+  compact["node_columns"] =
+      py::make_tuple("id", "player", "depth", "kind", "resolution",
+                     "edge_start", "edge_count");
+  compact["edge_columns"] = py::make_tuple("action", "reveal_group", "child");
+  compact["action_template_columns"] =
+      py::make_tuple("action_code", "oracle_card", "oracle_reserve",
+                     "oracle_reserve_card", "oracle_return_color",
+                     "oracle_gold_as");
+
+  py::list kind_strings;
+  py::list resolution_strings;
+  py::list action_templates;
+  py::list reveal_groups;
+  py::list nodes;
+  py::list edges;
+  std::map<std::string, size_t> kind_ids;
+  std::map<std::string, size_t> resolution_ids;
+  std::unordered_map<std::string, size_t> action_ids;
+  std::unordered_map<std::string, size_t> reveal_group_ids;
+
+  size_t edge_count = 0;
+  for (const RevealVerifiedProofNode &node : dag.nodes) {
+    const size_t edge_start = edge_count;
+    struct LocalGroup {
+      size_t action = 0;
+      int reveal_group = -1;
+      size_t child = 0;
+      bool has_reveal = false;
+      std::vector<int> reveal_cards;
+    };
+
+    std::vector<LocalGroup> groups;
+    std::unordered_map<std::string, size_t> group_ids;
+    for (const RevealVerifiedProofEdge &edge : node.children) {
+      const size_t action_index =
+          intern_proof_dag_action(action_ids, action_templates, edge);
+      const bool has_reveal = edge.reveal_card >= 0;
+      std::ostringstream key;
+      key << action_index << "|" << edge.child << "|" << has_reveal;
+      const std::string key_text = key.str();
+      auto known = group_ids.find(key_text);
+      if (known == group_ids.end()) {
+        known = group_ids.emplace(key_text, groups.size()).first;
+        groups.push_back(LocalGroup{action_index, -1, edge.child, has_reveal,
+                                    {}});
+      }
+      if (has_reveal)
+        groups[known->second].reveal_cards.push_back(edge.reveal_card);
+    }
+
+    for (LocalGroup &group : groups) {
+      int reveal_group = -1;
+      if (group.has_reveal) {
+        reveal_group = static_cast<int>(intern_proof_dag_reveal_group(
+            reveal_group_ids, reveal_groups, group.reveal_cards));
+      }
+      py::list item;
+      item.append(group.action);
+      item.append(reveal_group);
+      item.append(group.child);
+      edges.append(item);
+      ++edge_count;
+    }
+
+    const int kind_index = static_cast<int>(
+        intern_proof_dag_string(kind_ids, kind_strings, node.kind));
+    const int resolution_index =
+        node.resolution.empty()
+            ? -1
+            : static_cast<int>(intern_proof_dag_string(
+                  resolution_ids, resolution_strings, node.resolution));
+    py::list item;
+    item.append(node.id);
+    item.append(node.player);
+    item.append(node.depth);
+    item.append(kind_index);
+    item.append(resolution_index);
+    item.append(edge_start);
+    item.append(edge_count - edge_start);
+    nodes.append(item);
+  }
+
+  compact["kind_strings"] = kind_strings;
+  compact["resolution_strings"] = resolution_strings;
+  compact["action_templates"] = action_templates;
+  compact["reveal_groups"] = reveal_groups;
+  compact["nodes"] = nodes;
+  compact["edges"] = edges;
+  return compact;
+}
+
+} // namespace
 
 // Python callback featurizer
 class PyFeaturizer : public IFeaturizer {
@@ -68,6 +383,18 @@ public:
   std::array<uint8_t, MAX_ACTIONS> get_action_mask(const Game &game) override {
     py::gil_scoped_acquire acquire;
     py::object result = encoder_.attr("get_action_mask")(py::cast(game));
+    return copy_mask(result);
+  }
+
+  std::array<uint8_t, MAX_ACTIONS> get_action_mask_owned(Game &&game) override {
+    py::gil_scoped_acquire acquire;
+    py::object result = encoder_.attr("get_action_mask")(
+        py::cast(std::move(game), py::return_value_policy::move));
+    return copy_mask(result);
+  }
+
+private:
+  static std::array<uint8_t, MAX_ACTIONS> copy_mask(const py::object &result) {
     py::array_t<uint8_t> arr = result.cast<py::array_t<uint8_t>>();
     std::array<uint8_t, MAX_ACTIONS> mask = {0};
     auto r = arr.unchecked<1>();
@@ -78,7 +405,6 @@ public:
     return mask;
   }
 
-private:
   py::object encoder_;
 };
 
@@ -168,6 +494,7 @@ PYBIND11_MODULE(_csplendor, m) {
       .value("RESERVE_DECK", RESERVE_DECK)
       .value("PURCHASE", PURCHASE)
       .value("VISIT_NOBLE", VISIT_NOBLE)
+      .value("PASS", PASS)
       .export_values();
 
   py::class_<Board>(m, "Board")
@@ -198,15 +525,21 @@ PYBIND11_MODULE(_csplendor, m) {
       .def_property(
           "visible",
           [](const Board &b) {
-            std::vector<std::vector<int8_t>> v(3, std::vector<int8_t>(4));
-            for (int i = 0; i < 3; ++i)
-              for (int j = 0; j < 4; ++j)
-                v[i][j] = b.visible[i][j];
-            return v;
+            py::list visible(3);
+            for (int i = 0; i < 3; ++i) {
+              py::list row(Board::CARDS_PER_LEVEL);
+              for (int j = 0; j < Board::CARDS_PER_LEVEL; ++j)
+                row[j] = static_cast<int>(b.visible[i][j]);
+              visible[i] = std::move(row);
+            }
+            return visible;
           },
           [](Board &b, const std::vector<std::vector<int>> &visible) {
             if (visible.size() != 3)
               throw py::value_error("visible must have 3 levels");
+            // Validate the complete payload before mutating Board.  Otherwise
+            // an invalid value in a later slot leaves an earlier slot changed
+            // while the cached hash is still marked valid.
             for (int i = 0; i < 3; ++i) {
               if (visible[i].size() != Board::CARDS_PER_LEVEL)
                 throw py::value_error("each visible level must have 4 slots");
@@ -214,6 +547,11 @@ PYBIND11_MODULE(_csplendor, m) {
                 int card_id = visible[i][j];
                 if (card_id != -1 && !is_valid_card_id(card_id))
                   throw py::value_error("visible contains invalid card id");
+              }
+            }
+            for (int i = 0; i < 3; ++i) {
+              for (int j = 0; j < Board::CARDS_PER_LEVEL; ++j) {
+                int card_id = visible[i][j];
                 b.visible[i][j] = static_cast<int8_t>(card_id);
               }
             }
@@ -222,18 +560,20 @@ PYBIND11_MODULE(_csplendor, m) {
       .def_property(
           "nobles",
           [](const Board &b) {
-            std::vector<uint8_t> v;
+            py::list nobles(b.nobles.size());
             for (size_t i = 0; i < b.nobles.size(); ++i)
-              v.push_back(b.nobles[i]);
-            return v;
+              nobles[i] = static_cast<int>(b.nobles[i]);
+            return nobles;
           },
           [](Board &b, const std::vector<int> &nobles) {
             if (nobles.size() > Board::MAX_NOBLES_ON_BOARD)
               throw py::value_error("too many nobles");
-            b.nobles.clear();
             for (int noble_id : nobles) {
               if (!is_valid_noble_id(noble_id))
                 throw py::value_error("nobles contains invalid noble id");
+            }
+            b.nobles.clear();
+            for (int noble_id : nobles) {
               b.nobles.push_back(static_cast<uint8_t>(noble_id));
             }
             b.invalidate_hash();
@@ -241,12 +581,14 @@ PYBIND11_MODULE(_csplendor, m) {
       .def_property(
           "decks",
           [](const Board &b) {
-            std::vector<std::vector<uint8_t>> d(3);
+            py::list decks(3);
             for (int i = 0; i < 3; ++i) {
+              py::list deck(b.decks[i].size());
               for (size_t j = 0; j < b.decks[i].size(); ++j)
-                d[i].push_back(b.decks[i][j]);
+                deck[j] = static_cast<int>(b.decks[i][j]);
+              decks[i] = std::move(deck);
             }
-            return d;
+            return decks;
           },
           [](Board &b, const std::vector<std::vector<int>> &decks) {
             if (decks.size() != 3)
@@ -254,11 +596,15 @@ PYBIND11_MODULE(_csplendor, m) {
             for (int i = 0; i < 3; ++i) {
               if (decks[i].size() > Board::MAX_DECK_SIZE)
                 throw py::value_error("deck level exceeds max size");
-              b.decks[i].clear();
               for (int card_id : decks[i]) {
                 if (!is_valid_card_id(card_id) ||
                     get_card(card_id).level != i + 1)
                   throw py::value_error("decks contains invalid card id");
+              }
+            }
+            for (int i = 0; i < 3; ++i) {
+              b.decks[i].clear();
+              for (int card_id : decks[i]) {
                 b.decks[i].push_back(static_cast<uint8_t>(card_id));
               }
             }
@@ -284,11 +630,12 @@ PYBIND11_MODULE(_csplendor, m) {
             b.winner = static_cast<int8_t>(winner);
             b.invalidate_hash();
           })
-      .def_property_readonly("players",
-                             [](const Board &b) {
-                               return std::vector<PlayerState>{b.players[0],
-                                                               b.players[1]};
-                             })
+      .def_property_readonly("players", [](const Board &b) {
+        py::list players(Board::NUM_PLAYERS);
+        for (int i = 0; i < Board::NUM_PLAYERS; ++i)
+          players[i] = py::cast(b.players[i], py::return_value_policy::copy);
+        return players;
+      })
       .def("get_player",
            [](const Board &b, int i) {
              if (i < 0 || i >= 2)
@@ -336,6 +683,11 @@ PYBIND11_MODULE(_csplendor, m) {
       .def("apply_random_action", &Game::apply_random_action,
            py::arg("random_value"), py::arg("record_history") = false,
            "Generate legal actions internally and apply random_value % count")
+      .def_property_readonly("requires_forced_pass",
+                             &Game::requires_forced_pass)
+      .def("apply_forced_pass", &Game::apply_forced_pass,
+           py::arg("record_history") = true,
+           "Apply the forced pass available when no ordinary action exists")
       .def("undo", &Game::undo)
       .def("is_legal", &Game::is_legal)
       .def("is_game_over", &Game::is_game_over)
@@ -368,10 +720,15 @@ PYBIND11_MODULE(_csplendor, m) {
   m.def(
       "solve_visible_only_winner_cpp",
       [](const Game &game, uint64_t max_nodes, double time_limit_seconds) {
+        // Snapshot while the GIL still excludes Python-side Board mutation.
+        // The solver releases the GIL and must not keep reading the caller's
+        // live vectors concurrently with Python editor setters.
+        Game input_snapshot = game.clone_light();
         VisibleOnlySearchResult result;
         {
           py::gil_scoped_release release;
-          result = VisibleOnlySolver(max_nodes, time_limit_seconds).solve(game);
+          result = VisibleOnlySolver(max_nodes, time_limit_seconds)
+                       .solve(input_snapshot);
         }
 
         py::dict stats;
@@ -415,7 +772,18 @@ PYBIND11_MODULE(_csplendor, m) {
          double time_limit_seconds,
          const std::vector<uint64_t> &preferred_attacker_actions,
          bool include_proof_dag, size_t proof_dag_node_limit,
-         size_t proof_dag_edge_limit) {
+         size_t proof_dag_edge_limit, uint64_t required_root_action,
+         bool strict_preferred_attacker_actions,
+         size_t strict_preferred_attacker_prefix,
+         const std::string &proof_dag_format) {
+        if (proof_dag_format != "v1" && proof_dag_format != "compact") {
+          throw std::invalid_argument(
+              "proof_dag_format must be 'v1' or 'compact'");
+        }
+        // As above, detach all solver input before releasing the GIL.  The
+        // reveal solver reads deck and provenance vectors during its initial
+        // clone, so cloning only after release permits a Python data race.
+        Game input_snapshot = game.clone_light();
         RevealVerifiedSearchResult result;
         {
           py::gil_scoped_release release;
@@ -424,8 +792,11 @@ PYBIND11_MODULE(_csplendor, m) {
                                         preferred_attacker_actions,
                                         include_proof_dag,
                                         proof_dag_node_limit,
-                                        proof_dag_edge_limit)
-                       .solve(game);
+                                        proof_dag_edge_limit,
+                                        required_root_action,
+                                        strict_preferred_attacker_actions,
+                                        strict_preferred_attacker_prefix)
+                       .solve(input_snapshot);
         }
 
         py::dict stats;
@@ -470,47 +841,10 @@ PYBIND11_MODULE(_csplendor, m) {
         payload["memoized_states"] = result.memoized_states;
         payload["stats"] = stats;
         payload["line"] = line;
-        py::dict proof_dag;
-        proof_dag["requested"] = result.proof_dag.requested;
-        proof_dag["complete"] = result.proof_dag.complete;
-        proof_dag["omitted_reason"] =
-            result.proof_dag.omitted_reason.empty()
-                ? py::none()
-                : py::cast(result.proof_dag.omitted_reason);
-        proof_dag["root"] =
-            result.proof_dag.complete ? py::cast(result.proof_dag.root)
-                                      : py::none();
-        py::list proof_nodes;
-        for (const RevealVerifiedProofNode &node : result.proof_dag.nodes) {
-          py::dict item;
-          item["id"] = node.id;
-          item["player"] = node.player;
-          item["depth"] = node.depth;
-          item["kind"] = node.kind;
-          item["resolution"] =
-              node.resolution.empty() ? py::none() : py::cast(node.resolution);
-          py::list children;
-          for (const RevealVerifiedProofEdge &edge : node.children) {
-            py::dict child;
-            child["action_code"] = edge.action_code;
-            child["reveal_card"] =
-                edge.reveal_card < 0 ? py::none() : py::cast(edge.reveal_card);
-            child["oracle_card"] =
-                edge.oracle_card < 0 ? py::none() : py::cast(edge.oracle_card);
-            child["oracle_reserve"] = edge.oracle_reserve;
-            child["oracle_return_color"] =
-                edge.oracle_return_color < 0
-                    ? py::none()
-                    : py::cast(edge.oracle_return_color);
-            child["oracle_gold_as"] = edge.oracle_gold_as;
-            child["child"] = edge.child;
-            children.append(child);
-          }
-          item["children"] = children;
-          proof_nodes.append(item);
-        }
-        proof_dag["nodes"] = proof_nodes;
-        payload["proof_dag"] = proof_dag;
+        payload["proof_dag"] =
+            proof_dag_format == "compact"
+                ? proof_dag_to_py_compact(result.proof_dag)
+                : proof_dag_to_py_v1(result.proof_dag);
         return payload;
       },
       py::arg("game"), py::arg("attacker"), py::arg("depth"),
@@ -518,7 +852,11 @@ PYBIND11_MODULE(_csplendor, m) {
       py::arg("preferred_attacker_actions") = std::vector<uint64_t>{},
       py::arg("include_proof_dag") = false,
       py::arg("proof_dag_node_limit") = 100000,
-      py::arg("proof_dag_edge_limit") = 500000);
+      py::arg("proof_dag_edge_limit") = 500000,
+      py::arg("required_root_action") = UINT64_MAX,
+      py::arg("strict_preferred_attacker_actions") = false,
+      py::arg("strict_preferred_attacker_prefix") = 0,
+      py::arg("proof_dag_format") = "v1");
 
   m.def("get_card", &get_card, py::arg("id"));
   m.def("get_noble", &get_noble, py::arg("id"));
@@ -577,8 +915,7 @@ PYBIND11_MODULE(_csplendor, m) {
           "get_action_mask",
           [](const Game &game) {
             auto mask = ActionEncoderCpp::get_action_mask(game);
-            return py::array_t<uint8_t>({ActionEncoderCpp::BASE_ACTION_COUNT},
-                                        mask.data());
+            return owning_array_copy(mask);
           },
           py::arg("game"), "Get a boolean mask of size 48 where 1 means legal")
       .def_static(
@@ -586,11 +923,8 @@ PYBIND11_MODULE(_csplendor, m) {
           [](const Game &game) {
             auto [mask, scores] =
                 ActionEncoderCpp::get_action_mask_with_scores(game);
-            return py::make_tuple(
-                py::array_t<uint8_t>({ActionEncoderCpp::BASE_ACTION_COUNT},
-                                     mask.data()),
-                py::array_t<float>({ActionEncoderCpp::BASE_ACTION_COUNT},
-                                   scores.data()));
+            return py::make_tuple(owning_array_copy(mask),
+                                  owning_array_copy(scores));
           },
           py::arg("game"),
           "Get action mask and heuristic scores (mask, scores)")
@@ -598,14 +932,14 @@ PYBIND11_MODULE(_csplendor, m) {
           "get_heuristic_policy",
           [](const Game &game) {
             auto policy = ActionEncoderCpp::get_heuristic_policy(game);
-            return py::array_t<float>({ActionEncoderCpp::BASE_ACTION_COUNT},
-                                      policy.data());
+            return owning_array_copy(policy);
           },
           py::arg("game"), "Get normalized heuristic policy distribution");
 
   // ActionEncoderV2 bindings (full 4869-action space with return + payment patterns)
   py::class_<ActionEncoderV2>(m, "ActionEncoderV2")
       .def_readonly_static("ACTION_SIZE", &ActionEncoderV2::ACTION_SIZE)
+      .def_readonly_static("OFFSET_PASS", &ActionEncoderV2::OFFSET_PASS)
       .def_readonly_static("TAKE_DIFF_RETURN_PATTERNS",
                            &ActionEncoderV2::TAKE_DIFF_RETURN_PATTERNS)
       .def_readonly_static("TAKE_SAME_RETURN_PATTERNS",
@@ -639,13 +973,12 @@ PYBIND11_MODULE(_csplendor, m) {
           "get_action_mask",
           [](const Game &game) {
             auto mask = ActionEncoderV2::get_action_mask(game);
-            return py::array_t<uint8_t>({ActionEncoderV2::ACTION_SIZE},
-                                        mask.data());
+            return owning_array_copy(mask);
           },
           py::arg("game"),
           "Get a boolean mask of size 4869 where 1 means legal");
 
-  // ActionEncoderV3 bindings (3124-action space, card ID-based PURCHASE)
+  // ActionEncoderV3 bindings (3133-action space, card ID-based PURCHASE)
   py::class_<ActionEncoderV3>(m, "ActionEncoderV3")
       .def_readonly_static("ACTION_SIZE", &ActionEncoderV3::ACTION_SIZE)
       .def_readonly_static("OFFSET_PURCHASE", &ActionEncoderV3::OFFSET_PURCHASE)
@@ -678,8 +1011,7 @@ PYBIND11_MODULE(_csplendor, m) {
           "get_action_mask",
           [](const Game &game) {
             auto mask = ActionEncoderV3::get_action_mask(game);
-            return py::array_t<uint8_t>({ActionEncoderV3::ACTION_SIZE},
-                                        mask.data());
+            return owning_array_copy(mask);
           },
           py::arg("game"),
           "Get a boolean mask of size 3133 where 1 means legal")
@@ -723,6 +1055,172 @@ PYBIND11_MODULE(_csplendor, m) {
           "Get the stored pattern count for a card");
 
   // MCTS bindings
+  py::enum_<mcts_parallel::TreeBackend>(m, "ParallelTreeBackend")
+      .value("COARSE", mcts_parallel::TreeBackend::Coarse)
+      .value("SHARDED", mcts_parallel::TreeBackend::Sharded);
+
+  py::enum_<mcts_parallel::ParallelSearchMode>(m, "ParallelSearchMode")
+      .value("THROUGHPUT", mcts_parallel::ParallelSearchMode::Throughput)
+      .value("DETERMINISTIC_EPOCH",
+             mcts_parallel::ParallelSearchMode::DeterministicEpoch)
+      .value("ROOT_PARALLEL",
+             mcts_parallel::ParallelSearchMode::RootParallel);
+
+  py::enum_<mcts_parallel::SearchStopReason>(m, "ParallelSearchStopReason")
+      .value("COMPLETED", mcts_parallel::SearchStopReason::Completed)
+      .value("CANCELLED", mcts_parallel::SearchStopReason::Cancelled)
+      .value("TIMED_OUT", mcts_parallel::SearchStopReason::TimedOut)
+      .value("TREE_CAPACITY_REACHED",
+             mcts_parallel::SearchStopReason::TreeCapacityReached)
+      .value("CALLBACK_ERROR",
+             mcts_parallel::SearchStopReason::CallbackError)
+      .value("WORKER_ERROR", mcts_parallel::SearchStopReason::WorkerError);
+
+  py::class_<mcts_parallel::ParallelCancellationToken>(
+      m, "ParallelCancellationToken")
+      .def(py::init<>())
+      .def("request_cancel",
+           &mcts_parallel::ParallelCancellationToken::request_cancel)
+      .def_property_readonly(
+          "is_cancelled",
+          &mcts_parallel::ParallelCancellationToken::is_cancelled);
+
+  py::class_<mcts_parallel::ParallelSearchOptions>(m,
+                                                    "ParallelSearchOptions")
+      .def(py::init<>())
+      .def_readwrite("num_threads",
+                     &mcts_parallel::ParallelSearchOptions::num_threads)
+      .def_readwrite("batch_size",
+                     &mcts_parallel::ParallelSearchOptions::batch_size)
+      .def_readwrite("batch_wait_us",
+                     &mcts_parallel::ParallelSearchOptions::batch_wait_us)
+      .def_readwrite("max_inflight",
+                     &mcts_parallel::ParallelSearchOptions::max_inflight)
+      .def_readwrite(
+          "deterministic_epoch_size",
+          &mcts_parallel::ParallelSearchOptions::deterministic_epoch_size)
+      .def_readwrite("num_simulations",
+                     &mcts_parallel::ParallelSearchOptions::num_simulations)
+      .def_readwrite("master_seed",
+                     &mcts_parallel::ParallelSearchOptions::master_seed)
+      .def_readwrite("search_nonce",
+                     &mcts_parallel::ParallelSearchOptions::search_nonce)
+      .def_readwrite("simulation_id_base",
+                     &mcts_parallel::ParallelSearchOptions::simulation_id_base)
+      .def_readwrite("evaluator_version",
+                     &mcts_parallel::ParallelSearchOptions::evaluator_version)
+      .def_readwrite("timeout_ms",
+                     &mcts_parallel::ParallelSearchOptions::timeout_ms)
+      .def_readwrite("max_tree_nodes",
+                     &mcts_parallel::ParallelSearchOptions::max_tree_nodes)
+      .def_readwrite("shard_count",
+                     &mcts_parallel::ParallelSearchOptions::shard_count)
+      .def_readwrite("tree_backend",
+                     &mcts_parallel::ParallelSearchOptions::tree_backend)
+      .def_readwrite("mode", &mcts_parallel::ParallelSearchOptions::mode)
+      .def_readwrite(
+          "cancellation_token",
+          &mcts_parallel::ParallelSearchOptions::cancellation_token);
+
+  py::class_<mcts_parallel::SearchLedgerSnapshot>(
+      m, "ParallelSearchLedger")
+      .def_readonly("issued",
+                    &mcts_parallel::SearchLedgerSnapshot::issued)
+      .def_readonly("selected",
+                    &mcts_parallel::SearchLedgerSnapshot::selected)
+      .def_readonly("evaluation_owner",
+                    &mcts_parallel::SearchLedgerSnapshot::evaluation_owner)
+      .def_readonly("evaluation_waiter",
+                    &mcts_parallel::SearchLedgerSnapshot::evaluation_waiter)
+      .def_readonly("evaluation_requested",
+                    &mcts_parallel::SearchLedgerSnapshot::evaluation_requested)
+      .def_readonly("evaluated_boards",
+                    &mcts_parallel::SearchLedgerSnapshot::evaluated_boards)
+      .def_readonly(
+          "completed_evaluated",
+          &mcts_parallel::SearchLedgerSnapshot::completed_evaluated)
+      .def_readonly("completed_terminal",
+                    &mcts_parallel::SearchLedgerSnapshot::completed_terminal)
+      .def_readonly("completed_max_depth",
+                    &mcts_parallel::SearchLedgerSnapshot::completed_max_depth)
+      .def_readonly("cancelled",
+                    &mcts_parallel::SearchLedgerSnapshot::cancelled)
+      .def_readonly("failed", &mcts_parallel::SearchLedgerSnapshot::failed)
+      .def_readonly(
+          "virtual_loss_added",
+          &mcts_parallel::SearchLedgerSnapshot::virtual_loss_added)
+      .def_readonly(
+          "virtual_loss_released",
+          &mcts_parallel::SearchLedgerSnapshot::virtual_loss_released)
+      .def_readonly(
+          "reservations_committed",
+          &mcts_parallel::SearchLedgerSnapshot::reservations_committed)
+      .def_readonly("reservations_aborted",
+                    &mcts_parallel::SearchLedgerSnapshot::reservations_aborted)
+      .def_readonly("expansion_claimed",
+                    &mcts_parallel::SearchLedgerSnapshot::expansion_claimed)
+      .def_readonly("expansion_published",
+                    &mcts_parallel::SearchLedgerSnapshot::expansion_published)
+      .def_readonly("expansion_waited",
+                    &mcts_parallel::SearchLedgerSnapshot::expansion_waited)
+      .def_readonly("stale_result",
+                    &mcts_parallel::SearchLedgerSnapshot::stale_result)
+      .def_readonly("duplicate_result",
+                    &mcts_parallel::SearchLedgerSnapshot::duplicate_result)
+      .def_readonly("invalid_replay",
+                    &mcts_parallel::SearchLedgerSnapshot::invalid_replay)
+      .def_readonly("integrity_errors",
+                    &mcts_parallel::SearchLedgerSnapshot::integrity_errors)
+      .def_readonly(
+          "max_inflight_observed",
+          &mcts_parallel::SearchLedgerSnapshot::max_inflight_observed)
+      .def_property_readonly("completed",
+                             &mcts_parallel::SearchLedgerSnapshot::completed)
+      .def_property_readonly(
+          "virtual_loss_balanced",
+          &mcts_parallel::SearchLedgerSnapshot::virtual_loss_balanced);
+
+  py::class_<mcts_parallel::ParallelSearchResult>(m, "ParallelSearchResult")
+      .def_property_readonly(
+          "visits", [](const mcts_parallel::ParallelSearchResult &result) {
+            return std::vector<uint64_t>(result.visits.begin(),
+                                         result.visits.end());
+          })
+      .def_property_readonly(
+          "q_values", [](const mcts_parallel::ParallelSearchResult &result) {
+            return std::vector<double>(result.q_values.begin(),
+                                       result.q_values.end());
+          })
+      .def_property_readonly(
+          "probabilities",
+          [](const mcts_parallel::ParallelSearchResult &result) {
+            return std::vector<float>(result.probabilities.begin(),
+                                      result.probabilities.end());
+          })
+      .def_readonly("ledger", &mcts_parallel::ParallelSearchResult::ledger)
+      .def_readonly("stop_reason",
+                    &mcts_parallel::ParallelSearchResult::stop_reason)
+      .def_readonly("resolved_seed",
+                    &mcts_parallel::ParallelSearchResult::resolved_seed)
+      .def_readonly("rng_version",
+                    &mcts_parallel::ParallelSearchResult::rng_version)
+      .def_readonly("search_nonce",
+                    &mcts_parallel::ParallelSearchResult::search_nonce)
+      .def_readonly("tree_generation",
+                    &mcts_parallel::ParallelSearchResult::tree_generation)
+      .def_readonly("tree_size",
+                    &mcts_parallel::ParallelSearchResult::tree_size)
+      .def_readonly("elapsed_microseconds",
+                    &mcts_parallel::ParallelSearchResult::elapsed_microseconds)
+      .def_readonly("partial", &mcts_parallel::ParallelSearchResult::partial);
+
+  py::class_<mcts_parallel::RootParallelResult>(m, "RootParallelSearchResult")
+      .def_readonly("merged", &mcts_parallel::RootParallelResult::merged)
+      .def_readonly("workers", &mcts_parallel::RootParallelResult::workers)
+      .def_readonly(
+          "duplicate_root_evaluations_avoided",
+          &mcts_parallel::RootParallelResult::duplicate_root_evaluations_avoided);
+
   py::class_<MCTSConfig>(m, "MCTSConfig")
       .def(py::init<>())
       .def_readwrite("cpuct", &MCTSConfig::cpuct)
@@ -777,11 +1275,14 @@ PYBIND11_MODULE(_csplendor, m) {
   py::class_<MCTS>(m, "MCTS")
       .def(py::init<const MCTSConfig &>())
       .def("clear", &MCTS::clear)
+      .def("reset_replay_sequence", &MCTS::reset_replay_sequence,
+           py::arg("seed"), py::arg("nonce"),
+           "Reset the parallel-search seed and next nonce while idle")
       .def("tree_size", &MCTS::tree_size)
       .def("prune_if_needed", &MCTS::prune_if_needed)
       .def("get_node",
            [](MCTS &mcts, uint64_t hash) -> py::object {
-             MCTSNode *node = mcts.get_node(hash);
+             auto node = mcts.get_node_snapshot(hash);
              if (node)
                return py::cast(*node);
              return py::none();
@@ -868,53 +1369,66 @@ PYBIND11_MODULE(_csplendor, m) {
                 mcts.prepare_batch_simulations(root_game, observer, batch_size,
                                                num_determinizations, noise_ptr);
 
-            // Convert to Python-friendly format
+            // Convert to Python-friendly format. Every array remains an
+            // independent owning copy; only list growth is eliminated.
             py::dict py_result;
 
             // Flatten encoded boards and valid actions for batch NN inference
-            py::list flat_boards;
-            py::list flat_valids;
-            py::list leaf_world_counts;
-            py::list leaf_hashes;
-            py::list leaf_paths;
+            const size_t leaf_count = result.leaves.size();
+            py::list flat_boards(result.total_boards);
+            py::list flat_valids(result.total_boards);
+            py::list leaf_world_counts(leaf_count);
+            py::list leaf_hashes(leaf_count);
+            py::list leaf_paths(leaf_count);
+            size_t flat_index = 0;
 
-            for (const auto &leaf : result.leaves) {
-              leaf_hashes.append(leaf.hash);
-              leaf_world_counts.append(leaf.num_worlds);
+            for (size_t leaf_index = 0; leaf_index < leaf_count;
+                 ++leaf_index) {
+              const auto &leaf = result.leaves[leaf_index];
+              leaf_hashes[leaf_index] = leaf.hash;
+              leaf_world_counts[leaf_index] = leaf.num_worlds;
 
               // Convert path to Python list
-              py::list py_path;
-              for (const auto &entry : leaf.path) {
-                py::tuple t =
+              py::list py_path(leaf.path.size());
+              for (size_t path_index = 0; path_index < leaf.path.size();
+                   ++path_index) {
+                const auto &entry = leaf.path[path_index];
+                py_path[path_index] =
                     py::make_tuple(entry.hash, entry.action, entry.player);
-                py_path.append(t);
               }
-              leaf_paths.append(py_path);
+              leaf_paths[leaf_index] = py_path;
 
               // Add boards and valid actions
+              const size_t leaf_flat_start = flat_index;
               for (const auto &board : leaf.encoded_boards) {
-                flat_boards.append(
-                    py::array_t<float>({FEATURE_SIZE}, board.data()));
+                flat_boards[flat_index] = owning_array_copy(board);
+                ++flat_index;
               }
-              for (const auto &valid : leaf.valid_actions) {
-                flat_valids.append(
-                    py::array_t<uint8_t>({MAX_ACTIONS}, valid.data()));
+              for (size_t valid_index = 0;
+                   valid_index < leaf.valid_actions.size(); ++valid_index) {
+                const auto &valid = leaf.valid_actions[valid_index];
+                flat_valids[leaf_flat_start + valid_index] =
+                    owning_array_copy(valid);
               }
             }
 
             // Handle terminals
-            py::list py_terminals;
-            for (const auto &[path, value] : result.terminals) {
-              py::list py_path;
-              for (const auto &entry : path) {
-                py::tuple t =
+            py::list py_terminals(result.terminals.size());
+            for (size_t terminal_index = 0;
+                 terminal_index < result.terminals.size(); ++terminal_index) {
+              const auto &[path, value] = result.terminals[terminal_index];
+              py::list py_path(path.size());
+              for (size_t path_index = 0; path_index < path.size();
+                   ++path_index) {
+                const auto &entry = path[path_index];
+                py_path[path_index] =
                     py::make_tuple(entry.hash, entry.action, entry.player);
-                py_path.append(t);
               }
-              py::list py_value;
-              for (auto v : value)
-                py_value.append(v);
-              py_terminals.append(py::make_tuple(py_path, py_value));
+              py::list py_value(NUM_PLAYERS);
+              for (size_t value_index = 0; value_index < NUM_PLAYERS;
+                   ++value_index)
+                py_value[value_index] = value[value_index];
+              py_terminals[terminal_index] = py::make_tuple(py_path, py_value);
             }
 
             py_result["flat_boards"] = flat_boards;
@@ -925,6 +1439,7 @@ PYBIND11_MODULE(_csplendor, m) {
             py_result["terminals"] = py_terminals;
             py_result["total_boards"] = result.total_boards;
             py_result["num_leaves"] = static_cast<int>(result.leaves.size());
+            py_result["tree_generation"] = result.tree_generation;
 
             return py_result;
           },
@@ -935,102 +1450,82 @@ PYBIND11_MODULE(_csplendor, m) {
       .def(
           "apply_batch_results",
           [](MCTS &mcts, py::dict request, py::list policies, py::list values) {
-            // Reconstruct leaves from request
             py::list leaf_hashes = request["leaf_hashes"].cast<py::list>();
             py::list leaf_world_counts =
                 request["leaf_world_counts"].cast<py::list>();
             py::list leaf_paths = request["leaf_paths"].cast<py::list>();
+            py::list flat_valids = request["flat_valids"].cast<py::list>();
             py::list terminals = request["terminals"].cast<py::list>();
 
+            if (py::len(leaf_hashes) != py::len(leaf_world_counts) ||
+                py::len(leaf_hashes) != py::len(leaf_paths))
+              throw py::value_error("batch leaf metadata lengths differ");
+            size_t expected_worlds = 0;
+            for (auto item : leaf_world_counts) {
+              const int count = item.cast<int>();
+              if (count <= 0)
+                throw py::value_error("leaf world count must be positive");
+              expected_worlds += static_cast<size_t>(count);
+            }
+            if (py::len(policies) < expected_worlds ||
+                py::len(values) < expected_worlds ||
+                py::len(flat_valids) < expected_worlds)
+              throw py::value_error(
+                  "batch results do not match requested worlds");
+
+            // Convert the complete Python payload first. The canonical native
+            // implementation validates it once more before mutating any node,
+            // so malformed/stale batches cannot be partially applied.
+            BatchSimulationRequest native_request;
+            native_request.tree_generation =
+                request.contains("tree_generation")
+                    ? request["tree_generation"].cast<uint64_t>()
+                    : mcts.tree_generation_snapshot();
+            native_request.total_boards = static_cast<int>(expected_worlds);
             size_t result_idx = 0;
-
-            // Process each leaf
             for (size_t i = 0; i < py::len(leaf_hashes); ++i) {
-              uint64_t hash = leaf_hashes[i].cast<uint64_t>();
-              int num_worlds = leaf_world_counts[i].cast<int>();
+              BatchLeafData leaf;
+              leaf.hash = leaf_hashes[i].cast<uint64_t>();
+              leaf.num_worlds = leaf_world_counts[i].cast<int>();
               py::list py_path = leaf_paths[i].cast<py::list>();
-
-              // Reconstruct path
-              std::vector<PathEntry> path;
+              leaf.path.reserve(py::len(py_path));
               for (auto item : py_path) {
                 py::tuple t = item.cast<py::tuple>();
+                if (py::len(t) != 3)
+                  throw py::value_error("batch path entry must have 3 fields");
                 PathEntry entry;
                 entry.hash = t[0].cast<uint64_t>();
                 entry.action = t[1].cast<int>();
                 entry.player = t[2].cast<int>();
-                path.push_back(entry);
+                leaf.path.push_back(entry);
               }
-
-              // Average policy and value across worlds
-              std::array<float, MAX_ACTIONS> avg_policy = {0};
-              std::array<float, NUM_PLAYERS> avg_value = {0};
-              std::array<uint8_t, MAX_ACTIONS> combined_valid = {0};
-
-              for (int w = 0; w < num_worlds; ++w) {
-                py::array_t<float> policy =
-                    policies[result_idx].cast<py::array_t<float>>();
-                py::array_t<float> value =
-                    values[result_idx].cast<py::array_t<float>>();
-                auto p = policy.unchecked<1>();
-                auto v = value.unchecked<1>();
-
-                for (ssize_t a = 0;
-                     a <
-                     std::min(p.shape(0), static_cast<ssize_t>(MAX_ACTIONS));
-                     ++a) {
-                  avg_policy[a] += p(a);
-                  if (p(a) > 0)
-                    combined_valid[a] = 1;
-                }
-                for (ssize_t j = 0;
-                     j <
-                     std::min(v.shape(0), static_cast<ssize_t>(NUM_PLAYERS));
-                     ++j) {
-                  avg_value[j] += v(j);
-                }
+              for (int world = 0; world < leaf.num_worlds; ++world) {
+                py::array_t<uint8_t> valid =
+                    flat_valids[result_idx].cast<py::array_t<uint8_t>>();
+                auto valid_mask = valid.unchecked<1>();
+                if (valid_mask.shape(0) < static_cast<ssize_t>(MAX_ACTIONS))
+                  throw py::value_error("valid-action mask is too short");
+                std::array<uint8_t, MAX_ACTIONS> mask{};
+                for (size_t action = 0; action < MAX_ACTIONS; ++action)
+                  mask[action] = valid_mask(static_cast<ssize_t>(action));
+                leaf.valid_actions.push_back(mask);
                 result_idx++;
               }
-
-              // Normalize
-              float world_count = static_cast<float>(num_worlds);
-              for (size_t a = 0; a < MAX_ACTIONS; ++a) {
-                avg_policy[a] /= world_count;
-              }
-              for (size_t j = 0; j < NUM_PLAYERS; ++j) {
-                avg_value[j] /= world_count;
-              }
-
-              // Re-normalize policy
-              float policy_sum = 0.0f;
-              for (size_t a = 0; a < MAX_ACTIONS; ++a) {
-                if (combined_valid[a]) {
-                  policy_sum += avg_policy[a];
-                } else {
-                  avg_policy[a] = 0.0f;
-                }
-              }
-              if (policy_sum > EPS) {
-                for (size_t a = 0; a < MAX_ACTIONS; ++a) {
-                  avg_policy[a] /= policy_sum;
-                }
-              }
-
-              // Expand node
-              mcts.expand_node(hash, avg_policy, avg_value, combined_valid);
-
-              // Backpropagate
-              mcts.backpropagate_with_virtual_loss_removal(path, avg_value);
+              native_request.leaves.push_back(std::move(leaf));
             }
 
-            // Handle terminals
             for (auto item : terminals) {
               py::tuple t = item.cast<py::tuple>();
+              if (py::len(t) != 2)
+                throw py::value_error("terminal batch entry must have 2 fields");
               py::list py_path = t[0].cast<py::list>();
               py::list py_value = t[1].cast<py::list>();
-
               std::vector<PathEntry> path;
+              path.reserve(py::len(py_path));
               for (auto p_item : py_path) {
                 py::tuple pt = p_item.cast<py::tuple>();
+                if (py::len(pt) != 3)
+                  throw py::value_error("batch path entry must have 3 fields");
                 PathEntry entry;
                 entry.hash = pt[0].cast<uint64_t>();
                 entry.action = pt[1].cast<int>();
@@ -1043,15 +1538,113 @@ PYBIND11_MODULE(_csplendor, m) {
                    ++j) {
                 value[j] = py_value[j].cast<float>();
               }
-
-              mcts.backpropagate_with_virtual_loss_removal(path, value);
+              native_request.terminals.push_back({std::move(path), value});
             }
+
+            std::vector<std::array<float, MAX_ACTIONS>> native_policies;
+            std::vector<std::array<float, NUM_PLAYERS>> native_values;
+            native_policies.reserve(expected_worlds);
+            native_values.reserve(expected_worlds);
+            for (size_t index = 0; index < expected_worlds; ++index) {
+              py::array_t<float> policy =
+                  policies[index].cast<py::array_t<float>>();
+              py::array_t<float> value =
+                  values[index].cast<py::array_t<float>>();
+              auto policy_view = policy.unchecked<1>();
+              auto value_view = value.unchecked<1>();
+              if (policy_view.shape(0) < static_cast<ssize_t>(MAX_ACTIONS) ||
+                  value_view.shape(0) < static_cast<ssize_t>(NUM_PLAYERS))
+                throw py::value_error("batch policy/value array is too short");
+              std::array<float, MAX_ACTIONS> policy_array{};
+              std::array<float, NUM_PLAYERS> value_array{};
+              for (size_t action = 0; action < MAX_ACTIONS; ++action)
+                policy_array[action] =
+                    policy_view(static_cast<ssize_t>(action));
+              for (size_t player = 0; player < NUM_PLAYERS; ++player)
+                value_array[player] =
+                    value_view(static_cast<ssize_t>(player));
+              native_policies.push_back(policy_array);
+              native_values.push_back(value_array);
+            }
+            mcts.apply_batch_results(native_request, native_policies,
+                                     native_values);
           },
           py::arg("request"), py::arg("policies"), py::arg("values"),
           "Apply batch NN results to the tree")
-      .def_property_readonly(
-          "config", [](MCTS &mcts) -> MCTSConfig & { return mcts.config(); },
-          py::return_value_policy::reference_internal);
+      .def("get_config_snapshot", &MCTS::get_config_snapshot)
+      .def("set_config", &MCTS::set_config, py::arg("config"))
+      .def("is_parallel_search_active", &MCTS::is_parallel_search_active)
+      .def("tree_generation", &MCTS::tree_generation_snapshot)
+      .def_property(
+          "config", [](const MCTS &mcts) { return mcts.get_config_snapshot(); },
+          [](MCTS &mcts, const MCTSConfig &config) { mcts.set_config(config); });
+
+  m.def(
+      "mcts_search_parallel_native",
+      [](MCTS &mcts, const Game &root_game,
+         const mcts_parallel::ParallelSearchOptions &options,
+         py::function inference_fn, float temperature) {
+        auto inference = make_python_parallel_inference(inference_fn);
+
+        mcts_parallel::ParallelMCTSSearcher searcher;
+        mcts_parallel::ParallelSearchResult result;
+        // Snapshot every Python-owned input while the GIL is held. Acquiring
+        // the search guard here also freezes config/generation at API entry,
+        // before another Python thread can mutate the same MCTS/options.
+        mcts_parallel::ParallelSearchOptions options_snapshot = options;
+        mcts_parallel::ParallelMCTSSearcher::validate_entry_options(
+            options_snapshot, inference, temperature);
+        mcts_parallel::ParallelMCTSSearcher::validate_config_snapshot(
+            mcts.get_config_snapshot());
+        Game root_snapshot = root_game.clone_light();
+        if (options_snapshot.num_simulations > 0 &&
+            !options_snapshot.cancellation_requested() &&
+            mcts_internal::GameAdapter::requires_forced_pass(root_snapshot))
+          throw std::invalid_argument(
+              "MCTS root requires a forced pass; apply it before searching");
+        auto guard = mcts.begin_parallel_search();
+        {
+          py::gil_scoped_release release;
+          result = searcher.run_with_guard(
+              mcts, std::move(guard), root_snapshot, options_snapshot,
+              inference, temperature);
+        }
+        return result;
+      },
+      py::arg("mcts"), py::arg("root_game"), py::arg("options"),
+      py::arg("inference_fn"), py::arg("temperature") = 1.0f,
+      "Experimental native parallel MCTS search. Traversal releases the GIL; "
+      "one coordinator serializes Python inference callbacks.");
+
+  m.def(
+      "mcts_search_root_parallel_native",
+      [](const MCTSConfig &config, const Game &root_game,
+         uint64_t simulation_budget, uint32_t num_workers,
+         const mcts_parallel::ParallelSearchOptions &options,
+         py::function inference_fn, float temperature) {
+        const MCTSConfig config_snapshot = config;
+        mcts_parallel::ParallelSearchOptions options_snapshot = options;
+        options_snapshot.serialize_root_callbacks = true;
+        Game root_snapshot = root_game.clone_light();
+        auto evaluator_factory =
+            [&inference_fn](uint32_t /*worker_id*/) {
+              return make_python_parallel_inference(inference_fn);
+            };
+        mcts_parallel::RootParallelResult result;
+        {
+          py::gil_scoped_release release;
+          result = mcts_parallel::run_root_parallel(
+              config_snapshot, root_snapshot, simulation_budget, num_workers,
+              options_snapshot, evaluator_factory, temperature);
+        }
+        return result;
+      },
+      py::arg("config"), py::arg("root_game"),
+      py::arg("simulation_budget"), py::arg("num_workers"),
+      py::arg("options"), py::arg("inference_fn"),
+      py::arg("temperature") = 1.0f,
+      "Experimental independent-tree root-parallel fallback. Worker "
+      "traversal releases the GIL; Python callbacks remain GIL-serialized.");
 
   // LeafRequest binding
   py::class_<LeafRequest>(m, "LeafRequest")
@@ -1089,6 +1682,7 @@ PYBIND11_MODULE(_csplendor, m) {
             return std::vector<float>(res.policy.begin(), res.policy.end());
           },
           [](InferenceResult &res, const std::vector<float> &policy) {
+            res.policy.fill(0.0f);
             for (size_t i = 0; i < policy.size() && i < MAX_ACTIONS; ++i)
               res.policy[i] = policy[i];
           })
@@ -1098,22 +1692,10 @@ PYBIND11_MODULE(_csplendor, m) {
             return std::vector<float>(res.value.begin(), res.value.end());
           },
           [](InferenceResult &res, const std::vector<float> &value) {
+            res.value.fill(0.0f);
             for (size_t i = 0; i < value.size() && i < NUM_PLAYERS; ++i)
               res.value[i] = value[i];
           });
-
-  // MCTSSearcher binding with Python callbacks
-  m.def(
-      "create_mcts_searcher",
-      [](MCTS &mcts, py::object featurizer, py::object encoder) {
-        auto py_feat = std::make_shared<PyFeaturizer>(featurizer);
-        auto py_enc = std::make_shared<PyActionEncoder>(encoder);
-        return std::make_tuple(
-            std::make_shared<MCTSSearcher>(mcts, *py_feat, *py_enc), py_feat,
-            py_enc);
-      },
-      py::arg("mcts"), py::arg("featurizer"), py::arg("encoder"),
-      "Create an MCTSSearcher with Python featurizer and encoder");
 
   // Full search function that runs entirely in C++ with Python inference
   // callback
@@ -1125,6 +1707,12 @@ PYBIND11_MODULE(_csplendor, m) {
         PyFeaturizer py_feat(featurizer);
         PyActionEncoder py_enc(encoder);
         MCTSSearcher searcher(mcts, py_feat, py_enc);
+        // Python inference callbacks can retain and mutate the caller's root
+        // through a closure. Snapshot it while the GIL is still held so every
+        // simulation and the final root lookup use one stable position.
+        Game root_snapshot = mcts.config().use_determinization
+                                 ? root_game.clone_light()
+                                 : root_game.clone();
 
         // Inference callback wrapper
         auto cpp_inference =
@@ -1137,10 +1725,11 @@ PYBIND11_MODULE(_csplendor, m) {
           for (const auto &req : requests) {
             py::dict d;
             d["hash"] = req.hash;
-            d["features"] =
-                py::array_t<float>({196}, {sizeof(float)}, req.features.data());
-            d["valid_actions"] = py::array_t<uint8_t>(
-                {MAX_ACTIONS}, {sizeof(uint8_t)}, req.valid_actions.data());
+            // The callback may retain a request after it returns. Keep the
+            // ndarray lifetime independent of the temporary C++ request
+            // vector instead of exposing a dangling view.
+            d["features"] = owning_array_copy(req.features);
+            d["valid_actions"] = owning_array_copy(req.valid_actions);
             d["path_index"] = req.path_index;
             py_requests.append(d);
           }
@@ -1176,11 +1765,11 @@ PYBIND11_MODULE(_csplendor, m) {
         // Run search
         {
           py::gil_scoped_release release;
-          searcher.search(root_game, num_simulations, cpp_inference);
+          searcher.search(root_snapshot, num_simulations, cpp_inference);
         }
 
         // Get action probabilities
-        auto probs = searcher.get_action_probs(root_game, temperature);
+        auto probs = searcher.get_action_probs(root_snapshot, temperature);
         return std::vector<float>(probs.begin(), probs.end());
       },
       py::arg("mcts"), py::arg("featurizer"), py::arg("encoder"),

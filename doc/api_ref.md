@@ -11,6 +11,7 @@ The main class for controlling game state.
 ### Properties
 - `board`: Returns the `Board` object.
 - `legal_actions`: Returns a list of all currently legal `Action` objects.
+- `requires_forced_pass`: True only when the sole legal action is `PASS`.
 - `base_actions`: Returns a filtered list of "base" actions (ignoring return/noble combinations).
 - `scores`: Returns a tuple of scores `(player0_score, player1_score)`.
 - `turn`: The current turn count.
@@ -19,6 +20,9 @@ The main class for controlling game state.
 
 ### Methods
 - `apply(action: Action) -> bool`: Applies an action to the current state.
+- `apply_forced_pass(record_history: bool = True) -> bool`: Applies the forced
+  pass when no ordinary action exists. If the opponent also cannot act, the
+  game ends as a draw.
 - `undo() -> bool`: Reverts the last action.
 - `is_legal(action: Action) -> bool`: Checks if an action is legal.
 - `is_game_over() -> bool`: Returns True if the game has ended.
@@ -29,7 +33,7 @@ The main class for controlling game state.
 Represents a game move.
 
 ### Attributes
-- `type`: `csplendor.ActionType` (e.g., `TAKE_DIFFERENT`).
+- `type`: `csplendor.ActionType` (for example `TAKE_DIFFERENT` or `PASS`).
 - `take`: List[6] of gems to take (index 0-5).
 - `card_id`: ID of the card being purchased or reserved.
 - `deck_level`: Level of the deck being reserved (0-2).

@@ -29,6 +29,28 @@ Applies a legal action to the game.
 Undoes the last action.
 - **Response**: `GameStateSchema` (Updated state).
 
+### `POST /game/{session_id}/ai_move`
+Optional compatibility bridge to external AI projects. It is not required by
+the rule/session/replay API and model code is not bundled in csplendor. Without
+torch and the external `dlsplendor` package the endpoint returns HTTP 503.
+Unknown AI modes and missing fixed search budgets return HTTP 400 before any
+model stack is loaded. The `ml` package extra supplies torch only;
+`dlsplendor` and its models must be provided separately by the integrating
+project.
+
+### Legacy replay endpoints
+
+`GET /replay/files`, `POST /replay/load?path=<filename>`, and
+`GET /replay/{session_id}/game/{game_idx}/{step}` expose the optional legacy
+pickle replay viewer. Pickle files are executable input and must therefore be
+created or installed only by a trusted server administrator. `/replay/load`
+accepts only `.pkl` files that resolve inside the configured replay data
+directory; uploads, arbitrary paths resolving outside it, and symlinks escaping
+that directory are rejected. The listing endpoint returns directory-local names
+and does not unpickle files merely to inspect them. This endpoint is not an
+upload or untrusted-data ingestion API; use a non-executable serialization
+format if replays must cross a trust boundary.
+
 ## 3. JSON Schema Overview (Simplified)
 
 ### `GameStateSchema`
@@ -72,6 +94,10 @@ The GUI should:
 2. Call `GET /game/{session_id}` to get the initial layout.
 3. Map user interactions (clicks) to the indices in the `legal_actions` array.
 4. Call `POST /game/{session_id}/action?action_idx=X` to progress the game.
+
+If the only legal action has type `6` (`PASS`), it is a forced transition and
+may be submitted like any other legal-action index. If neither player has an
+ordinary move, applying it ends the game as a draw.
 
 ## 5. PURCHASE Actions and Payment Options
 

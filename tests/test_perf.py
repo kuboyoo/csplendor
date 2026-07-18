@@ -5,7 +5,6 @@ import pytest
 
 from csplendor import Action, Game
 
-
 MIN_LEGAL_ACTIONS_PER_SEC = 5_000
 MIN_LEGAL_ACTION_CODES_PER_SEC = 30_000
 MIN_LEGAL_ACTION_COUNT_PER_SEC = 40_000

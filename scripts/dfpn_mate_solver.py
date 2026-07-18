@@ -18,6 +18,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import csplendor as cs
+from csplendor.api.usi_kifu import (
+    build_kifu_text,
+    find_legal_action_index_by_usi,
+    game_to_spn,
+    now_iso,
+)
 
 from scripts.mate_solver import (
     INVALID_INPUT,
@@ -40,10 +46,14 @@ from scripts.mate_solver import (
 )
 
 
+from scripts import dfpn_output as _dfpn_output
+from scripts.dfpn_cli import main as _dfpn_cli_main
+
 INF = 10**12
 PLAYER0_WIN = "Player0Win"
 PLAYER1_WIN = "Player1Win"
 DRAW = "Draw"
+MATE_KIFU_REVEAL_COMMENT_PREFIX = "reveal:C"
 _DFPN_DEFAULT_PRUNING = {
     "lazy_reveal": True,
     "attacker_dependency": True,
@@ -66,6 +76,69 @@ _WORKER_PROGRESS_STRIDE = 0
 _WORKER_PROGRESS_SLOT = -1
 _CARD_INFO_CACHE: Dict[int, Tuple[int, int, int, Tuple[int, int, int, int, int]]] = {}
 _NOBLE_REQ_CACHE: Dict[int, Tuple[int, int, int, int, int]] = {}
+_CARD_MASK_BYTES = 12
+
+
+def _json_size_bytes(value: Any) -> int:
+    return _dfpn_output._json_size_bytes(value)
+
+
+def _cards_to_mask_hex(cards: Sequence[int]) -> str:
+    return _dfpn_output._cards_to_mask_hex(cards)
+
+
+def _mask_hex_to_cards(mask_hex: str) -> List[int]:
+    return _dfpn_output._mask_hex_to_cards(mask_hex)
+
+
+def _nullable_int(value: Any, default: int = -1) -> int:
+    return _dfpn_output._nullable_int(value, default)
+
+
+def _optional_int(value: int) -> Optional[int]:
+    return _dfpn_output._optional_int(value)
+
+
+def _compact_card_classes(reveal_cards: Sequence[int]) -> Dict[str, Any]:
+    return _dfpn_output._compact_card_classes(reveal_cards)
+
+
+def _strategy_dag_semantics() -> Dict[str, str]:
+    return _dfpn_output._strategy_dag_semantics()
+
+
+def proof_dag_to_compact(
+    proof_dag: Dict[str, Any],
+    *,
+    include_card_classes: bool = False,
+) -> Dict[str, Any]:
+    return _dfpn_output.proof_dag_to_compact(
+        proof_dag,
+        include_card_classes=include_card_classes,
+    )
+
+
+def compact_proof_dag_to_v1(compact: Dict[str, Any]) -> Dict[str, Any]:
+    return _dfpn_output.compact_proof_dag_to_v1(compact)
+
+
+def strategy_dag_size_report(
+    v1_dag: Dict[str, Any],
+    compact_dag: Dict[str, Any],
+) -> Dict[str, Any]:
+    return _dfpn_output.strategy_dag_size_report(v1_dag, compact_dag)
+
+
+def strategy_dag_node_count(dag: Dict[str, Any]) -> int:
+    return _dfpn_output.strategy_dag_node_count(dag)
+
+
+def strategy_dag_max_children(
+    dag: Dict[str, Any],
+    *,
+    player: Optional[int] = None,
+) -> int:
+    return _dfpn_output.strategy_dag_max_children(dag, player=player)
 
 
 @dataclass
@@ -185,6 +258,117 @@ class _DFPNNode:
 
 class SearchLimitExceeded(Exception):
     pass
+
+
+def _kifu_card_level(card_id: int) -> int:
+    return int(DFPNMateSolver._card_info(int(card_id))[0])
+
+
+def proof_tree_to_kifu_text(
+    game: cs.Game,
+    proof_tree: Dict[str, Any],
+    *,
+    attacker: int,
+) -> str:
+    return _dfpn_output.proof_tree_to_kifu_text(
+        game,
+        proof_tree,
+        attacker=attacker,
+        _now_iso=now_iso,
+        _card_level=_kifu_card_level,
+    )
+
+
+def principal_line_to_kifu_text(
+    game: cs.Game,
+    line: Sequence[Dict[str, Any]],
+    *,
+    attacker: int,
+    reveal_hidden_reserved_ids: bool = False,
+) -> str:
+    return _dfpn_output.principal_line_to_kifu_text(
+        game,
+        line,
+        attacker=attacker,
+        reveal_hidden_reserved_ids=reveal_hidden_reserved_ids,
+        _now_iso=now_iso,
+        _card_level=_kifu_card_level,
+    )
+
+
+def _build_mate_kifu_text(
+    game: cs.Game,
+    moves: Sequence[Dict[str, object]],
+    *,
+    attacker: int,
+    reveal_hidden_reserved_ids: bool = False,
+) -> str:
+    return _dfpn_output._build_mate_kifu_text(
+        game,
+        moves,
+        attacker=attacker,
+        reveal_hidden_reserved_ids=reveal_hidden_reserved_ids,
+        _now_iso=now_iso,
+        _card_level=_kifu_card_level,
+    )
+
+
+def _with_implicit_noble_visits(
+    root_game: cs.Game,
+    moves: Sequence[Dict[str, object]],
+) -> List[Dict[str, object]]:
+    return _dfpn_output._with_implicit_noble_visits(
+        root_game,
+        moves,
+        _card_level=_kifu_card_level,
+    )
+
+
+def _set_reveal_card_for_kifu_move(
+    game: cs.Game,
+    action: cs.Action,
+    comment: object,
+) -> None:
+    _dfpn_output._set_reveal_card_for_kifu_move(
+        game,
+        action,
+        comment,
+        _card_level=_kifu_card_level,
+    )
+
+
+def write_mate_kifu(
+    path: str,
+    game: cs.Game,
+    proof_tree: Dict[str, Any],
+    *,
+    attacker: int,
+) -> None:
+    _dfpn_output.write_mate_kifu(
+        path,
+        game,
+        proof_tree,
+        attacker=attacker,
+        _now_iso=now_iso,
+        _card_level=_kifu_card_level,
+    )
+
+
+def write_principal_line_kifu(
+    path: str,
+    game: cs.Game,
+    line: Sequence[Dict[str, Any]],
+    *,
+    attacker: int,
+) -> None:
+    _dfpn_output.write_principal_line_kifu(
+        path,
+        game,
+        line,
+        attacker=attacker,
+        _now_iso=now_iso,
+        _card_level=_kifu_card_level,
+    )
 
 
 class DFPNMateSolver:
@@ -466,11 +650,15 @@ class DFPNMateSolver:
                     )
                     continue
 
-                defender_actions = self._ordered_actions(
+                defender_actions, omitted_defender_actions = self._ordered_actions_with_omissions(
                     child_state,
                     self._helper._legal_actions(child_state),
                     next_depth,
                 )
+                # Root parallelization eagerly splits defender responses into
+                # worker tasks. Unlike a state node, this path has no later
+                # opportunity to materialize lazily omitted responses.
+                defender_actions.extend(omitted_defender_actions)
                 if not defender_actions:
                     tasks.append(
                         {
@@ -656,9 +844,9 @@ class DFPNMateSolver:
             for future in active:
                 future.cancel()
             try:
-                executor.shutdown(wait=False, cancel_futures=True)
+                executor.shutdown(wait=True, cancel_futures=True)
             except TypeError:
-                executor.shutdown(wait=False)
+                executor.shutdown(wait=True)
 
     def _merge_worker_stats(self, stats: Dict[str, Any]) -> None:
         self.stats.nodes += int(stats.get("nodes", 0))
@@ -2884,8 +3072,11 @@ def solve_reveal_verified_mate(
     include_proof_dag: bool = False,
     proof_dag_node_limit: int = 100000,
     proof_dag_edge_limit: int = 500000,
+    proof_dag_format: str = "v1",
 ) -> SearchResult:
     options = options or SolverOptions()
+    if proof_dag_format not in {"v1", "compact", "both"}:
+        raise ValueError("proof_dag_format must be 'v1', 'compact', or 'both'")
     if attacker != int(game.board.current_player):
         raise ValueError("reveal-verified mate requires attacker to be the current player")
     if not hasattr(cs, "solve_reveal_verified_mate_cpp"):
@@ -2936,18 +3127,107 @@ def solve_reveal_verified_mate(
         for entry in candidate_tree.get("line", [])
         if int(entry["player"]) == attacker
     ]
-    raw = cs.solve_reveal_verified_mate_cpp(
-        game,
-        attacker=int(attacker),
-        depth=int(candidate_depth),
-        max_nodes=remaining_nodes,
-        time_limit_seconds=remaining_time,
-        preferred_attacker_actions=preferred_attacker_actions,
-        include_proof_dag=bool(include_proof_dag),
-        proof_dag_node_limit=max(0, int(proof_dag_node_limit)),
-        proof_dag_edge_limit=max(0, int(proof_dag_edge_limit)),
-    )
+    strict_verification_stats = None
+    used_strict_result = False
+    if (
+        preferred_attacker_actions
+        and remaining_time > 0.0
+        and remaining_nodes != 1
+        and not include_proof_dag
+    ):
+        strict_time = min(remaining_time, max(0.001, remaining_time * 0.25))
+        strict_nodes = (
+            max(1, int(remaining_nodes * 0.25))
+            if remaining_nodes
+            else 0
+        )
+        strict_start = time.monotonic()
+        raw = None
+        strict_verification_stats = {}
+        for strict_prefix in range(len(preferred_attacker_actions), 0, -1):
+            elapsed_strict = time.monotonic() - strict_start
+            if elapsed_strict >= strict_time:
+                break
+            strict_remaining_time = max(0.001, strict_time - elapsed_strict)
+            strict_raw = cs.solve_reveal_verified_mate_cpp(
+                game,
+                attacker=int(attacker),
+                depth=int(candidate_depth),
+                max_nodes=strict_nodes,
+                time_limit_seconds=strict_remaining_time,
+                preferred_attacker_actions=preferred_attacker_actions,
+                include_proof_dag=bool(include_proof_dag),
+                proof_dag_node_limit=max(0, int(proof_dag_node_limit)),
+                proof_dag_edge_limit=max(0, int(proof_dag_edge_limit)),
+                strict_preferred_attacker_prefix=int(strict_prefix),
+                proof_dag_format="v1",
+            )
+            for key, value in dict(strict_raw["stats"]).items():
+                if isinstance(value, (int, float)):
+                    strict_verification_stats[key] = (
+                        strict_verification_stats.get(key, 0) + value
+                    )
+            if bool(strict_raw["proven"]):
+                raw = strict_raw
+                used_strict_result = True
+                break
+
+        if raw is None:
+            elapsed = time.monotonic() - start_time
+            remaining_time = (
+                max(0.001, float(options.time_limit) - elapsed)
+                if options.time_limit
+                else 0.0
+            )
+            remaining_nodes = (
+                max(
+                    1,
+                    int(options.max_nodes)
+                    - int(candidate.stats.nodes)
+                    - int(strict_verification_stats.get("nodes", 0)),
+                )
+                if options.max_nodes
+                else 0
+            )
+            raw = cs.solve_reveal_verified_mate_cpp(
+                game,
+                attacker=int(attacker),
+                depth=int(candidate_depth),
+                max_nodes=remaining_nodes,
+                time_limit_seconds=remaining_time,
+                preferred_attacker_actions=preferred_attacker_actions,
+                include_proof_dag=bool(include_proof_dag),
+                proof_dag_node_limit=max(0, int(proof_dag_node_limit)),
+                proof_dag_edge_limit=max(0, int(proof_dag_edge_limit)),
+                proof_dag_format=(
+                    "compact"
+                    if include_proof_dag and proof_dag_format == "compact"
+                    else "v1"
+                ),
+            )
+    else:
+        raw = cs.solve_reveal_verified_mate_cpp(
+            game,
+            attacker=int(attacker),
+            depth=int(candidate_depth),
+            max_nodes=remaining_nodes,
+            time_limit_seconds=remaining_time,
+            preferred_attacker_actions=preferred_attacker_actions,
+            include_proof_dag=bool(include_proof_dag),
+            proof_dag_node_limit=max(0, int(proof_dag_node_limit)),
+            proof_dag_edge_limit=max(0, int(proof_dag_edge_limit)),
+            proof_dag_format=(
+                "compact"
+                if include_proof_dag and proof_dag_format == "compact"
+                else "v1"
+            ),
+        )
     verification_stats = raw["stats"]
+    if strict_verification_stats is not None and not used_strict_result:
+        verification_stats = dict(verification_stats)
+        for key, value in strict_verification_stats.items():
+            if isinstance(value, (int, float)) and key in verification_stats:
+                verification_stats[key] += value
     unknown_reason = raw["unknown_reason"]
     if not raw["proven"] and unknown_reason is None:
         unknown_reason = "visible-only candidate mate has a reveal counterexample"
@@ -2977,17 +3257,28 @@ def solve_reveal_verified_mate(
         "reason": str(raw["reason"]),
         "memoized_states": int(raw["memoized_states"]),
         "stats": dict(verification_stats),
+        "line": _reveal_verified_line(game, raw["line"]),
     }
     if include_proof_dag:
         proof_dag = dict(raw["proof_dag"])
-        proof_dag["format"] = "strategy_dag_v1"
-        proof_dag["semantics"] = {
-            "attacker_nodes": "one_proven_action_with_all_nondeterministic_outcomes",
-            "defender_nodes": "all_legal_actions_with_all_nondeterministic_outcomes",
-            "shared_states": "referenced_by_node_id",
-            "resolved_leaves": "sound_final_round_proof_summaries",
-        }
-        verification["proof_dag"] = proof_dag
+        if proof_dag.get("format") == "strategy_dag_compact_v1":
+            proof_dag.setdefault("semantics", _strategy_dag_semantics())
+            verification["proof_dag"] = proof_dag
+        else:
+            proof_dag["format"] = "strategy_dag_v1"
+            proof_dag["semantics"] = _strategy_dag_semantics()
+            if proof_dag_format == "compact":
+                verification["proof_dag"] = proof_dag_to_compact(proof_dag)
+            elif proof_dag_format == "both":
+                compact_dag = proof_dag_to_compact(proof_dag)
+                verification["proof_dag"] = proof_dag
+                verification["proof_dag_compact"] = compact_dag
+                verification["proof_dag_size"] = strategy_dag_size_report(
+                    proof_dag,
+                    compact_dag,
+                )
+            else:
+                verification["proof_dag"] = proof_dag
     proof = {
         "mode": "reveal_verified_mate",
         "attacker": int(attacker),
@@ -2996,19 +3287,19 @@ def solve_reveal_verified_mate(
             "hidden_decks_ignored_during_candidate_search": True,
             "all_defender_responses_verified": True,
             "all_reveal_shapes_verified": True,
-            "hidden_reveal_verification": "defender_dominating_reveal_oracle",
-            "reveal_identity_abstraction": "level_and_reveal_timing_preserved",
             "reserve_deck": "all_post_root_draws_verified",
             "attacker_candidate_policy": "heuristic_subset_for_bounded_proof",
             "candidate_purchase_payments": candidate_tree["assumptions"][
                 "purchase_payments"
             ],
+            "hidden_reveal_verification": "explicit_legal_reveal_branching",
+            "reveal_identity_abstraction": "concrete_card_id_preserved_in_strategy_dag",
             "public_card_purchase_payments_during_verification": (
                 "canonical_minimal_gold_only"
                 if bool(game.simple_payment_mode)
                 else "all_legal_patterns"
             ),
-            "hidden_card_purchase_payments_during_verification": "all_legal_patterns",
+            "hidden_card_purchase_payments_during_verification": "reserved_cards_only",
         },
         "candidate": {
             "mode": "visible_only_winner",
@@ -3017,7 +3308,7 @@ def solve_reveal_verified_mate(
             "line": candidate_tree.get("line"),
         },
         "verification": verification,
-        "line": _reveal_verified_line(game, raw["line"]),
+        "line": candidate_tree.get("line"),
     }
     if raw["proven"]:
         return SearchResult(
@@ -3176,222 +3467,8 @@ def solve_game_dfpn(*args: Any, **kwargs: Any) -> SearchResult:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Search guaranteed Splendor mate with depth-first proof-number search."
-    )
-    state_group = parser.add_mutually_exclusive_group()
-    state_group.add_argument("--state-json", help="JSON file describing an arbitrary state")
-    state_group.add_argument("--position", help="USI position command or raw SPN text")
-    state_group.add_argument("--position-file", help="file containing a USI position command or raw SPN")
-    parser.add_argument("--seed", type=int, default=0, help="initial game seed when state-json is omitted")
-    parser.add_argument("--moves", action="append", default=[], help="USI move list, comma-separated or repeated")
-    parser.add_argument("--attacker", type=int, default=0, choices=(0, 1))
-    parser.add_argument("--max-depth", type=int, default=4, help="attacker turn depth for DFPN; ignored by --visible-only-winner and --reveal-verified")
-    parser.add_argument("--node-limit", type=int)
-    parser.add_argument("--time-limit", type=float, default=10.0)
-    parser.add_argument(
-        "--simple-payment",
-        action="store_true",
-        help="generate only canonical purchase payments that preserve gold when possible",
-    )
-    parser.add_argument(
-        "--visible-only-winner",
-        "--visible-only",
-        dest="visible_only_winner",
-        action="store_true",
-        help="ignore hidden deck reveals and solve the visible-card game with full-response minimax; not a mate proof",
-    )
-    parser.add_argument(
-        "--reveal-verified",
-        action="store_true",
-        help="find a visible-only candidate mate, then verify all defender responses and hidden reveal shapes",
-    )
-    parser.add_argument(
-        "--reveal-proof-dag",
-        action="store_true",
-        help="with --reveal-verified, emit the proven strategy DAG after search",
-    )
-    parser.add_argument(
-        "--proof-dag-node-limit",
-        type=int,
-        default=100000,
-        help="maximum nodes emitted by --reveal-proof-dag; 0 disables the limit",
-    )
-    parser.add_argument(
-        "--proof-dag-edge-limit",
-        type=int,
-        default=500000,
-        help="maximum edges emitted by --reveal-proof-dag; 0 disables the limit",
-    )
-    parser.add_argument(
-        "--jobs",
-        type=int,
-        default=1,
-        help="worker processes for root-parallel DFPN search; 0 uses CPU count",
-    )
-    parser.add_argument("--allow-deck-reserve", action="store_true")
-    parser.add_argument(
-        "--no-threat-reveal-pruning",
-        action="store_true",
-        help="disable immediate-win threat based reveal collapsing",
-    )
-    parser.add_argument(
-        "--no-lazy-reveal-pruning",
-        action="store_true",
-        help="disable delayed blank reveal refinement before concrete reveal branching",
-    )
-    parser.add_argument(
-        "--no-attacker-dependency-pruning",
-        action="store_true",
-        help="disable lazy pruning of attacker moves outside the score dependency cone",
-    )
-    parser.add_argument(
-        "--no-defender-relevance-pruning",
-        action="store_true",
-        help="disable lazy deferral of defender moves that do not affect the attacker's race plan",
-    )
-    parser.add_argument(
-        "--no-equivalence-hash",
-        action="store_true",
-        help="disable threat-equivalence hashing and use exact state keys",
-    )
-    parser.add_argument(
-        "--no-return-pattern-pruning",
-        action="store_true",
-        help="Disable representative pruning for equivalent payment/return patterns.",
-    )
-    parser.add_argument(
-        "--no-upper-bound-pruning",
-        action="store_true",
-        help="Disable pruning by the attacker's optimistic score upper bound.",
-    )
-    parser.add_argument(
-        "--no-immediate-terminal-pruning",
-        action="store_true",
-        help="Disable immediate win/defense terminal checks before expanding children.",
-    )
-    parser.add_argument(
-        "--defender-threat-filter",
-        action="store_true",
-        help="Only expand defender replies that address immediate attacker threats.",
-    )
-    parser.add_argument(
-        "--max-actions-per-node",
-        type=int,
-        default=0,
-        help="Optional cap after move ordering and pruning; 0 means no cap.",
-    )
-    parser.add_argument(
-        "--target-candidate-limit",
-        type=int,
-        default=int(_DFPN_DEFAULT_PRUNING["target_candidate_limit"]),
-        help="Limit scored target cards for dependency pruning; 0 disables the limit.",
-    )
-    parser.add_argument(
-        "--parallel-tt-limit",
-        type=int,
-        default=10000,
-        help="max transposition-table entries per parallel worker; 0 disables worker memo",
-    )
-    parser.add_argument(
-        "--parallel-start-method",
-        choices=("spawn", "fork", "forkserver"),
-        default="spawn",
-        help="multiprocessing start method for parallel DFPN workers",
-    )
-    parser.add_argument("--progress", action="store_true", help="print periodic progress to stderr")
-    parser.add_argument("--progress-interval", type=float, default=1.0, help="progress output interval in seconds")
-    parser.add_argument("--no-memo", action="store_true")
-    parser.add_argument("--no-proof", action="store_true")
-    parser.add_argument("--pretty", action="store_true")
-    args = parser.parse_args(argv)
-
-    try:
-        if args.reveal_proof_dag and not args.reveal_verified:
-            raise ValueError("--reveal-proof-dag requires --reveal-verified")
-        if args.reveal_proof_dag and args.no_proof:
-            raise ValueError("--reveal-proof-dag cannot be combined with --no-proof")
-        if args.state_json:
-            game = load_game_from_json(args.state_json)
-        elif args.position:
-            game = load_game_from_usi_text(args.position, seed=args.seed)
-        elif args.position_file:
-            game = load_game_from_usi_file(args.position_file, seed=args.seed)
-        else:
-            game = cs.Game(seed=args.seed)
-        if args.simple_payment:
-            game.simple_payment_mode = True
-        apply_usi_moves(game, _parse_moves(args.moves))
-        default_node_limit = 0 if args.visible_only_winner or args.reveal_verified else 200000
-        options = SolverOptions(
-            max_nodes=default_node_limit if args.node_limit is None else args.node_limit,
-            time_limit=args.time_limit,
-            include_proof=not args.no_proof,
-            allow_deck_reserve=args.allow_deck_reserve,
-            use_memo=not args.no_memo,
-            jobs=args.jobs,
-        )
-        if args.visible_only_winner:
-            result = solve_visible_only_winner(game, options=options)
-            print(json.dumps(result.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
-            return 0 if result.status in (PLAYER0_WIN, PLAYER1_WIN, DRAW) else 2
-        if args.reveal_verified:
-            result = solve_reveal_verified_mate(
-                game,
-                attacker=args.attacker,
-                options=options,
-                include_proof_dag=args.reveal_proof_dag,
-                proof_dag_node_limit=args.proof_dag_node_limit,
-                proof_dag_edge_limit=args.proof_dag_edge_limit,
-            )
-            print(json.dumps(result.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
-            return 0 if result.status == MATE else 2
-        _DFPN_DEFAULT_PRUNING.update(
-            {
-                "lazy_reveal": not args.no_lazy_reveal_pruning,
-                "attacker_dependency": not args.no_attacker_dependency_pruning,
-                "defender_relevance": not args.no_defender_relevance_pruning,
-                "return_pattern": not args.no_return_pattern_pruning,
-                "upper_bound": not args.no_upper_bound_pruning,
-                "immediate_terminal": not args.no_immediate_terminal_pruning,
-                "defender_threat_filter": args.defender_threat_filter,
-                "max_actions_per_node": max(0, int(args.max_actions_per_node)),
-                "target_candidate_limit": max(0, int(args.target_candidate_limit)),
-            }
-        )
-        result = solve_game_dfpn(
-            game,
-            attacker=args.attacker,
-            max_depth=args.max_depth,
-            options=options,
-            use_lazy_reveal_pruning=not args.no_lazy_reveal_pruning,
-            use_attacker_dependency_pruning=not args.no_attacker_dependency_pruning,
-            use_defender_relevance_pruning=not args.no_defender_relevance_pruning,
-            use_threat_reveal_pruning=not args.no_threat_reveal_pruning,
-            use_equivalence_hash=not args.no_equivalence_hash,
-            use_return_pattern_pruning=not args.no_return_pattern_pruning,
-            use_upper_bound_pruning=not args.no_upper_bound_pruning,
-            use_immediate_terminal_pruning=not args.no_immediate_terminal_pruning,
-            use_defender_threat_filter=args.defender_threat_filter,
-            max_actions_per_node=max(0, int(args.max_actions_per_node)),
-            target_candidate_limit=max(0, int(args.target_candidate_limit)),
-            parallel_tt_limit=args.parallel_tt_limit,
-            show_progress=args.progress,
-            progress_interval=args.progress_interval,
-            parallel_start_method=args.parallel_start_method,
-        )
-        print(json.dumps(result.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
-        return 0 if result.status in (MATE, NO_MATE) else 2
-    except Exception as exc:
-        error = SearchResult(
-            status=INVALID_INPUT,
-            depth=None,
-            proof_tree=None,
-            refutation={"error": str(exc)},
-            stats=SearchStats(),
-        )
-        print(json.dumps(error.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
-        return 1
+    """Run the legacy CLI through the separated orchestration module."""
+    return _dfpn_cli_main(argv, api=sys.modules[__name__])
 
 
 if __name__ == "__main__":

@@ -1,6 +1,9 @@
-import numpy as np
-from . import _csplendor as core
 import itertools
+
+import numpy as np
+
+from . import _csplendor as core
+
 
 class ActionEncoder:
     """
@@ -13,26 +16,26 @@ class ActionEncoder:
     - PURCHASE_VISIBLE: 12 (indices 30-41)
     - PURCHASE_RESERVED: 3 (indices 42-44)
     - VISIT_NOBLE: 3 (indices 45-47)
-    
-    Returns and Nobles are handled by providing the 'best' version 
+
+    Returns and Nobles are handled by providing the 'best' version
     of the action (e.g. heuristic return) if multiple exist for a base index.
     """
-    
+
     BASE_ACTION_COUNT = 48  # Extended from 45 to 48 for VISIT_NOBLE
-    
+
     def __init__(self):
         # 1. TAKE_DIFFERENT (10)
         self.take_diff_combinations = list(itertools.combinations(range(5), 3))
-        
+
         # 2. TAKE_SAME (5)
         self.take_same_indices = list(range(5))
-        
+
     def encode(self, action: core.Action, game: core.Game) -> int:
         """
         Maps a core.Action to an integer index [0, 47].
         """
         board = game.board
-        
+
         if action.type == core.ActionType.TAKE_DIFFERENT:
             # Find which colors were taken
             colors = []
@@ -48,23 +51,23 @@ class ActionEncoder:
                     if all(c in comb for c in colors):
                         return idx
                 return 0
-                
+
         elif action.type == core.ActionType.TAKE_SAME:
             for i in range(5):
                 if action.take[i] == 2:
                     return 10 + i
             return 10
-            
+
         elif action.type == core.ActionType.RESERVE_VISIBLE:
-            for l in range(3):
+            for level in range(3):
                 for s in range(4):
-                    if board.visible[l][s] == action.card_id:
-                        return 15 + l * 4 + s
+                    if board.visible[level][s] == action.card_id:
+                        return 15 + level * 4 + s
             return 15
-            
+
         elif action.type == core.ActionType.RESERVE_DECK:
             return 27 + action.deck_level
-            
+
         elif action.type == core.ActionType.PURCHASE:
             if action.from_reserved:
                 # Find index in player's reserved cards
@@ -75,12 +78,12 @@ class ActionEncoder:
                 return 42
             else:
                 # Visible on board
-                for l in range(3):
+                for level in range(3):
                     for s in range(4):
-                        if board.visible[l][s] == action.card_id:
-                            return 30 + l * 4 + s
+                        if board.visible[level][s] == action.card_id:
+                            return 30 + level * 4 + s
                 return 30
-        
+
         elif action.type == core.ActionType.VISIT_NOBLE:
             # noble_choice is the noble ID (0-9 typically), but we only have 3 nobles on board
             # Map to the position (0-2) in the current nobles list
@@ -90,7 +93,7 @@ class ActionEncoder:
                     return 45 + i
             # Fallback to first noble slot if not found
             return 45
-                
+
         return -1
 
     def decode(self, index: int, game: core.Game) -> core.Action:

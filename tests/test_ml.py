@@ -1,6 +1,12 @@
 import numpy as np
 
-from csplendor import ActionEncoder, ActionEncoderCpp, Game, StateEncoder, StateFeaturizer
+from csplendor import (
+    ActionEncoder,
+    ActionEncoderCpp,
+    Game,
+    StateEncoder,
+    StateFeaturizer,
+)
 
 
 def test_python_and_cpp_state_encoders_return_stable_feature_vectors():

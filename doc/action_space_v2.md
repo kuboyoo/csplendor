@@ -235,6 +235,12 @@ action_id = 0 + combo_idx * 84 + ret_pattern
 | 8 | B(1), R(3), K(4) |
 | 9 | G(2), R(3), K(4) |
 
+When only one or two gem colors remain in the bank, the legal action takes all
+remaining colors.  It is assigned to the first combination above containing
+that color subset.  No three-color superset is legal in the same state, so the
+mapping remains injective over the state's legal actions.  This is also the
+mapping used by the 48-action encoder.
+
 ### TAKE_SAME (offset 840, size 140)
 
 Take 2 gems of the same color from the bank (requires >= 4 in bank).
@@ -306,9 +312,10 @@ action_id = 4868
 
 ### MoveGenerator
 
-`MoveGenerator::generate_all_fixed()` in `move_generator.h` already generates
-all distinct actions with full payment and return variants when
-`simple_payment_mode = false`. No changes are needed.
+`MoveGenerator::generate_all_fixed()` in `move_generator.h` generates all
+distinct actions with full payment and return variants when
+`simple_payment_mode = false`. If an ongoing, non-noble state has no ordinary
+action, it generates the single forced `PASS` rule action.
 
 ### MAX_MOVES
 
@@ -323,8 +330,11 @@ only when no other action is legal.
 
 ### MCTS
 
-The current MCTS (`mcts.h`) uses the V1 encoder with `MAX_ACTIONS = 48`.
-Switching MCTS to V2 requires updating `MAX_ACTIONS` to 4869, which
+The current MCTS (`mcts.h`) uses the V1 encoder with `MAX_ACTIONS = 48`; its
+policy therefore does not allocate a slot to the forced `PASS`. Callers apply
+a root pass before starting search, while a pass reached below the root is
+resolved internally without a policy decision. Switching MCTS to V2 requires
+updating `MAX_ACTIONS` to 4869, which
 significantly increases memory per node (~83 KB vs ~0.8 KB). This is a
 separate task that may require sparse node representations.
 

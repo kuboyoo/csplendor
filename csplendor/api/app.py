@@ -1,24 +1,30 @@
-from fastapi import FastAPI, HTTPException
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel
-import uuid
-import os
 import glob
-import time
+import os
 import re
-from .schemas import (
-    GameStateSchema, BoardSchema, PlayerSchema, ActionSchema,
-    ActionType
-)
-from .. import Game, Action, ActionType as CoreActionType
+import time
+import uuid
+from typing import Any, Dict, List, Optional
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+from .. import Action, Game
+from .. import ActionType as CoreActionType
 from .replay import replay_router
+from .schemas import (
+    ActionSchema,
+    ActionType,
+    BoardSchema,
+    GameStateSchema,
+    PlayerSchema,
+)
 from .usi_kifu import (
     action_to_usi,
-    find_legal_action_index_by_usi,
     build_kifu_text,
-    parse_kifu_text,
+    find_legal_action_index_by_usi,
     game_to_spn,
     now_iso,
+    parse_kifu_text,
 )
 
 app = FastAPI(title="Splendor Engine API")
@@ -385,7 +391,7 @@ async def get_ai_move(
     session_id: str,
     ai_type: str = "greedy",
     time_limit: float = 2.0,
-    use_determinization: bool = False,
+    use_determinization: bool = True,
     num_simulations: int = None,
     # AlphaZero advanced options - inference defaults (optimized for strongest play)
     fpu: float = 0.0,              # Keep same as training
@@ -405,7 +411,7 @@ async def get_ai_move(
         session_id: Game session ID
         ai_type: AI type - "mcts", "greedy", "genbu", "alphazero", "deepsets", "set_transformer", or "nnue"
         time_limit: Max thinking time in seconds (default: 2.0)
-        use_determinization: Whether to use determinization for MCTS (default: False)
+        use_determinization: Whether to use determinization for MCTS (default: True)
         num_simulations: Fixed number of MCTS simulations (optional, overrides time_limit for alphazero)
         model_path: Path to .pt model file (optional, uses default if not specified)
 
@@ -422,7 +428,41 @@ async def get_ai_move(
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    from .ai_manager import AIManager
+    allowed_ai_types = {
+        "mcts",
+        "greedy",
+        "genbu",
+        "alphazero",
+        "deepsets",
+        "set_transformer",
+        "nnue",
+    }
+    if ai_type not in allowed_ai_types:
+        raise HTTPException(status_code=400, detail=f"Unknown AI type: {ai_type}")
+
+    # Distilled/search AIs must explicitly run with a fixed-count search
+    # budget. Validate this before loading any optional model dependency.
+    if ai_type in ("deepsets", "set_transformer", "nnue") and (
+        num_simulations is None or num_simulations <= 0
+    ):
+        ai_name = {
+            "deepsets": "DeepSets",
+            "set_transformer": "SetTransformer",
+            "nnue": "NNUE",
+        }[ai_type]
+        raise HTTPException(
+            status_code=400,
+            detail=f"{ai_name} requires a positive num_simulations "
+            "(search budget).",
+        )
+
+    try:
+        from .ai_manager import AIIntegrationUnavailable, AIManager
+    except (ImportError, OSError) as error:
+        raise HTTPException(
+            status_code=503, detail="Optional AI integration is unavailable"
+        ) from error
+
     try:
         game = sessions[session_id]
         ai_manager = AIManager.get_instance()
@@ -438,20 +478,6 @@ async def get_ai_move(
             'dirichletAlpha': dirichlet_alpha,
             'model_path': model_path,
         }
-
-        # Distilled/search AIs must explicitly run with fixed-count search budget from UI selection.
-        # Prevent silent fallback to raw NN inference when simulations are missing.
-        if ai_type in ("deepsets", "set_transformer", "nnue") and (num_simulations is None or num_simulations <= 0):
-            if ai_type == "set_transformer":
-                ai_name = "SetTransformer"
-            elif ai_type == "nnue":
-                ai_name = "NNUE"
-            else:
-                ai_name = "DeepSets"
-            raise HTTPException(
-                status_code=400,
-                detail=f"{ai_name} requires a positive num_simulations (search budget)."
-            )
 
         action_start = time.perf_counter()
         action_idx = ai_manager.get_best_action(
@@ -499,6 +525,8 @@ async def get_ai_move(
         }
     except HTTPException:
         raise
+    except AIIntegrationUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     except Exception as e:
         import traceback
         traceback.print_exc()

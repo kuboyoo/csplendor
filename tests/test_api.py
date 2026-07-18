@@ -1,8 +1,32 @@
-from fastapi.testclient import TestClient
+import asyncio
+
+import httpx
 
 from csplendor.api.app import app, kifu_sessions, session_records, sessions
 
-client = TestClient(app)
+
+class _InProcessASGIClient:
+    """Run requests on the calling thread without TestClient's socket wakeup."""
+
+    def request(self, method, url, **kwargs):
+        async def send():
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://testserver",
+            ) as async_client:
+                return await async_client.request(method, url, **kwargs)
+
+        return asyncio.run(send())
+
+    def get(self, url, **kwargs):
+        return self.request("GET", url, **kwargs)
+
+    def post(self, url, **kwargs):
+        return self.request("POST", url, **kwargs)
+
+
+client = _InProcessASGIClient()
 
 
 def setup_function():

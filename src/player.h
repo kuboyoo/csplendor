@@ -27,18 +27,26 @@ struct PlayerState {
   // Noble eligibility bitmask - bit i is set if player can visit noble i
   uint16_t noble_eligibility_mask = 0;
 
-  void sync_packed() {
+  void sync_packed_gems() {
     uint64_t g = 0;
-    uint64_t b = 0;
     for (int i = 0; i < 5; ++i) {
       g |= (uint64_t(gems[i]) << (i * 12));
-      b |= (uint64_t(bonuses[i]) << (i * 12));
     }
     packed_gems = g;
-    packed_bonuses = b;
+  }
 
-    // Update noble eligibility mask
+  void sync_packed_bonuses_and_noble_eligibility() {
+    uint64_t b = 0;
+    for (int i = 0; i < 5; ++i)
+      b |= (uint64_t(bonuses[i]) << (i * 12));
+    packed_bonuses = b;
     update_noble_eligibility();
+  }
+
+  // Compatibility wrapper for bindings, loaders, and whole-state updates.
+  void sync_packed() {
+    sync_packed_gems();
+    sync_packed_bonuses_and_noble_eligibility();
   }
 
   void update_noble_eligibility() {

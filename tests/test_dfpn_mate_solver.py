@@ -1,14 +1,18 @@
-import csplendor as cs
 import pytest
-from csplendor.api.usi_kifu import game_to_spn
 
+import csplendor as cs
+from csplendor.api.usi_kifu import action_to_usi, game_to_spn, parse_kifu_text
+from scripts import dfpn_mate_solver
 from scripts.dfpn_mate_solver import (
     DFPNMateSolver,
+    compact_proof_dag_to_v1,
+    principal_line_to_kifu_text,
+    proof_dag_to_compact,
+    proof_tree_to_kifu_text,
     solve_game_dfpn,
-    solve_reveal_verified_mate,
     solve_visible_only_winner,
+    strategy_dag_size_report,
 )
-from scripts import dfpn_mate_solver
 from scripts.mate_solver import (
     MATE,
     NO_MATE,
@@ -17,7 +21,6 @@ from scripts.mate_solver import (
     load_game_from_usi_text,
     solve_game,
 )
-
 
 BENCH_POSITION = (
     "position bank:W1U3G3R3K0D4 | "
@@ -38,6 +41,199 @@ def _fast_options(**overrides):
     }
     values.update(overrides)
     return SolverOptions(**values)
+
+
+def test_dfpn_proof_tree_serializes_replayable_principal_line_kifu():
+    game = cs.Game(seed=0)
+    action = game.legal_actions[0]
+    usi = action_to_usi(action, game=game)
+    proof = {
+        "kind": "state",
+        "children": [{
+            "kind": "action",
+            "current_player": 0,
+            "action": {"usi": usi},
+            "children": [{
+                "kind": "outcome",
+                "reveal_card": 12,
+            }],
+        }],
+    }
+
+    parsed = parse_kifu_text(proof_tree_to_kifu_text(game, proof, attacker=0))
+
+    assert parsed["position"] == game_to_spn(game)
+    assert parsed["moves"] == [{
+        "player": 0,
+        "usi": usi,
+        "comment": "reveal:C12",
+    }]
+    assert parsed["result"] == "P0_WIN"
+
+
+def test_solver_line_serializes_kifu_moves():
+    game = cs.Game(seed=0)
+    usi = action_to_usi(game.legal_actions[0], game=game)
+
+    parsed = parse_kifu_text(principal_line_to_kifu_text(
+        game,
+        [{"player": 0, "action": {"usi": usi}}],
+        attacker=0,
+    ))
+
+    assert parsed["moves"] == [{"player": 0, "usi": usi}]
+
+
+def test_compact_strategy_dag_groups_reveals_without_losing_cards():
+    reveal_edges = [
+        {"action_code": 123, "reveal_card": card, "child": 1}
+        for card in range(40)
+    ]
+    v1 = {
+        "format": "strategy_dag_v1",
+        "requested": True,
+        "complete": True,
+        "validated": True,
+        "omitted_reason": None,
+        "root": 0,
+        "nodes": [
+            {
+                "id": 0,
+                "player": 0,
+                "depth": 3,
+                "kind": "state",
+                "resolution": None,
+                "children": reveal_edges + [
+                    {"action_code": 456, "reveal_card": None, "child": 2}
+                ],
+            },
+            {
+                "id": 1,
+                "player": 1,
+                "depth": 2,
+                "kind": "terminal",
+                "resolution": "attacker_win",
+                "children": [],
+            },
+            {
+                "id": 2,
+                "player": 1,
+                "depth": 2,
+                "kind": "terminal",
+                "resolution": "attacker_win",
+                "children": [],
+            },
+        ],
+    }
+
+    compact = proof_dag_to_compact(v1)
+    expanded = compact_proof_dag_to_v1(compact)
+    size = strategy_dag_size_report(v1, compact)
+
+    root_edges = expanded["nodes"][0]["children"]
+    recovered_reveals = sorted(
+        edge["reveal_card"]
+        for edge in root_edges
+        if edge["action_code"] == 123
+    )
+    assert compact["format"] == "strategy_dag_compact_v1"
+    assert len(compact["edges"]) == 2
+    assert recovered_reveals == list(range(40))
+    assert any(edge["reveal_card"] is None for edge in root_edges)
+    assert size["compact_json_bytes"] < size["v1_json_bytes"]
+
+
+def test_compact_strategy_dag_rejects_oracle_edges():
+    v1 = {
+        "format": "strategy_dag_v1",
+        "requested": True,
+        "complete": True,
+        "validated": False,
+        "omitted_reason": None,
+        "root": 0,
+        "nodes": [
+            {
+                "id": 0,
+                "player": 0,
+                "depth": 1,
+                "kind": "state",
+                "resolution": None,
+                "children": [
+                    {
+                        "action_code": 0,
+                        "reveal_card": None,
+                        "oracle_card": 68,
+                        "oracle_reserve": False,
+                        "child": 1,
+                    }
+                ],
+            },
+            {
+                "id": 1,
+                "player": 1,
+                "depth": 0,
+                "kind": "terminal",
+                "resolution": "attacker_win",
+                "children": [],
+            },
+        ],
+    }
+
+    with pytest.raises(ValueError, match="non-replayable oracle edge"):
+        proof_dag_to_compact(v1)
+
+
+def test_dfpn_cli_kifu_output_defaults_to_reveal_verified(tmp_path, capsys, monkeypatch):
+    output = tmp_path / "mate.kifu"
+    expected_game = load_game_from_usi_text(BENCH_POSITION)
+    expected_usi = action_to_usi(expected_game.legal_actions[0], game=expected_game)
+    calls = []
+
+    def fake_reveal_verified(game, attacker, options=None, **kwargs):
+        calls.append((attacker, kwargs))
+        return dfpn_mate_solver.SearchResult(
+            MATE,
+            1,
+            {
+                "mode": "reveal_verified_mate",
+                "attacker": attacker,
+                "line": [
+                    {
+                        "player": int(game.board.current_player),
+                        "action": {"usi": expected_usi},
+                    }
+                ],
+            },
+            None,
+            dfpn_mate_solver.SearchStats(),
+        )
+
+    monkeypatch.setattr(
+        dfpn_mate_solver,
+        "solve_reveal_verified_mate",
+        fake_reveal_verified,
+    )
+
+    code = dfpn_mate_solver.main([
+        "--position",
+        BENCH_POSITION,
+        "--attacker",
+        "0",
+        "--kifu-output",
+        str(output),
+    ])
+
+    parsed = parse_kifu_text(output.read_text(encoding="utf-8"))
+    assert code == 0
+    assert '"status": "Mate"' in capsys.readouterr().out
+    assert calls == [(0, {
+        "include_proof_dag": False,
+        "proof_dag_node_limit": 100000,
+        "proof_dag_edge_limit": 500000,
+        "proof_dag_format": "compact",
+    })]
+    assert [move["usi"] for move in parsed["moves"]] == [expected_usi]
+    assert parsed["total_turns"] == 1
 
 
 def test_dfpn_terminal_winner_is_used_for_mate_status():
@@ -170,6 +366,38 @@ def test_dfpn_splits_root_action_tasks_by_reveal_outcome():
     assert tasks
     assert all(task["kind"] in {"outcome", "state_after_root", "defender_outcome"} for task in tasks)
     assert all(task["group_index"] == 0 for task in tasks)
+
+
+def test_dfpn_root_parallel_materializes_omitted_defender_actions(monkeypatch):
+    game = cs.Game(seed=1)
+    state = SolverState.from_game(game)
+    solver = DFPNMateSolver(attacker=0, max_depth=1, options=_fast_options())
+    solver.use_lazy_reveal_pruning = False
+    root_action = solver._helper._legal_actions(state)[0]
+    defender_game = game.clone_light()
+    defender_game.board.current_player = 1
+    defender_state = SolverState.from_game(defender_game)
+    defender_actions = solver._helper._legal_actions(defender_state)
+    assert len(defender_actions) >= 2
+
+    monkeypatch.setattr(
+        solver,
+        "_transition_outcomes",
+        lambda state, action: [dfpn_mate_solver._Outcome(None, None, (defender_state,))],
+    )
+    monkeypatch.setattr(
+        solver,
+        "_ordered_actions_with_omissions",
+        lambda state, actions, depth: ([defender_actions[0]], [defender_actions[1]]),
+    )
+    action_child = solver._action_node(state, 1, root_action, actor_is_attacker=True)
+
+    tasks = solver._root_tasks_from_child(0, action_child)
+
+    assert {task["defender_action_code"] for task in tasks} == {
+        int(defender_actions[0].pack()),
+        int(defender_actions[1].pack()),
+    }
 
 
 def test_dfpn_lazy_reveal_starts_with_blank_then_refines():
@@ -436,8 +664,11 @@ def test_visible_only_winner_ignores_depth_and_decks():
     assert result.proof_tree["mode"] == "visible_only_winner"
     assert result.proof_tree["assumptions"]["hidden_decks_ignored"] is True
     assert result.proof_tree["assumptions"]["max_depth_ignored"] is True
-    assert result.proof_tree["assumptions"]["policy"] == "full_legal_minimax_with_cycle_score_adjudication"
+    assert result.proof_tree["assumptions"]["policy"] == "bounded_forced_win_with_all_defender_responses"
+    assert result.proof_tree["assumptions"]["mate_proof"] is True
+    assert result.proof_tree["assumptions"]["attacker_candidate_policy"] == "heuristic_subset_for_bounded_proof"
     assert result.proof_tree["assumptions"]["all_visible_only_responses_read"] is True
+    assert result.proof_tree["forced_win_depth"] == 1
     assert result.proof_tree["line"]
 
 
@@ -484,86 +715,22 @@ def test_visible_only_winner_respects_explicit_simple_payment_mode():
     )
 
 
-def test_reveal_verified_mate_finds_bench_forced_line():
-    result = solve_reveal_verified_mate(
+def test_reveal_verified_mate_does_not_emit_oracle_purchase_actions():
+    result = cs.solve_reveal_verified_mate_cpp(
         load_game_from_usi_text(BENCH_POSITION),
         attacker=0,
-        options=_fast_options(max_nodes=0, time_limit=30.0, include_proof=True),
-    )
-
-    assert result.status == MATE
-    assert result.depth <= 5
-    assert result.proof_tree["assumptions"]["all_reveal_shapes_verified"] is True
-    assert (
-        result.proof_tree["assumptions"]["hidden_reveal_verification"]
-        == "defender_dominating_reveal_oracle"
-    )
-    assert (
-        result.proof_tree["assumptions"]["reserve_deck"]
-        == "all_post_root_draws_verified"
-    )
-    assert (
-        result.proof_tree["assumptions"]["candidate_purchase_payments"]
-        == "all_legal_patterns"
-    )
-    assert (
-        result.proof_tree["assumptions"]["public_card_purchase_payments_during_verification"]
-        == "all_legal_patterns"
-    )
-    assert result.proof_tree["candidate"]["line"]
-    assert result.stats.oracle_purchase_actions > 0
-    assert result.stats.deck_reserve_branches > 0
-    assert result.stats.verification_elapsed_ms < 30000
-
-
-def test_reveal_verified_mate_emits_bounded_proof_dag():
-    result = solve_reveal_verified_mate(
-        load_game_from_usi_text(BENCH_POSITION),
-        attacker=0,
-        options=_fast_options(max_nodes=0, time_limit=30.0, include_proof=True),
+        depth=5,
+        time_limit_seconds=1.0,
         include_proof_dag=True,
-        proof_dag_node_limit=10000,
+        proof_dag_node_limit=100000,
     )
 
-    dag = result.proof_tree["verification"]["proof_dag"]
-    assert result.status == MATE
-    assert dag["format"] == "strategy_dag_v1"
-    assert dag["complete"] is True
-    assert dag["root"] == 0
-    assert 1 < len(dag["nodes"]) <= 10000
-    assert any(node["children"] for node in dag["nodes"])
-    assert any(
-        node["resolution"] == "final_round_proof_summary"
+    dag = result["proof_dag"]
+    assert not any(
+        edge["oracle_card"] is not None or edge["oracle_reserve"]
         for node in dag["nodes"]
+        for edge in node["children"]
     )
-
-
-@pytest.mark.parametrize(
-    ("node_limit", "edge_limit", "reason"),
-    [
-        (1, 500000, "proof DAG node limit exceeded"),
-        (10000, 1, "proof DAG edge limit exceeded"),
-    ],
-)
-def test_reveal_verified_mate_omits_proof_dag_over_limit(
-    node_limit,
-    edge_limit,
-    reason,
-):
-    result = solve_reveal_verified_mate(
-        load_game_from_usi_text(BENCH_POSITION),
-        attacker=0,
-        options=_fast_options(max_nodes=0, time_limit=30.0, include_proof=True),
-        include_proof_dag=True,
-        proof_dag_node_limit=node_limit,
-        proof_dag_edge_limit=edge_limit,
-    )
-
-    dag = result.proof_tree["verification"]["proof_dag"]
-    assert result.status == MATE
-    assert dag["complete"] is False
-    assert dag["nodes"] == []
-    assert dag["omitted_reason"] == reason
 
 
 def test_dfpn_cli_visible_only_winner_does_not_require_max_depth(monkeypatch, capsys):

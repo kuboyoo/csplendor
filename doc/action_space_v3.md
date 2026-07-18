@@ -138,6 +138,11 @@ ret_pattern = encode_return(return_gems, n=6)  // 0-83
 action_id = 0 + combo_idx * 84 + ret_pattern
 ```
 
+If the bank has only one or two non-empty colors, the action takes all of them
+and uses the first ordinary three-color combination containing that subset.
+The absent superset action is not legal in that state, preserving injectivity
+over legal actions and matching the 48-action encoder.
+
 ### TAKE_SAME (offset 840, size 140)
 
 Same as V2. Take 2 gems of the same color from the bank.
@@ -222,6 +227,11 @@ Pass the turn (only when no other action is legal).
 ```
 action_id = 3132
 ```
+
+`PASS` is a real forced rule action (`ActionType.PASS`), not a terminal-state
+sentinel. Terminal masks are all zero. The fixed 48-slot MCTS policy omits this
+forced transition: callers apply it before a root search and search resolves
+passes reached below the root automatically.
 
 ## Migration Notes
 

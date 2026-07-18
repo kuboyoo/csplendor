@@ -1,3 +1,5 @@
+import pytest
+
 from csplendor import Game
 from csplendor.api.app import _build_replay_from_kifu_text
 from csplendor.api.usi_kifu import (
@@ -9,7 +11,6 @@ from csplendor.api.usi_kifu import (
     position_to_game,
     spn_to_game,
 )
-import pytest
 
 
 def _signature(action):
@@ -39,6 +40,7 @@ def _state_signature(game):
             int(player.reserved_count),
             int(player.purchased_count),
             tuple(int(v) for v in player.purchased_cards),
+            tuple(int(v) for v in player.acquired_nobles),
         ))
     return (
         tuple(int(v) for v in board.bank),
@@ -114,6 +116,20 @@ def test_spn_to_game_round_trips_observable_state_and_unseen_sets():
     assert _state_signature(parsed) == _state_signature(game)
 
 
+def test_spn_round_trips_acquired_nobles():
+    game = Game(seed=5)
+    player = game.board.get_player(0)
+    player.acquired_nobles = [int(game.board.nobles[0])]
+    game.board.nobles = list(game.board.nobles)[1:]
+    game.board.set_player(0, player)
+
+    spn = game_to_spn(game)
+    parsed = spn_to_game(spn)
+
+    assert f"nobles:[{int(player.acquired_nobles[0])}]" in spn
+    assert _state_signature(parsed) == _state_signature(game)
+
+
 def test_position_startpos_with_moves_uses_seed_and_applies_usi_moves():
     expected = Game(seed=42)
     move = action_to_usi(expected.legal_actions[0], game=expected)
@@ -142,6 +158,23 @@ def test_spn_hidden_reserved_cards_are_rejected_for_exact_solver_state():
         spn_to_game(spn)
 
 
+def test_spn_exact_hidden_reserved_card_round_trips_with_hidden_label():
+    game = Game(seed=3)
+    action = next(
+        action for action in game.legal_actions
+        if action_to_usi(action, game=game).startswith("reserve:L")
+    )
+    assert game.apply(action, False)
+
+    public_spn = game_to_spn(game)
+    exact_spn = game_to_spn(game, reveal_hidden_reserved_ids=True)
+    parsed = spn_to_game(exact_spn)
+
+    assert "?L" in public_spn
+    assert "?C" in exact_spn
+    assert _state_signature(parsed) == _state_signature(game)
+
+
 def test_editor_spn_with_unknown_bought_cards_keeps_non_visible_non_reserved_cards_in_decks():
     spn = (
         "bank:W1U3G3R3K0D4 | "
@@ -162,6 +195,11 @@ def test_editor_spn_with_unknown_bought_cards_keeps_non_visible_non_reserved_car
     assert int(game.board.get_player(1).purchased_count) == 7
     assert list(game.board.get_player(0).purchased_cards) == []
     assert list(game.board.get_player(1).purchased_cards) == []
+    serialized = game_to_spn(game)
+    assert "bought:[_,_,_,_,_,_,_,_,_,_,_]" in serialized
+    assert "bought:[_,_,_,_,_,_,_]" in serialized
+    with pytest.raises(ValueError, match="purchased card IDs are incomplete"):
+        game_to_spn(game, require_purchased_card_ids=True)
     assert 68 not in game.board.decks[1]
     assert 85 not in game.board.decks[2]
     assert 35 not in game.board.decks[0]

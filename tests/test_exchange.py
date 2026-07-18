@@ -5,7 +5,6 @@ import pytest
 
 from csplendor import ActionEncoderV2, ActionEncoderV3, ActionType, Game
 
-
 EXCHANGE_TYPES = {
     ActionType.TAKE_DIFFERENT,
     ActionType.TAKE_SAME,
@@ -198,7 +197,7 @@ def test_depleted_bank_take_different_one_or_two_colors():
 
     for available_count in (1, 2):
         for mask in range(1, 1 << 5):
-            if mask.bit_count() != available_count:
+            if bin(mask).count("1") != available_count:
                 continue
             bank = tuple(1 if mask & (1 << i) else 0 for i in range(5)) + (5,)
             for gems in _gem_distributions(total=10):

@@ -76,13 +76,13 @@ public:
 
         if (card_id == -1) {
           // No card in this slot
-          for (int f = 0; f < CARD_FEATURE_SIZE; ++f) {
+          for (size_t f = 0; f < CARD_FEATURE_SIZE; ++f) {
             features[idx++] = 0.0f;
           }
         } else if (is_hidden) {
           // Hidden card: only encode tier/level
           const Card &card = get_card(card_id);
-          for (int f = 0; f < CARD_FEATURE_SIZE - 1; ++f) {
+          for (size_t f = 0; f < CARD_FEATURE_SIZE - 1; ++f) {
             features[idx++] = 0.0f; // Hide all details except level
           }
           features[idx++] = static_cast<float>(card.level) / 3.0f;
@@ -111,7 +111,7 @@ public:
       if (i < board.nobles.size()) {
         encode_noble(board.nobles[i], features, idx);
       } else {
-        for (int f = 0; f < NOBLE_FEATURE_SIZE; ++f) {
+        for (size_t f = 0; f < NOBLE_FEATURE_SIZE; ++f) {
           features[idx++] = 0.0f;
         }
       }
@@ -147,7 +147,7 @@ private:
   static void encode_card(int8_t card_id, std::array<float, TOTAL_FEATURES> &features,
                           size_t &idx) {
     if (card_id == -1) {
-      for (int f = 0; f < CARD_FEATURE_SIZE; ++f) {
+      for (size_t f = 0; f < CARD_FEATURE_SIZE; ++f) {
         features[idx++] = 0.0f;
       }
       return;

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import re
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .. import ActionType as CoreActionType
-from .. import Game
-from .. import get_card
+from .. import Game, get_card
 
 # USI gem letters in canonical order:
 # W=Diamond(White), U=Sapphire(Blue), G=Emerald(Green), R=Ruby(Red), K=Onyx(Black), D=Gold
@@ -256,7 +255,10 @@ def find_legal_action_index_by_usi(game, usi_move: str) -> int:
     parsed = parse_usi_move(usi_move)
 
     if parsed.kind == "pass":
-        return -1 if len(legal_actions) == 0 else -1
+        for i, action in enumerate(legal_actions):
+            if action.type == CoreActionType.PASS:
+                return i
+        raise ValueError(f"pass is not legal in current state: {usi_move}")
 
     if parsed.kind == "take":
         for i, action in enumerate(legal_actions):
@@ -320,7 +322,12 @@ def find_legal_action_index_by_usi(game, usi_move: str) -> int:
     raise ValueError(f"unsupported USI move kind: {parsed.kind}")
 
 
-def board_to_spn(board) -> str:
+def board_to_spn(
+    board,
+    *,
+    reveal_hidden_reserved_ids: bool = False,
+    require_purchased_card_ids: bool = False,
+) -> str:
     """Serialize current board to SPN text."""
     bank = [int(v) for v in board.bank]
     bank_part = f"bank:W{bank[0]}U{bank[1]}G{bank[2]}R{bank[3]}K{bank[4]}D{bank[5]}"
@@ -348,21 +355,38 @@ def board_to_spn(board) -> str:
             cid = int(card_id)
             if cid < 0:
                 continue
-            # Keep hidden cards as ?Lx when available.
+            # Public SPN hides deck-reserved identities. Reproducible artifacts
+            # may opt into ?C<id>, which preserves both identity and visibility.
             if slot_idx < len(p.reserved_is_hidden) and bool(p.reserved_is_hidden[slot_idx]):
-                lvl = card_level_from_id(cid)
-                reserved.append(f"?L{lvl}" if lvl > 0 else "?L1")
+                if reveal_hidden_reserved_ids:
+                    reserved.append(f"?C{cid}")
+                else:
+                    lvl = card_level_from_id(cid)
+                    reserved.append(f"?L{lvl}" if lvl > 0 else "?L1")
             else:
                 reserved.append(str(cid))
         bought = [str(int(cid)) for cid in p.purchased_cards if int(cid) >= 0]
+        unknown_bought_count = int(p.purchased_count) - len(bought)
+        if require_purchased_card_ids and unknown_bought_count != 0:
+            raise ValueError(
+                f"P{p_idx} purchased card IDs are incomplete: "
+                f"count={int(p.purchased_count)}, known={len(bought)}"
+            )
+        bought.extend("_" for _ in range(max(0, unknown_bought_count)))
+        acquired_nobles = [
+            str(int(noble_id))
+            for noble_id in p.acquired_nobles
+            if int(noble_id) >= 0
+        ]
         players_part.append(
             "P{idx}:gems:W{g0}U{g1}G{g2}R{g3}K{g4}D{g5};"
             "bonuses:W{b0}U{b1}G{b2}R{b3}K{b4};"
-            "points:{pts};reserved:[{res}];bought:[{bought}]".format(
+            "points:{pts};nobles:[{nobles}];reserved:[{res}];bought:[{bought}]".format(
                 idx=p_idx,
                 g0=gems[0], g1=gems[1], g2=gems[2], g3=gems[3], g4=gems[4], g5=gems[5],
                 b0=bonuses[0], b1=bonuses[1], b2=bonuses[2], b3=bonuses[3], b4=bonuses[4],
                 pts=int(p.points),
+                nobles=",".join(acquired_nobles),
                 res=",".join(reserved),
                 bought=",".join(bought),
             )
@@ -373,8 +397,17 @@ def board_to_spn(board) -> str:
     )
 
 
-def game_to_spn(game) -> str:
-    return board_to_spn(game.board)
+def game_to_spn(
+    game,
+    *,
+    reveal_hidden_reserved_ids: bool = False,
+    require_purchased_card_ids: bool = False,
+) -> str:
+    return board_to_spn(
+        game.board,
+        reveal_hidden_reserved_ids=reveal_hidden_reserved_ids,
+        require_purchased_card_ids=require_purchased_card_ids,
+    )
 
 
 def spn_to_game(spn: str, seed: int = 0) -> Game:
@@ -433,7 +466,7 @@ def spn_to_game(spn: str, seed: int = 0) -> Game:
         player.reserved_count = pdata["reserved_count"]
         player.purchased_cards = pdata["bought"]
         player.purchased_count = pdata["purchased_count"]
-        player.acquired_nobles = []
+        player.acquired_nobles = pdata["nobles"]
         board.set_player(idx, player)
 
     return game
@@ -562,7 +595,7 @@ def _parse_player_section(section: str, expected_player: int) -> Dict[str, objec
         raise ValueError(f"P{expected_player} missing fields: {sorted(missing)}")
 
     reserved, reserved_is_hidden = _parse_reserved_section(fields["reserved"])
-    if any(reserved_is_hidden):
+    if any(card_id < 0 and hidden for card_id, hidden in zip(reserved, reserved_is_hidden)):
         raise ValueError(
             "SPN hidden reserved cards (?Lx) cannot be solved exactly; use explicit card ids"
         )
@@ -571,11 +604,15 @@ def _parse_player_section(section: str, expected_player: int) -> Dict[str, objec
     reserved_slots = reserved + [-1] * (3 - len(reserved))
 
     bought_ids, purchased_count, unknown_bought_count = _parse_bought_section(fields["bought"])
+    nobles = _parse_nobles_section("nobles:" + fields.get("nobles", "[]"))
+    if len(nobles) > 3:
+        raise ValueError("a player can acquire at most 3 nobles")
 
     return {
         "gems": _parse_prefixed_counts("gems:" + fields["gems"], "gems:", include_gold=True),
         "bonuses": _parse_prefixed_counts("bonuses:" + fields["bonuses"], "bonuses:", include_gold=False),
         "points": int(fields["points"]),
+        "nobles": nobles,
         "reserved": reserved_slots,
         "reserved_is_hidden": reserved_is_hidden[:3] + [False] * (3 - len(reserved_is_hidden)),
         "reserved_count": len(reserved),
@@ -611,7 +648,10 @@ def _parse_id_list(text: str, label: str) -> List[int]:
         return []
     ids: List[int] = []
     for part in body.split(","):
-        value = int(part.strip())
+        item = part.strip()
+        if item == "-":
+            continue
+        value = int(item)
         if label == "card" and not 0 <= value < 90:
             raise ValueError(f"card id out of range: {value}")
         if label == "noble" and not 0 <= value < 12:
@@ -633,6 +673,14 @@ def _parse_reserved_section(text: str) -> Tuple[List[int], List[bool]]:
     hidden: List[bool] = []
     for part in body.split(","):
         item = part.strip()
+        exact_hidden = re.fullmatch(r"\?C(\d+)", item, flags=re.IGNORECASE)
+        if exact_hidden:
+            card_id = int(exact_hidden.group(1))
+            if not 0 <= card_id < 90:
+                raise ValueError(f"reserved card id out of range: {card_id}")
+            reserved.append(card_id)
+            hidden.append(True)
+            continue
         if re.fullmatch(r"\?L[123]", item, flags=re.IGNORECASE):
             reserved.append(-1)
             hidden.append(True)

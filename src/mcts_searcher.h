@@ -3,6 +3,7 @@
 
 #include "game.h"
 #include "mcts.h"
+#include "mcts_game_adapter.h"
 #include <functional>
 #include <vector>
 
@@ -17,8 +18,8 @@ public:
 
 // Batch inference result
 struct InferenceResult {
-  std::array<float, MAX_ACTIONS> policy;
-  std::array<float, NUM_PLAYERS> value;
+  std::array<float, MAX_ACTIONS> policy{};
+  std::array<float, NUM_PLAYERS> value{};
 };
 
 // MCTS Searcher - orchestrates the search process
@@ -31,30 +32,59 @@ public:
   // Returns true if a leaf was found, false if terminal
   bool run_simulation(const Game &root_game, int observer,
                       std::vector<LeafRequest> &leaf_requests,
-                      bool is_first_sim) {
-    path_.clear();
+                      bool is_first_sim, int current_sim = 0) {
+    if (mcts_internal::GameAdapter::requires_forced_pass(root_game))
+      throw std::invalid_argument(
+          "MCTS root requires a forced pass; apply it before searching");
+    // Non-determinized Python callbacks observe an isolated copy of the
+    // root's history. Keep that contract while transferring ownership to the
+    // simulation loop so search() does not need another copy.
+    return run_simulation_owned(
+        mcts_internal::GameAdapter::clone_with_history(root_game), observer,
+        leaf_requests, is_first_sim, current_sim);
+  }
 
-    Game game = root_game;
-    uint64_t current_hash = get_hash(game, observer);
+private:
+  bool run_simulation_owned(Game game, int observer,
+                            std::vector<LeafRequest> &leaf_requests,
+                            bool is_first_sim, int current_sim) {
+    path_.clear();
+    uint64_t current_hash = mcts_internal::GameAdapter::hash(
+        game, static_cast<uint8_t>(observer),
+        mcts_.config().use_determinization);
     int depth = 0;
 
     while (depth < MAX_DEPTH) {
       MCTSNode *node = mcts_.get_node(current_hash);
 
       // Check for terminal state
-      if (game.is_game_over()) {
-        auto terminal_value = get_terminal_value(game);
+      if (mcts_internal::GameAdapter::is_terminal(game)) {
+        auto terminal_value =
+            mcts_internal::GameAdapter::terminal_value(game, 0.01f);
         mcts_.set_terminal(current_hash, terminal_value);
         backpropagate(terminal_value);
         return false;
+      }
+
+      if (mcts_internal::GameAdapter::requires_forced_pass(game)) {
+        mcts_internal::GameAdapter::resolve_forced_pass(game);
+        current_hash = mcts_internal::GameAdapter::hash(
+            game, static_cast<uint8_t>(observer),
+            mcts_.config().use_determinization);
+        ++depth;
+        continue;
       }
 
       // Leaf node - needs expansion
       if (!node || !node->is_expanded) {
         LeafRequest req;
         req.hash = current_hash;
-        req.features = featurizer_.featurize(game);
-        req.valid_actions = encoder_.get_action_mask(game);
+        req.features =
+            mcts_internal::GameAdapter::featurize(featurizer_, game);
+        // This is the last use of the leaf Game. A Python encoder can take
+        // ownership of it while preserving callback isolation and history.
+        req.valid_actions = mcts_internal::GameAdapter::action_mask_owned(
+            encoder_, std::move(game));
         req.path_index = static_cast<int>(leaf_requests.size());
 
         // Store path for later backpropagation
@@ -70,10 +100,12 @@ public:
       }
 
       // Select action using PUCT
-      int action = mcts_.select_action(*node, is_first_sim && depth == 0);
+      int action = mcts_.select_action(*node, is_first_sim && depth == 0,
+                                       current_sim);
       if (action < 0) {
         // No valid action - treat as terminal
-        auto value = get_terminal_value(game);
+        auto value =
+            mcts_internal::GameAdapter::terminal_value(game, 0.01f);
         backpropagate(value);
         return false;
       }
@@ -82,19 +114,22 @@ public:
       PathEntry entry;
       entry.hash = current_hash;
       entry.action = action;
-      entry.player = game.current_player();
+      entry.player = mcts_internal::GameAdapter::current_player(game);
       path_.push_back(entry);
 
       // Apply action
-      Action decoded = encoder_.decode(action, game);
-      if (!game.apply_trusted(decoded, false)) {
-        auto value = get_terminal_value(game);
+      if (!mcts_internal::GameAdapter::decode_and_apply(game, encoder_,
+                                                        action)) {
+        auto value =
+            mcts_internal::GameAdapter::terminal_value(game, 0.01f);
         backpropagate(value);
         return false;
       }
 
       // Get next state hash
-      current_hash = get_hash(game, observer);
+      current_hash = mcts_internal::GameAdapter::hash(
+          game, static_cast<uint8_t>(observer),
+          mcts_.config().use_determinization);
       depth++;
     }
 
@@ -104,17 +139,7 @@ public:
     return false;
   }
 
-  // Process inference results and complete backpropagation
-  void process_inference_results(const std::vector<InferenceResult> &results) {
-    for (size_t i = 0; i < results.size() && i < pending_paths_.size(); ++i) {
-      const auto &result = results[i];
-
-      // Get the leaf request to find the hash
-      // Note: The leaf hash is stored at the end of the corresponding path
-      // We need to track it separately
-    }
-  }
-
+public:
   // Expand leaf nodes with inference results and backpropagate
   void expand_and_backpropagate(const std::vector<LeafRequest> &requests,
                                 const std::vector<InferenceResult> &results) {
@@ -139,21 +164,32 @@ public:
   void search(const Game &root_game, int num_simulations,
               std::function<std::vector<InferenceResult>(
                   const std::vector<LeafRequest> &)> inference_fn) {
+    if (num_simulations > 0 &&
+        mcts_internal::GameAdapter::requires_forced_pass(root_game))
+      throw std::invalid_argument(
+          "MCTS root requires a forced pass; apply it before searching");
     mcts_.prune_if_needed();
 
-    int observer = root_game.current_player();
+    int observer = mcts_internal::GameAdapter::current_player(root_game);
 
     for (int sim = 0; sim < num_simulations; ++sim) {
       std::vector<LeafRequest> leaf_requests;
 
-      // Optionally use determinization
-      Game search_game = root_game;
+      bool has_leaf;
       if (mcts_.config().use_determinization) {
-        search_game = root_game.shuffled_clone(observer, rng_());
+        // shuffled_clone() already omits history. Transfer its temporary
+        // directly instead of full-copying root and copying the shuffled
+        // board once more inside run_simulation().
+        has_leaf = run_simulation_owned(
+            mcts_internal::GameAdapter::determinize(
+                root_game, static_cast<uint8_t>(observer), rng_()),
+            observer, leaf_requests, sim == 0, sim);
+      } else {
+        // run_simulation() makes the one full copy required by the observable
+        // Python callback history contract.
+        has_leaf =
+            run_simulation(root_game, observer, leaf_requests, sim == 0, sim);
       }
-
-      bool has_leaf = run_simulation(search_game, observer, leaf_requests,
-                                     sim == 0);
 
       if (has_leaf && !leaf_requests.empty()) {
         // Call inference
@@ -166,38 +202,17 @@ public:
   // Get action probabilities
   std::array<float, MAX_ACTIONS> get_action_probs(const Game &root_game,
                                                    float temperature) {
-    int observer = root_game.current_player();
-    uint64_t root_hash = get_hash(root_game, observer);
+    if (mcts_internal::GameAdapter::requires_forced_pass(root_game))
+      throw std::invalid_argument(
+          "MCTS root requires a forced pass; apply it before reading policy");
+    int observer = mcts_internal::GameAdapter::current_player(root_game);
+    uint64_t root_hash = mcts_internal::GameAdapter::hash(
+        root_game, static_cast<uint8_t>(observer),
+        mcts_.config().use_determinization);
     return mcts_.get_action_probs(root_hash, temperature);
   }
 
 private:
-  uint64_t get_hash(const Game &game, int observer) const {
-    if (mcts_.config().use_determinization) {
-      return game.board.observable_hash(observer);
-    }
-    return game.board.hash();
-  }
-
-  std::array<float, NUM_PLAYERS> get_terminal_value(const Game &game) const {
-    std::array<float, NUM_PLAYERS> value = {0};
-    int winner = game.winner();
-
-    if (winner == 0) {
-      value[0] = 1.0f;
-      value[1] = -1.0f;
-    } else if (winner == 1) {
-      value[0] = -1.0f;
-      value[1] = 1.0f;
-    } else if (winner == -2) {
-      // Draw
-      value[0] = 0.01f;
-      value[1] = 0.01f;
-    }
-
-    return value;
-  }
-
   void backpropagate(const std::array<float, NUM_PLAYERS> &value) {
     mcts_.backpropagate(path_, value);
   }

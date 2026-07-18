@@ -65,6 +65,8 @@ struct Action {
     case VISIT_NOBLE:
       code |= (static_cast<uint64_t>(noble_choice + 1) & 0x1FULL) << 3;
       break;
+    case PASS:
+      break;
     default:
       break;
     }
@@ -117,6 +119,8 @@ struct Action {
     case VISIT_NOBLE:
       action.noble_choice =
           static_cast<int8_t>(static_cast<int>((code >> 3) & 0x1FULL) - 1);
+      break;
+    case PASS:
       break;
     default:
       action.type = ACTION_TYPE_COUNT;
@@ -173,6 +177,15 @@ struct Action {
     case PURCHASE:
       ss << "PURCHASE: C" << (int)card_id << (from_reserved ? " (R)" : "");
       break;
+    case VISIT_NOBLE:
+      ss << "VISIT_NOBLE: N" << (int)noble_choice;
+      break;
+    case PASS:
+      ss << "PASS";
+      break;
+    default:
+      ss << "INVALID";
+      break;
     }
 
     bool has_return = false;
@@ -186,7 +199,7 @@ struct Action {
           ss << (int)return_gems[i] << "x" << i << " ";
     }
 
-    if (noble_choice != -1) {
+    if (noble_choice != -1 && type != VISIT_NOBLE) {
       ss << " NOBLE: N" << (int)noble_choice;
     }
 

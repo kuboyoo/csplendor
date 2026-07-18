@@ -4,20 +4,212 @@ on:
   pull_request:
   push:
     branches: [ main ]
+  schedule:
+    # 03:17 JST. Avoid the top of the hour, when hosted runners are busiest.
+    - cron: "17 18 * * *"
+  workflow_dispatch:
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - name: Install
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,web]"
       - name: Compile Python
         run: python -m compileall -q csplendor
+      - name: Lint Python
+        run: |
+          python -m ruff check --target-version py38 --extend-select W,I csplendor tests
+          python -m ruff check --target-version py38 --select S csplendor
       - name: Test
-        run: python -m pytest
+        if: matrix.python-version != '3.12'
+        run: python -m pytest -W error
+      - name: Test with coverage gate
+        if: matrix.python-version == '3.12'
+        run: >-
+          python -m pytest -W error
+          --cov=csplendor --cov-report=term-missing --cov-fail-under=50
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build release artifacts
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine auditwheel
+          python -m build
+          python -m twine check dist/*
+          python -m auditwheel show dist/*.whl
+      - name: Rebuild wheel from sdist
+        run: |
+          mkdir -p dist/from-sdist
+          python -m pip wheel --no-deps --wheel-dir dist/from-sdist dist/*.tar.gz
+      - name: Install and smoke-test built wheel
+        run: |
+          python -m venv /tmp/csplendor-wheel-venv
+          /tmp/csplendor-wheel-venv/bin/python -m pip install \
+            dist/from-sdist/*.whl
+          cd /tmp
+          /tmp/csplendor-wheel-venv/bin/python - <<'PY'
+          from importlib import metadata
+
+          import csplendor
+
+          game = csplendor.Game(seed=42)
+          assert game.legal_action_count == len(game.legal_actions) > 0
+          assert csplendor.__version__ == metadata.version("csplendor")
+          PY
+      - name: Upload package diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-${{ github.run_id }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure native tests
+        run: >-
+          cmake -S . -B build/native
+          -DCMAKE_BUILD_TYPE=Release
+          -DCSPLENDOR_BUILD_PYTHON_MODULE=OFF
+          -DCSPLENDOR_BUILD_NATIVE_TESTS=ON
+          -DCSPLENDOR_SANITIZER=none
+      - name: Build native tests
+        run: cmake --build build/native --parallel 2
+      - name: Run native tests
+        run: ctest --test-dir build/native --output-on-failure
+
+  strict-bindings:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install binding build dependency
+        run: python -m pip install "pybind11>=2.10"
+      - name: Configure strict binding build
+        run: >-
+          cmake -S . -B build/strict-bindings
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_CXX_FLAGS="-Wall -Wextra -Wpedantic -Werror"
+          -DCSPLENDOR_BUILD_PYTHON_MODULE=ON
+          -DCSPLENDOR_BUILD_NATIVE_TESTS=OFF
+          -Dpybind11_DIR="$(python -m pybind11 --cmakedir)"
+      - name: Build bindings without warnings
+        run: cmake --build build/strict-bindings --parallel 2
+
+  sanitizer:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [thread, address-undefined]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record sanitizer metadata
+        run: |
+          mkdir -p artifacts
+          {
+            echo "revision=${GITHUB_SHA}"
+            uname -a
+            clang++ --version
+            cmake --version
+          } | tee artifacts/sanitizer-metadata.txt
+      - name: Configure instrumented native tests
+        run: >-
+          cmake -S . -B build/${{ matrix.sanitizer }}
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCMAKE_CXX_COMPILER=clang++
+          -DCSPLENDOR_BUILD_PYTHON_MODULE=OFF
+          -DCSPLENDOR_BUILD_NATIVE_TESTS=ON
+          -DCSPLENDOR_SANITIZER=${{ matrix.sanitizer }}
+      - name: Build instrumented native tests
+        run: cmake --build build/${{ matrix.sanitizer }} --parallel 2
+      - name: ThreadSanitizer tests
+        if: matrix.sanitizer == 'thread'
+        env:
+          TSAN_OPTIONS: halt_on_error=1:history_size=7:exitcode=66
+        run: |
+          ctest --test-dir build/thread -L tsan \
+            --output-on-failure --no-tests=error -j1 2>&1 \
+            | tee artifacts/thread-ctest.log
+      - name: Address/UndefinedBehaviorSanitizer tests
+        if: matrix.sanitizer == 'address-undefined'
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_init_order=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          ctest --test-dir build/address-undefined \
+            --output-on-failure -j1 2>&1 \
+            | tee artifacts/address-undefined-ctest.log
+      - name: Upload sanitizer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanitizer-${{ matrix.sanitizer }}-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+  nightly-native-soak:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record nightly metadata
+        run: |
+          mkdir -p artifacts
+          {
+            echo "revision=${GITHUB_SHA}"
+            echo "plan=4 native tests x 25 repetitions (approximately 100 test executions)"
+            uname -a
+            c++ --version
+            cmake --version
+          } | tee artifacts/nightly-metadata.txt
+      - name: Configure native soak tests
+        run: >-
+          cmake -S . -B build/nightly
+          -DCMAKE_BUILD_TYPE=Release
+          -DCSPLENDOR_BUILD_PYTHON_MODULE=OFF
+          -DCSPLENDOR_BUILD_NATIVE_TESTS=ON
+          -DCSPLENDOR_SANITIZER=none
+      - name: Build native soak tests
+        run: cmake --build build/nightly --parallel 2
+      - name: Run repeated native stress/replay suite
+        run: |
+          ctest --test-dir build/nightly --output-on-failure -j1 \
+            --repeat until-fail:25 2>&1 | tee artifacts/nightly-ctest.log
+      - name: Upload nightly diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-native-soak-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
