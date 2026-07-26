@@ -407,6 +407,15 @@ public:
     return h;
   }
 
+  // Observable rule-position identity for repetition detection.  The regular
+  // observable hash intentionally includes the monotonic turn counter for
+  // MCTS tree identity; repetition logic must not treat that metadata as a
+  // material position change.
+  uint64_t observable_repetition_hash(uint8_t observer) const {
+    const auto &z = Zobrist::get_instance();
+    return observable_hash(observer) ^ z.turn[turn];
+  }
+
   void randomize_hidden_information(uint8_t observer_player, uint64_t seed) {
     std::mt19937 rng(seed);
     randomize_hidden_information_impl(

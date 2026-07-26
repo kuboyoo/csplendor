@@ -26,6 +26,16 @@ The main class for controlling game state.
 - `undo() -> bool`: Reverts the last action.
 - `is_legal(action: Action) -> bool`: Checks if an action is legal.
 - `is_game_over() -> bool`: Returns True if the game has ended.
+- `serialize_snapshot() -> bytes`: Serializes the current board, hidden state,
+  deck order, and phase without undo history.
+- `Game.deserialize_snapshot(snapshot: bytes) -> Game`: Restores a versioned
+  lightweight snapshot after validating its rules fingerprint and checksum.
+- `Game.snapshot_format_version() -> int`: Returns the binary layout version.
+- `Game.snapshot_rules_version() -> int`: Returns the rule-transition version.
+
+Snapshots contain authoritative hidden information. An imperfect-information
+search must determinize the restored game for its root observer before use.
+See [Versioned Game Snapshot](game_snapshot.md).
 
 ---
 

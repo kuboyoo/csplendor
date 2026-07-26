@@ -27,6 +27,16 @@ struct Action {
   // For noble choice (if multiple are eligible)
   int8_t noble_choice = -1; // ID of the noble chosen
 
+  bool is_token_noop() const {
+    if (type != TAKE_DIFFERENT && type != TAKE_SAME)
+      return false;
+    for (int color = 0; color < 5; ++color) {
+      if (take[color] != return_gems[color])
+        return false;
+    }
+    return return_gems[GOLD] == 0;
+  }
+
   uint64_t pack() const {
     uint64_t code = static_cast<uint64_t>(type) & 0x7ULL;
 
