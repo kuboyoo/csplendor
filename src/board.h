@@ -416,6 +416,26 @@ public:
     return observable_hash(observer) ^ z.turn[turn];
   }
 
+  std::vector<uint8_t> observable_card_pool(uint8_t observer,
+                                            int level) const {
+    if (observer >= NUM_PLAYERS)
+      throw std::invalid_argument("observer must identify a player");
+    if (level < 1 || level > 3)
+      throw std::invalid_argument("card level must be in [1, 3]");
+
+    const auto &deck = decks[level - 1];
+    std::vector<uint8_t> result(deck.begin(), deck.end());
+    const PlayerState &opponent = players[1 - observer];
+    for (int slot = 0; slot < MAX_RESERVED; ++slot) {
+      const int card_id = opponent.reserved[slot];
+      if (opponent.reserved_is_hidden[slot] && is_valid_card_id(card_id) &&
+          get_card(card_id).level == level)
+        result.push_back(static_cast<uint8_t>(card_id));
+    }
+    std::sort(result.begin(), result.end());
+    return result;
+  }
+
   void randomize_hidden_information(uint8_t observer_player, uint64_t seed) {
     std::mt19937 rng(seed);
     randomize_hidden_information_impl(

@@ -659,6 +659,9 @@ PYBIND11_MODULE(_csplendor, m) {
       .def("observable_repetition_hash", &Board::observable_repetition_hash,
            py::arg("observer"),
            "Observable position hash that ignores the monotonic turn counter")
+      .def("observable_card_pool", &Board::observable_card_pool,
+           py::arg("observer"), py::arg("level"),
+           "Return the sorted observer-safe unknown pool for one tier")
       .def("randomize_hidden_information", &Board::randomize_hidden_information,
            py::arg("observer_player"), py::arg("seed"))
       .def("print_board", [](const Board &b) { cli::print_board(b); })
@@ -919,7 +922,19 @@ PYBIND11_MODULE(_csplendor, m) {
             return std::vector<float>(features.begin(), features.end());
           },
           py::arg("game"), py::arg("player"), py::arg("observer") = -1,
-          "Encode game state with player perspective swap");
+          "Encode game state with player perspective swap")
+      .def_static(
+          "encode_public_card_statistics",
+          [](const Game &game, int player, uint8_t observer) {
+            auto features = StateEncoder::encode_public_card_statistics(
+                game, player, observer);
+            return std::vector<float>(features.begin(), features.end());
+          },
+          py::arg("game"), py::arg("player"), py::arg("observer"),
+          "Encode observer-safe posterior statistics for future card reveals")
+      .def_static(
+          "public_card_feature_size",
+          []() { return PUBLIC_CARD_FEATURE_SIZE; });
 
   // ActionEncoderCpp bindings (native C++ implementation)
   py::class_<ActionEncoderCpp>(m, "ActionEncoderCpp")

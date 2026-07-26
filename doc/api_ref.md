@@ -37,6 +37,22 @@ Snapshots contain authoritative hidden information. An imperfect-information
 search must determinize the restored game for its root observer before use.
 See [Versioned Game Snapshot](game_snapshot.md).
 
+### Public card probability API
+
+- `Board.observable_card_pool(observer, level) -> list[int]`: Returns the
+  observer-safe union of the physical deck and the opponent's hidden
+  reservations for one tier.
+- `StateEncoder.encode_public_card_statistics(game, player, observer) ->
+  list[float]`: Calculates native posterior summaries including the next-one
+  and next-three reveal reachability probabilities.
+- `StateEncoder.public_card_feature_size() -> int`: Returns the fixed feature
+  length.
+
+The observer argument is mandatory; no full-information physical-deck list is
+exposed by this API. The observable pool is invariant under
+observer-perspective determinization, and the hidden reservation identity is
+never exposed separately.
+
 ---
 
 ## `csplendor.Action`
