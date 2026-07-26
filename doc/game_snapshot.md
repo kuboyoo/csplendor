@@ -35,4 +35,3 @@ rule transitionの意味を変更する場合は`GAME_SNAPSHOT_RULES_VERSION`を
 snapshotはauthoritativeな完全情報であり、山札順と相手の非公開予約も含む。
 不完全情報ゲームのMCTSで直接読むと情報漏洩になるため、root observer視点の
 determinizationを必ず適用する。
-
