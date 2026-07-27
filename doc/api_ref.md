@@ -26,6 +26,32 @@ The main class for controlling game state.
 - `undo() -> bool`: Reverts the last action.
 - `is_legal(action: Action) -> bool`: Checks if an action is legal.
 - `is_game_over() -> bool`: Returns True if the game has ended.
+- `serialize_snapshot() -> bytes`: Serializes the current board, hidden state,
+  deck order, and phase without undo history.
+- `Game.deserialize_snapshot(snapshot: bytes) -> Game`: Restores a versioned
+  lightweight snapshot after validating its rules fingerprint and checksum.
+- `Game.snapshot_format_version() -> int`: Returns the binary layout version.
+- `Game.snapshot_rules_version() -> int`: Returns the rule-transition version.
+
+Snapshots contain authoritative hidden information. An imperfect-information
+search must determinize the restored game for its root observer before use.
+See [Versioned Game Snapshot](game_snapshot.md).
+
+### Public card probability API
+
+- `Board.observable_card_pool(observer, level) -> list[int]`: Returns the
+  observer-safe union of the physical deck and the opponent's hidden
+  reservations for one tier.
+- `StateEncoder.encode_public_card_statistics(game, player, observer) ->
+  list[float]`: Calculates native posterior summaries including the next-one
+  and next-three reveal reachability probabilities.
+- `StateEncoder.public_card_feature_size() -> int`: Returns the fixed feature
+  length.
+
+The observer argument is mandatory; no full-information physical-deck list is
+exposed by this API. The observable pool is invariant under
+observer-perspective determinization, and the hidden reservation identity is
+never exposed separately.
 
 ---
 

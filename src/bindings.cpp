@@ -6,6 +6,7 @@
 #include "card_data.h"
 #include "cli_utils.h"
 #include "game.h"
+#include "game_snapshot.h"
 #include "mcts.h"
 #include "mcts_parallel_searcher.h"
 #include "mcts_root_parallel.h"
@@ -482,6 +483,8 @@ PYBIND11_MODULE(_csplendor, m) {
       .def_readwrite("gold_as", &Action::gold_as)
       .def_readwrite("return_gems", &Action::return_gems)
       .def_readwrite("noble_choice", &Action::noble_choice)
+      .def("is_token_noop", &Action::is_token_noop,
+           "Whether a token-taking action returns exactly the tokens it takes")
       .def("pack", &Action::pack, "Pack action into a compact uint64 code")
       .def_static("unpack", &Action::unpack, py::arg("code"),
                   "Unpack a compact uint64 action code")
@@ -653,6 +656,12 @@ PYBIND11_MODULE(_csplendor, m) {
       .def("hash", &Board::hash)
       .def("observable_hash", &Board::observable_hash, py::arg("observer"),
            "Hash based only on information visible to observer player")
+      .def("observable_repetition_hash", &Board::observable_repetition_hash,
+           py::arg("observer"),
+           "Observable position hash that ignores the monotonic turn counter")
+      .def("observable_card_pool", &Board::observable_card_pool,
+           py::arg("observer"), py::arg("level"),
+           "Return the sorted observer-safe unknown pool for one tier")
       .def("randomize_hidden_information", &Board::randomize_hidden_information,
            py::arg("observer_player"), py::arg("seed"))
       .def("print_board", [](const Board &b) { cli::print_board(b); })
@@ -662,6 +671,28 @@ PYBIND11_MODULE(_csplendor, m) {
       .def(py::init<uint64_t>(), py::arg("seed") = 0)
       .def("clone", &Game::clone)
       .def("clone_light", &Game::clone_light)
+      .def(
+          "serialize_snapshot",
+          [](const Game &game) {
+            return py::bytes(csplendor::snapshot::serialize(game));
+          },
+          "Serialize the current lightweight game state without undo history")
+      .def_static(
+          "deserialize_snapshot",
+          [](py::bytes snapshot) {
+            return csplendor::snapshot::deserialize(
+                snapshot.cast<std::string>());
+          },
+          py::arg("snapshot"),
+          "Restore a versioned lightweight game-state snapshot")
+      .def_static(
+          "snapshot_format_version",
+          []() {
+            return csplendor::snapshot::GAME_SNAPSHOT_FORMAT_VERSION;
+          })
+      .def_static(
+          "snapshot_rules_version",
+          []() { return csplendor::snapshot::GAME_SNAPSHOT_RULES_VERSION; })
       .def("shuffled_clone", &Game::shuffled_clone, py::arg("observer_player"),
            py::arg("seed"),
            "Create a clone with hidden information randomized from observer's "
@@ -891,7 +922,19 @@ PYBIND11_MODULE(_csplendor, m) {
             return std::vector<float>(features.begin(), features.end());
           },
           py::arg("game"), py::arg("player"), py::arg("observer") = -1,
-          "Encode game state with player perspective swap");
+          "Encode game state with player perspective swap")
+      .def_static(
+          "encode_public_card_statistics",
+          [](const Game &game, int player, uint8_t observer) {
+            auto features = StateEncoder::encode_public_card_statistics(
+                game, player, observer);
+            return std::vector<float>(features.begin(), features.end());
+          },
+          py::arg("game"), py::arg("player"), py::arg("observer"),
+          "Encode observer-safe posterior statistics for future card reveals")
+      .def_static(
+          "public_card_feature_size",
+          []() { return PUBLIC_CARD_FEATURE_SIZE; });
 
   // ActionEncoderCpp bindings (native C++ implementation)
   py::class_<ActionEncoderCpp>(m, "ActionEncoderCpp")

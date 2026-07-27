@@ -13,6 +13,9 @@ static constexpr size_t CARD_FEATURE_SIZE = 8;   // points, cost[5], bonus, leve
 static constexpr size_t NOBLE_FEATURE_SIZE = 6;  // points, requirement[5]
 static constexpr size_t PLAYER_FEATURE_SIZE = 36; // gems(6) + bonuses(5) + points(1) + reserved(3*8)
 static constexpr size_t TOTAL_FEATURES = 196;    // 6 + 36 + 36 + 96 + 3 + 18 + 1
+static constexpr size_t PUBLIC_CARD_LEVEL_FEATURE_SIZE = 39;
+static constexpr size_t PUBLIC_CARD_FEATURE_SIZE =
+    3 * PUBLIC_CARD_LEVEL_FEATURE_SIZE;
 
 /**
  * C++ implementation of StateFeaturizer for encoding game state.
@@ -143,7 +146,147 @@ public:
     return features;
   }
 
+  /**
+   * Encode observer-safe posterior summaries for future card reveals.
+   *
+   * The unknown pool for a tier is the physical deck plus the opponent's
+   * hidden reservations in that tier. Their allocation is private, but the
+   * union is derivable from public card history and is determinization-stable.
+   *
+   * Each tier contributes:
+   *   pool/hidden/deck fractions (3), bonus probabilities (5),
+   *   point probabilities 0..5 (6), expected printed costs (5), and,
+   *   for the perspective player then the opponent, probabilities that the
+   *   next one/three reveals have payment distance <= 0..3 plus expected
+   *   distance and point efficiency (10 each).
+   */
+  static std::array<float, PUBLIC_CARD_FEATURE_SIZE>
+  encode_public_card_statistics(const Game &game, int player,
+                                uint8_t observer) {
+    if (player < 0 || player >= Board::NUM_PLAYERS)
+      throw std::invalid_argument("player must identify a player");
+    if (observer >= Board::NUM_PLAYERS)
+      throw std::invalid_argument("observer must identify a player");
+
+    constexpr std::array<int, 3> LEVEL_CARD_COUNTS = {40, 30, 20};
+    std::array<float, PUBLIC_CARD_FEATURE_SIZE> features = {0.0f};
+    size_t feature_index = 0;
+
+    for (int level_index = 0; level_index < 3; ++level_index) {
+      const auto &deck = game.board.decks[level_index];
+      const auto pool =
+          game.board.observable_card_pool(observer, level_index + 1);
+      const size_t pool_size = pool.size();
+      const size_t hidden_count = pool_size - deck.size();
+
+      const float denominator =
+          pool_size == 0 ? 1.0f : static_cast<float>(pool_size);
+      const float level_count =
+          static_cast<float>(LEVEL_CARD_COUNTS[level_index]);
+      features[feature_index++] = static_cast<float>(pool_size) / level_count;
+      features[feature_index++] =
+          static_cast<float>(hidden_count) / Board::MAX_RESERVED;
+      features[feature_index++] =
+          static_cast<float>(deck.size()) / level_count;
+
+      std::array<int, 5> bonus_counts = {0};
+      std::array<int, 6> point_counts = {0};
+      std::array<int, 5> cost_sums = {0};
+      for (size_t index = 0; index < pool_size; ++index) {
+        const Card &card = get_card(pool[index]);
+        if (card.bonus < bonus_counts.size())
+          ++bonus_counts[card.bonus];
+        const int point_bucket = std::min(5, static_cast<int>(card.points));
+        ++point_counts[point_bucket];
+        for (int color = 0; color < 5; ++color)
+          cost_sums[color] += card.cost[color];
+      }
+      for (int count : bonus_counts)
+        features[feature_index++] = static_cast<float>(count) / denominator;
+      for (int count : point_counts)
+        features[feature_index++] = static_cast<float>(count) / denominator;
+      for (int sum : cost_sums)
+        features[feature_index++] =
+            static_cast<float>(sum) / (denominator * 7.0f);
+
+      for (int offset = 0; offset < Board::NUM_PLAYERS; ++offset) {
+        const PlayerState &target_player =
+            game.board.players[offset == 0 ? player : 1 - player];
+        std::array<int, 4> reachable_counts = {0};
+        float distance_sum = 0.0f;
+        float efficiency_sum = 0.0f;
+
+        for (size_t index = 0; index < pool_size; ++index) {
+          const Card &card = get_card(pool[index]);
+          int colored_shortfall = 0;
+          int effective_cost = 0;
+          for (int color = 0; color < 5; ++color) {
+            const int discounted =
+                std::max(0, static_cast<int>(card.cost[color]) -
+                                static_cast<int>(target_player.bonuses[color]));
+            effective_cost += discounted;
+            colored_shortfall +=
+                std::max(0, discounted -
+                                static_cast<int>(target_player.gems[color]));
+          }
+          const int distance =
+              std::max(0, colored_shortfall -
+                              static_cast<int>(target_player.gems[GOLD]));
+          distance_sum += static_cast<float>(distance);
+          const float efficiency =
+              effective_cost == 0
+                  ? static_cast<float>(card.points)
+                  : static_cast<float>(card.points) / effective_cost;
+          efficiency_sum += std::min(5.0f, efficiency);
+          for (int threshold = 0; threshold <= 3; ++threshold) {
+            if (distance <= threshold)
+              ++reachable_counts[threshold];
+          }
+        }
+
+        const int reveal_count =
+            std::min(3, static_cast<int>(deck.size()));
+        for (int threshold = 0; threshold <= 3; ++threshold) {
+          features[feature_index++] =
+              static_cast<float>(reachable_counts[threshold]) / denominator;
+        }
+        for (int threshold = 0; threshold <= 3; ++threshold) {
+          features[feature_index++] =
+              probability_at_least_one(pool_size,
+                                       reachable_counts[threshold],
+                                       reveal_count);
+        }
+        features[feature_index++] =
+            distance_sum / (denominator * 15.0f);
+        features[feature_index++] =
+            efficiency_sum / (denominator * 5.0f);
+      }
+    }
+
+    if (feature_index != features.size())
+      throw std::logic_error("public card feature size mismatch");
+    return features;
+  }
+
 private:
+  static float probability_at_least_one(size_t population, size_t successes,
+                                        int draws) {
+    if (population == 0 || successes == 0 || draws <= 0)
+      return 0.0f;
+    if (successes >= population)
+      return 1.0f;
+    draws = std::min(draws, static_cast<int>(population));
+    double none = 1.0;
+    for (int draw = 0; draw < draws; ++draw) {
+      const size_t failures = population - successes;
+      if (static_cast<size_t>(draw) >= failures)
+        return 1.0f;
+      none *= static_cast<double>(failures - draw) /
+              static_cast<double>(population - draw);
+    }
+    return static_cast<float>(1.0 - none);
+  }
+
   static void encode_card(int8_t card_id, std::array<float, TOTAL_FEATURES> &features,
                           size_t &idx) {
     if (card_id == -1) {

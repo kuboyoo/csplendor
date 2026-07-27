@@ -223,6 +223,25 @@ def test_observable_hash_uses_all_public_state_but_not_deck_order():
     assert game.board.observable_hash(observer) == before
 
 
+def test_observable_repetition_hash_ignores_only_the_turn_counter():
+    game = Game(seed=11)
+    observer = 0
+    observable_before = game.board.observable_hash(observer)
+    repetition_before = game.board.observable_repetition_hash(observer)
+
+    game.board.turn = 7
+
+    assert game.board.observable_hash(observer) != observable_before
+    assert game.board.observable_repetition_hash(observer) == repetition_before
+
+    player = game.board.get_player(0)
+    player.points = 1
+    player.purchased_count = 1
+    game.board.set_player(0, player)
+
+    assert game.board.observable_repetition_hash(observer) != repetition_before
+
+
 def test_mcts_defaults_to_public_information_determinization():
     assert MCTSConfig().use_determinization is True
 

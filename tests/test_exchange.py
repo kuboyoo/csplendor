@@ -229,6 +229,34 @@ def test_depleted_bank_no_gold_reserve_has_no_return():
     assert checked_actions > 0
 
 
+def test_token_noop_classification_does_not_match_real_exchanges():
+    game = setup_game_with_gems([2, 2, 2, 2, 2, 0])
+    takes = [
+        action
+        for action in game.legal_actions
+        if action.type in (ActionType.TAKE_DIFFERENT, ActionType.TAKE_SAME)
+    ]
+    noops = [action for action in takes if action.is_token_noop()]
+    exchanges = [
+        action
+        for action in takes
+        if sum(action.return_gems) > 0 and not action.is_token_noop()
+    ]
+
+    assert noops
+    assert exchanges
+    assert all(
+        tuple(int(value) for value in action.take)
+        == tuple(int(value) for value in action.return_gems[:5])
+        for action in noops
+    )
+    assert all(
+        tuple(int(value) for value in action.take)
+        != tuple(int(value) for value in action.return_gems[:5])
+        for action in exchanges
+    )
+
+
 @pytest.mark.parametrize("encoder", [ActionEncoderV2, ActionEncoderV3])
 @pytest.mark.parametrize(
     "gems",
