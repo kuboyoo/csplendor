@@ -29,7 +29,7 @@ jobs:
         run: python -m compileall -q csplendor
       - name: Lint Python
         run: |
-          python -m ruff check --target-version py38 --extend-select W,I csplendor tests
+          python -m ruff check --target-version py38 --select E4,E7,E9,F,W,I csplendor tests
           python -m ruff check --target-version py38 --select S csplendor
       - name: Test
         if: matrix.python-version != '3.12'
