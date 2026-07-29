@@ -124,6 +124,65 @@ make -j
 cp _csplendor.*.so ../csplendor/
 ```
 
+### macOS Apple SiliconのCPUターゲット
+
+`CSPLENDOR_CPU_TARGET`で、配布用とローカル最適化用を同じソースから
+分けてビルドできます。
+
+- `portable`（既定）: CPU固有フラグを追加しません。汎用arm64 wheelなどの
+  配布物には必ずこちらを使用します。
+- `native`: Apple SiliconのローカルCPUに合わせて`-mcpu=native`を使用します。
+  M4 Pro上ではM4向けコードになります。
+
+Pythonビルドのarchitectureは`CSPLENDOR_OSX_ARCHITECTURES`へ`arm64`、
+`x86_64`、`universal2`のいずれかを指定できます。`ARCHFLAGS`などと競合する
+指定はエラーになります。通常wheelでは選択したarchitectureとplatform tagも
+照合するため、クロスビルドには一致するPythonまたは`_PYTHON_HOST_PLATFORM`が
+必要です。
+
+Python拡張のビルド例:
+
+```bash
+# 配布用の汎用arm64 wheel
+MACOSX_DEPLOYMENT_TARGET=11.0 \
+  CSPLENDOR_OSX_ARCHITECTURES=arm64 \
+  CSPLENDOR_CPU_TARGET=portable \
+  python -m pip wheel . --wheel-dir dist/arm64
+
+# このMac用のローカル最適化版
+CSPLENDOR_OSX_ARCHITECTURES=arm64 \
+  CSPLENDOR_CPU_TARGET=native \
+  python -m pip install -e .
+```
+
+CMakeを直接使う場合は、異なるbuild directoryを指定します。
+
+```bash
+cmake -S . -B build/macos-arm64-portable \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+  -DCSPLENDOR_CPU_TARGET=portable
+cmake --build build/macos-arm64-portable --parallel 2
+
+cmake -S . -B build/macos-m4-native \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DCSPLENDOR_CPU_TARGET=native
+cmake --build build/macos-m4-native --parallel 2
+```
+
+`native`はeditable installまたはCMake直接ビルド専用です。通常wheelと同じ互換性tag
+ではM4専用であることを表現できないため、native wheelの作成はエラーになります。
+また、以前のprofileのバイナリを混入させないため、wheelの`--skip-build`も
+使用できません。
+例ではApple Siliconの最小OSであるmacOS 11.0をdeployment targetにしています。
+サポート方針に応じて、これより新しい値へ変更できます。環境変数を省略したPython
+ビルドでは、そのPython自身のdeployment targetをCMakeへ引き継ぎます。
+wheelの互換性tagはビルドに使うPython自身の下限にも制約されるため、リリース時は
+Mach-Oのminimum OSとwheel tagの両方を確認してください。
+Rosetta、universal2、非Apple環境では`native`を使用できません。
+
 ## 基本的な使い方 (Python)
 
 ```python
@@ -289,6 +348,6 @@ python -m pytest -m performance
 - **強制パス**: 通常手がない場合だけ `Game.legal_actions` は
   `ActionType.PASS` を1件返します。48枠MCTS policyには強制手の枠を増やさず、
   その局面をroot探索する前に `Game.apply_forced_pass()` を呼びます。
-- **seedの移植性**: `Game(seed)` は同じC++標準library実装内では再現可能ですが、
-  初期配置/deck shuffleがlibstdc++・libc++・MSVC間で一致することは保証しません。
-  native並列MCTSは別途version管理されたportable RNG契約を使います。
+- **seedの移植性**: `Game(seed)` の初期配置/deck shuffleはrepository管理の
+  portable shuffleを使い、libstdc++・libc++・MSVC間で同じ結果になります。
+  native並列MCTSも別途version管理されたportable RNG契約を使います。

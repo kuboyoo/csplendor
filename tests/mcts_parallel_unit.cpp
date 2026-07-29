@@ -161,6 +161,27 @@ bool test_portable_rng_golden() {
   if (values != std::array<int, 8>{6, 0, 7, 2, 1, 4, 5, 3})
     return false;
 
+  std::array<int, 8> game_seed_values = {0, 1, 2, 3, 4, 5, 6, 7};
+  std::mt19937 game_seed_rng(123);
+  portable_mt19937_shuffle(game_seed_values.begin(), game_seed_values.end(),
+                           game_seed_rng);
+  if (game_seed_values != std::array<int, 8>{3, 4, 6, 0, 1, 2, 5, 7})
+    return false;
+
+  std::array<int, 9> odd_game_seed_values = {0, 1, 2, 3, 4, 5, 6, 7, 8};
+  std::mt19937 odd_game_seed_rng(123);
+  portable_mt19937_shuffle(odd_game_seed_values.begin(),
+                           odd_game_seed_values.end(), odd_game_seed_rng);
+  if (odd_game_seed_values !=
+          std::array<int, 9>{0, 5, 3, 8, 4, 6, 2, 1, 7} ||
+      odd_game_seed_rng() != 974319580U)
+    return false;
+
+  std::mt19937 rejection_rng(2);
+  if (portable_mt19937_bounded(rejection_rng, 2147483649U) != 397460743U ||
+      rejection_rng() != 111352301U)
+    return false;
+
   TreeKey key{1234, MCTS_TREE_KEY_VERSION, 0, TreeDomain::Observable, 0};
   return derive_search_seed(0, key, 7, SearchRandomDomain::RootDeterminization,
                             9) == 4284427826275011102ULL &&

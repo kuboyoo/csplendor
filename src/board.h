@@ -103,7 +103,7 @@ public:
       decks[CARDS[i].level - 1].push_back(CARDS[i].id);
     }
     for (int i = 0; i < 3; ++i) {
-      std::shuffle(decks[i].begin(), decks[i].end(), rng);
+      portable_mt19937_shuffle(decks[i].begin(), decks[i].end(), rng);
     }
 
     // Visible cards
@@ -122,7 +122,7 @@ public:
     std::array<uint8_t, NOBLE_COUNT> all_nobles;
     for (int i = 0; i < NOBLE_COUNT; ++i)
       all_nobles[i] = i;
-    std::shuffle(all_nobles.begin(), all_nobles.end(), rng);
+    portable_mt19937_shuffle(all_nobles.begin(), all_nobles.end(), rng);
     for (int i = 0; i < NUM_NOBLES; ++i) {
       nobles.push_back(all_nobles[i]);
     }
@@ -440,7 +440,7 @@ public:
     std::mt19937 rng(seed);
     randomize_hidden_information_impl(
         observer_player, [&rng](auto first, auto last) {
-          std::shuffle(first, last, rng);
+          portable_mt19937_shuffle(first, last, rng);
         });
   }
 

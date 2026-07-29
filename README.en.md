@@ -94,6 +94,66 @@ make -j
 cp _csplendor.*.so ../csplendor/
 ```
 
+### macOS Apple Silicon CPU targets
+
+`CSPLENDOR_CPU_TARGET` selects a distributable or locally optimized build from
+the same source tree.
+
+- `portable` (default): adds no CPU-specific flags. Always use this for
+  distributed artifacts such as generic arm64 wheels.
+- `native`: uses `-mcpu=native` for the local Apple Silicon CPU. On an M4 Pro,
+  this produces M4-targeted code.
+
+Set `CSPLENDOR_OSX_ARCHITECTURES` to `arm64`, `x86_64`, or `universal2` to
+select the Python build architecture. Conflicting requests from `ARCHFLAGS`
+and related frontend settings are rejected. Normal wheel builds also require
+the selected architecture to match the platform tag, so cross-builds need a
+matching Python or `_PYTHON_HOST_PLATFORM`.
+
+Python extension examples:
+
+```bash
+# Generic arm64 wheel for distribution
+MACOSX_DEPLOYMENT_TARGET=11.0 \
+  CSPLENDOR_OSX_ARCHITECTURES=arm64 \
+  CSPLENDOR_CPU_TARGET=portable \
+  python -m pip wheel . --wheel-dir dist/arm64
+
+# Locally optimized extension for this Mac
+CSPLENDOR_OSX_ARCHITECTURES=arm64 \
+  CSPLENDOR_CPU_TARGET=native \
+  python -m pip install -e .
+```
+
+Use separate build directories when invoking CMake directly:
+
+```bash
+cmake -S . -B build/macos-arm64-portable \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+  -DCSPLENDOR_CPU_TARGET=portable
+cmake --build build/macos-arm64-portable --parallel 2
+
+cmake -S . -B build/macos-m4-native \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DCSPLENDOR_CPU_TARGET=native
+cmake --build build/macos-m4-native --parallel 2
+```
+
+A `native` build is limited to editable installs or direct CMake builds. A
+normal wheel tag cannot express an M4-only requirement, so native wheel builds
+fail. Wheel builds also reject `--skip-build` so a binary from an earlier CPU
+profile cannot be included. The examples use macOS 11.0, the minimum Apple
+Silicon OS, as the deployment target; raise it to match the supported OS range
+when needed. When the environment variable is omitted, Python builds pass that
+Python installation's deployment target through to CMake. The `native` target
+is rejected under Rosetta, for universal2 builds, and on non-Apple platforms.
+The wheel compatibility tag is also constrained by the build Python's own
+minimum target, so release validation must inspect both the Mach-O minimum OS
+and the wheel tag.
+
 ## Basic Usage (Python)
 
 ```python
@@ -206,7 +266,6 @@ The current recommended encoder is `ActionEncoderV3`. It indexes purchase action
 - **Forced pass**: `Game.legal_actions` returns one `ActionType.PASS` only when
   no ordinary move exists. The 48-slot MCTS policy omits this forced choice;
   call `Game.apply_forced_pass()` before searching such a root.
-- **Seed portability**: a fixed `Game(seed)` is reproducible with the same C++
-  standard-library implementation, but initial/deck shuffles are not promised
-  to match across libstdc++, libc++, and MSVC. Native parallel MCTS uses its
-  separately versioned portable RNG contract.
+- **Seed portability**: `Game(seed)` uses a repository-owned portable shuffle,
+  so initial layouts and deck order match across libstdc++, libc++, and MSVC.
+  Native parallel MCTS uses its separately versioned portable RNG contract.

@@ -1,10 +1,31 @@
 import os
 import platform
+import shutil
 import subprocess
 import sys
+import sysconfig
 
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
+
+try:
+    from setuptools.command.bdist_wheel import bdist_wheel
+except ImportError:
+    from wheel.bdist_wheel import bdist_wheel
+
+SOURCE_ROOT = os.path.abspath(os.path.dirname(__file__))
+if SOURCE_ROOT not in sys.path:
+    sys.path.insert(0, SOURCE_ROOT)
+
+# PEP 517 executes setup.py without guaranteeing that its directory is on
+# sys.path, so the local build helper must be imported after the path fixup.
+from _build_support import (  # noqa: E402
+    cpu_target_from_environment,
+    macos_architectures,
+    macos_deployment_target,
+    validate_macos_wheel_architectures,
+    validate_wheel_build,
+)
 
 
 class CMakeExtension(Extension):
@@ -27,26 +48,65 @@ class CMakeBuild(build_ext):
             self.build_extension(ext)
 
     def build_extension(self, ext):
-        extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
+        ext_fullpath = os.path.abspath(self.get_ext_fullpath(ext.name))
+        extdir = os.path.dirname(ext_fullpath)
+        try:
+            cpu_target = cpu_target_from_environment()
+        except ValueError as error:
+            raise RuntimeError(str(error)) from error
+
         import pybind11
 
+        cfg = "Debug" if self.debug else "Release"
+        architectures = None
+        if platform.system() == "Darwin":
+            try:
+                architectures = macos_architectures(
+                    python_platform=sysconfig.get_platform(),
+                    machine=platform.machine(),
+                )
+            except ValueError as error:
+                raise RuntimeError(str(error)) from error
+            if cpu_target == "native":
+                python_architectures = macos_architectures(
+                    {},
+                    python_platform=sysconfig.get_platform(),
+                    machine=platform.machine(),
+                )
+                if (
+                    architectures != ("arm64",)
+                    or python_architectures != ("arm64",)
+                    or platform.machine().lower() != "arm64"
+                ):
+                    raise RuntimeError(
+                        "CSPLENDOR_CPU_TARGET=native requires a native "
+                        "arm64-only Python build"
+                    )
+
+        architecture_key = (
+            "-".join(architectures) if architectures is not None else "default"
+        )
+        profile_build_temp = os.path.abspath(
+            os.path.join(self.build_temp, cpu_target, architecture_key, cfg.lower())
+        )
+        profile_output_dir = os.path.join(profile_build_temp, "python-output")
+
+        self.announce(f"csplendor CPU target: {cpu_target}", level=2)
         cmake_args = [
-            "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=" + extdir,
+            "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=" + profile_output_dir,
+            "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{}={}".format(
+                cfg.upper(), profile_output_dir
+            ),
             "-DPython_EXECUTABLE=" + sys.executable,
             "-DCSPLENDOR_BUILD_PYTHON_MODULE=ON",
             "-DCSPLENDOR_BUILD_NATIVE_TESTS=OFF",
+            "-DCSPLENDOR_CPU_TARGET=" + cpu_target,
             "-Dpybind11_DIR=" + pybind11.get_cmake_dir(),
         ]
 
-        cfg = "Debug" if self.debug else "Release"
         build_args = ["--config", cfg]
 
         if platform.system() == "Windows":
-            cmake_args += [
-                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{}={}".format(
-                    cfg.upper(), extdir
-                )
-            ]
             if sys.maxsize > 2**32:
                 cmake_args += ["-A", "x64"]
             build_args += ["--", "/m"]
@@ -54,14 +114,66 @@ class CMakeBuild(build_ext):
             cmake_args += ["-DCMAKE_BUILD_TYPE=" + cfg]
             build_args += ["--", "-j2"]
 
-        os.makedirs(self.build_temp, exist_ok=True)
+        if platform.system() == "Darwin":
+            try:
+                deployment_target = macos_deployment_target(
+                    python_target=sysconfig.get_config_var("MACOSX_DEPLOYMENT_TARGET")
+                )
+            except ValueError as error:
+                raise RuntimeError(str(error)) from error
+            if deployment_target is not None:
+                cmake_args += ["-DCMAKE_OSX_DEPLOYMENT_TARGET=" + deployment_target]
+            if architectures is not None:
+                cmake_args += ["-DCMAKE_OSX_ARCHITECTURES=" + ";".join(architectures)]
+
+        os.makedirs(profile_output_dir, exist_ok=True)
+        os.makedirs(profile_build_temp, exist_ok=True)
         subprocess.check_call(
-            ["cmake", ext.sourcedir] + cmake_args, cwd=self.build_temp
+            ["cmake", ext.sourcedir] + cmake_args, cwd=profile_build_temp
         )
-        subprocess.check_call(["cmake", "--build", "."] + build_args, cwd=self.build_temp)
+        subprocess.check_call(
+            ["cmake", "--build", "."] + build_args, cwd=profile_build_temp
+        )
+
+        built_extension = os.path.join(
+            profile_output_dir, os.path.basename(ext_fullpath)
+        )
+        if not os.path.isfile(built_extension):
+            raise RuntimeError(
+                f"CMake did not produce the expected extension: {built_extension}"
+            )
+        os.makedirs(extdir, exist_ok=True)
+        shutil.copy2(built_extension, ext_fullpath)
+
+
+class PortableWheel(bdist_wheel):
+    def run(self):
+        try:
+            cpu_target = cpu_target_from_environment()
+            validate_wheel_build(cpu_target, skip_build=self.skip_build)
+        except ValueError as error:
+            raise RuntimeError(str(error)) from error
+        if platform.system() == "Darwin":
+            self.get_tag()
+        super().run()
+
+    def get_tag(self):
+        tag = super().get_tag()
+        if platform.system() != "Darwin":
+            return tag
+
+        try:
+            architectures = macos_architectures(
+                python_platform=sysconfig.get_platform(),
+                machine=platform.machine(),
+            )
+            validate_macos_wheel_architectures(architectures, tag[2])
+        except ValueError as error:
+            raise RuntimeError(str(error)) from error
+        return tag
 
 
 setup(
     ext_modules=[CMakeExtension("csplendor._csplendor")],
-    cmdclass={"build_ext": CMakeBuild},
+    cmdclass={"build_ext": CMakeBuild, "bdist_wheel": PortableWheel},
 )
