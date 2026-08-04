@@ -187,6 +187,16 @@ inline uint64_t mask_digest(const ActionMask &mask) noexcept {
   return hash;
 }
 
+inline uint64_t mask_digest(ActionMaskBits mask) noexcept {
+  uint64_t hash = 1469598103934665603ULL;
+  for (size_t action = 0; action < MAX_ACTIONS; ++action) {
+    const uint8_t value =
+        mcts_action_mask::contains(mask, action) ? uint8_t{1} : uint8_t{0};
+    hash_integer(hash, value);
+  }
+  return hash;
+}
+
 inline uint64_t ledger_digest(const SearchLedgerSnapshot &ledger) noexcept {
   uint64_t hash = 1469598103934665603ULL;
 #define CSPLENDOR_TRACE_LEDGER(field) hash_integer(hash, ledger.field)

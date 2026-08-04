@@ -7,3 +7,4 @@ include README.en.md
 recursive-include src *.cpp *.h
 recursive-include tests *.cpp *.py CMakeLists.txt
 include scripts/benchmark_mcts_parallel.cpp
+include scripts/benchmark_mcts_optimizations.cpp

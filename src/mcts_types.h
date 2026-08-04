@@ -6,6 +6,9 @@
 #include <cstdint>
 #include <utility>
 #include <vector>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 
 // Public MCTS constants. These remain available through the mcts.h facade.
 static constexpr size_t MAX_ACTIONS = 48; // ActionEncoder.BASE_ACTION_COUNT
@@ -16,9 +19,83 @@ static constexpr size_t MAX_TREE_SIZE = 50000;
 static constexpr size_t PRUNE_THRESHOLD = 40000;
 static constexpr size_t FEATURE_SIZE = 196;
 
+using DenseActionMask = std::array<uint8_t, MAX_ACTIONS>;
+using ActionMaskBits = uint64_t;
+
+namespace mcts_action_mask {
+
+static constexpr ActionMaskBits ALL =
+    (ActionMaskBits{1} << MAX_ACTIONS) - ActionMaskBits{1};
+
+inline constexpr bool contains(ActionMaskBits mask, size_t action) noexcept {
+  return action < MAX_ACTIONS && (mask & (ActionMaskBits{1} << action)) != 0;
+}
+
+inline constexpr ActionMaskBits bit(size_t action) noexcept {
+  return action < MAX_ACTIONS ? ActionMaskBits{1} << action : 0;
+}
+
+inline ActionMaskBits from_dense(const DenseActionMask &mask) noexcept {
+  ActionMaskBits bits = 0;
+  for (size_t action = 0; action < MAX_ACTIONS; ++action) {
+    if (mask[action])
+      bits |= bit(action);
+  }
+  return bits;
+}
+
+inline DenseActionMask to_dense(ActionMaskBits bits) noexcept {
+  DenseActionMask mask{};
+  bits &= ALL;
+  for (size_t action = 0; action < MAX_ACTIONS; ++action)
+    mask[action] = static_cast<uint8_t>((bits >> action) & ActionMaskBits{1});
+  return mask;
+}
+
+inline size_t popcount(ActionMaskBits bits) noexcept {
+#if defined(_MSC_VER) && defined(_M_X64)
+  return static_cast<size_t>(__popcnt64(bits & ALL));
+#elif defined(__GNUC__) || defined(__clang__)
+  return static_cast<size_t>(__builtin_popcountll(bits & ALL));
+#else
+  size_t count = 0;
+  for (bits &= ALL; bits != 0; bits &= bits - 1)
+    ++count;
+  return count;
+#endif
+}
+
+inline size_t pop_lowest(ActionMaskBits &bits) noexcept {
+#if defined(_MSC_VER) && defined(_M_X64)
+  unsigned long action = 0;
+  _BitScanForward64(&action, bits);
+  bits &= bits - 1;
+  return static_cast<size_t>(action);
+#elif defined(__GNUC__) || defined(__clang__)
+  const size_t action = static_cast<size_t>(__builtin_ctzll(bits));
+  bits &= bits - 1;
+  return action;
+#else
+  size_t action = 0;
+  while ((bits & (ActionMaskBits{1} << action)) == 0)
+    ++action;
+  bits &= bits - 1;
+  return action;
+#endif
+}
+
+template <typename Function>
+inline void for_each(ActionMaskBits bits, Function &&function) {
+  bits &= ALL;
+  while (bits != 0)
+    function(pop_lowest(bits));
+}
+
+} // namespace mcts_action_mask
+
 // MCTS Node - stores statistics for a game state
 struct MCTSNode {
-  std::array<uint8_t, MAX_ACTIONS> valid_actions = {0}; // Valid action mask
+  DenseActionMask valid_actions = {0};                  // Valid action mask
   std::array<float, MAX_ACTIONS> prior = {0};           // Policy prior P(s,a)
   std::array<float, MAX_ACTIONS> Q = {0};               // Action value Q(s,a)
   std::array<uint32_t, MAX_ACTIONS> N = {0};            // Visit count N(s,a)
@@ -34,7 +111,7 @@ struct MCTSNode {
 struct LeafRequest {
   uint64_t hash = 0;                              // State hash
   std::array<float, FEATURE_SIZE> features{};      // Encoded board features
-  std::array<uint8_t, MAX_ACTIONS> valid_actions{}; // Valid action mask
+  DenseActionMask valid_actions{};                 // Valid action mask
   int path_index = 0;                             // Index in search path
 };
 

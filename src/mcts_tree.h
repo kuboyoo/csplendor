@@ -413,13 +413,20 @@ public:
     return best_action;
   }
 
-  // Select using the current determinized world's legality while retaining an
-  // unmasked information-set policy.  This serial scaffold is intentionally a
-  // separate overload: PS-5 will combine selection and VL reservation under a
-  // node lock for the parallel tree.
+  // Compatibility boundary for callers that still provide a dense mask.
+  // Native orchestration uses the bitset overload below.
   int select_action_with_virtual_loss_for_world(
       uint64_t hash, const std::array<uint8_t, MAX_ACTIONS> &world_mask,
       bool is_root,
+      const std::array<float, MAX_ACTIONS> *dirichlet_noise = nullptr,
+      int current_sim = 0) {
+    return select_action_with_virtual_loss_for_world_bits(
+        hash, mcts_action_mask::from_dense(world_mask), is_root,
+        dirichlet_noise, current_sim);
+  }
+
+  int select_action_with_virtual_loss_for_world_bits(
+      uint64_t hash, ActionMaskBits world_mask, bool is_root,
       const std::array<float, MAX_ACTIONS> *dirichlet_noise = nullptr,
       int current_sim = 0) {
     reject_if_parallel_active("select from legacy tree");
@@ -429,23 +436,23 @@ public:
 
     MCTSNode &node = node_it->second;
     LegacyNodeAux &aux = node_aux_[hash];
+    world_mask &= mcts_action_mask::ALL;
     float policy_sum = 0.0f;
-    for (size_t action = 0; action < MAX_ACTIONS; ++action) {
-      if (!world_mask[action])
-        continue;
-      aux.availability_union[action] = 1;
-      aux.availability_count[action]++;
+    mcts_action_mask::for_each(world_mask, [&](size_t action) {
+      auto &edge = aux.ensure_edge(action);
+      ++edge.availability_count;
       node.valid_actions[action] = 1;
       const float base =
           aux.has_base_policy ? aux.base_policy[action] : node.prior[action];
       if (std::isfinite(base) && base > 0.0f)
         policy_sum += base;
-    }
+    });
 
     float total_vl = 0.0f;
     constexpr float VL_WEIGHT = 0.3f;
-    for (size_t action = 0; action < MAX_ACTIONS; ++action)
+    mcts_action_mask::for_each(aux.availability_union, [&](size_t action) {
       total_vl += node.virtual_loss[action] * VL_WEIGHT;
+    });
     const float sqrt_total =
         std::sqrt(static_cast<float>(node.total_visits) + total_vl + EPS);
 
@@ -457,15 +464,15 @@ public:
 
     float best_ucb = -1e9f;
     int best_action = -1;
-    int candidate_count = 0;
-    for (uint8_t available : world_mask)
-      candidate_count += available ? 1 : 0;
+    const int candidate_count =
+        static_cast<int>(mcts_action_mask::popcount(world_mask));
     if (candidate_count == 0)
       return -1;
 
-    for (size_t action = 0; action < MAX_ACTIONS; ++action) {
-      if (!world_mask[action] || !aux.availability_union[action])
-        continue;
+    bool forced_choice = false;
+    mcts_action_mask::for_each(world_mask, [&](size_t action) {
+      if (forced_choice)
+        return;
       const float base =
           aux.has_base_policy ? aux.base_policy[action] : node.prior[action];
       float p = (policy_sum > EPS && std::isfinite(base) && base > 0.0f)
@@ -477,11 +484,14 @@ public:
       }
 
       if (config_.forced_playouts && current_sim > 0) {
-        const int threshold = static_cast<int>(
-            std::sqrt(config_.forced_playouts_k * p *
-                      static_cast<float>(aux.availability_count[action])));
-        if (static_cast<int>(node.N[action]) < threshold)
-          return static_cast<int>(action);
+        const int threshold = static_cast<int>(std::sqrt(
+            config_.forced_playouts_k * p *
+            static_cast<float>(aux.edge_for(action).availability_count)));
+        if (static_cast<int>(node.N[action]) < threshold) {
+          best_action = static_cast<int>(action);
+          forced_choice = true;
+          return;
+        }
       }
 
       const float effective_n = static_cast<float>(node.N[action]) +
@@ -500,7 +510,7 @@ public:
         best_ucb = ucb;
         best_action = static_cast<int>(action);
       }
-    }
+    });
     return best_action;
   }
 
@@ -592,10 +602,10 @@ public:
     LegacyNodeAux &aux = node_aux_[hash];
     aux.base_policy = policy;
     aux.has_base_policy = true;
-    for (size_t action = 0; action < MAX_ACTIONS; ++action) {
-      if (valid_actions[action])
-        aux.availability_union[action] = 1;
-    }
+    const ActionMaskBits valid_bits =
+        mcts_action_mask::from_dense(valid_actions);
+    mcts_action_mask::for_each(valid_bits,
+                               [&](size_t action) { aux.ensure_edge(action); });
 
     // Normalize policy over valid actions
     float policy_sum = 0.0f;
@@ -857,11 +867,42 @@ public:
   const MCTSConfig &config() const { return config_; }
 
 private:
+  struct LegacyAvailabilityEdge {
+    uint64_t availability_count = 0;
+    uint8_t action = 0;
+  };
+
   struct LegacyNodeAux {
     std::array<float, MAX_ACTIONS> base_policy{};
-    std::array<uint8_t, MAX_ACTIONS> availability_union{};
-    std::array<uint64_t, MAX_ACTIONS> availability_count{};
+    std::vector<LegacyAvailabilityEdge> edges;
+    ActionMaskBits availability_union = 0;
     bool has_base_policy = false;
+
+    LegacyAvailabilityEdge &ensure_edge(size_t action) {
+      auto iterator = std::lower_bound(
+          edges.begin(), edges.end(), action,
+          [](const LegacyAvailabilityEdge &edge, size_t requested) {
+            return static_cast<size_t>(edge.action) < requested;
+          });
+      if (iterator == edges.end() || iterator->action != action) {
+        LegacyAvailabilityEdge edge;
+        edge.action = static_cast<uint8_t>(action);
+        iterator = edges.insert(iterator, edge);
+      }
+      availability_union |= mcts_action_mask::bit(action);
+      return *iterator;
+    }
+
+    const LegacyAvailabilityEdge &edge_for(size_t action) const {
+      const auto iterator = std::lower_bound(
+          edges.begin(), edges.end(), action,
+          [](const LegacyAvailabilityEdge &edge, size_t requested) {
+            return static_cast<size_t>(edge.action) < requested;
+          });
+      if (iterator == edges.end() || iterator->action != action)
+        throw std::logic_error("legacy compact edge is missing");
+      return *iterator;
+    }
   };
 
   void generate_dirichlet_noise(const MCTSNode &node,
@@ -980,7 +1021,7 @@ inline void MCTS::SearchGuard::finish() {
   MCTS *owner = owner_;
   const uint64_t id = search_id_;
   if (tree_prepared_)
-    owner->parallel_tree(*this).validate_quiescent();
+    owner->parallel_tree(*this).validate_quiescent_for_search();
   owner->finish_parallel_search(id);
   owner_ = nullptr;
   search_id_ = 0;

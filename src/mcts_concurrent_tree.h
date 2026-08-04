@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <exception>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -26,6 +27,14 @@ namespace detail {
 
 struct ConcurrentTreeState;
 
+struct EdgeStats64 {
+  uint64_t N = 0;
+  uint64_t virtual_loss = 0;
+  uint64_t availability_count = 0;
+  double Q = 0.0;
+  uint8_t action = 0;
+};
+
 struct NodeRecord {
   NodeRecord(const TreeKey &node_key, uint64_t node_generation,
              const std::shared_ptr<ConcurrentTreeState> &owner_state)
@@ -33,10 +42,11 @@ struct NodeRecord {
 
   const TreeKey key;
   mutable std::mutex mutex;
-  NodeStats64 stats{};
+  std::vector<EdgeStats64> edges;
   Policy base_policy{};
-  ActionMask information_set_union{};
-  std::array<uint64_t, MAX_ACTIONS> availability_count{};
+  ActionMaskBits information_set_union = 0;
+  Value value{};
+  uint64_t total_visits = 0;
   ExpansionState state = ExpansionState::Unexpanded;
   const uint64_t generation;
   const std::weak_ptr<ConcurrentTreeState> owner;
@@ -73,6 +83,10 @@ struct ConcurrentTreeState {
   std::atomic<uint64_t> access_epoch{0};
   std::atomic<uint64_t> next_reservation_id{1};
   std::atomic<uint64_t> next_pending_id{1};
+  std::atomic<uint64_t> live_reservation_count{0};
+  std::atomic<uint64_t> virtual_loss_count{0};
+  std::atomic<uint64_t> evaluating_node_count{0};
+  std::atomic<uint64_t> pending_evaluation_count{0};
   mutable std::mutex metadata_mutex;
   bool evaluator_bound = false;
   uint64_t evaluator_version = 0;
@@ -107,6 +121,48 @@ inline uint64_t claim_monotonic_id(std::atomic<uint64_t> &next,
                                    std::memory_order_relaxed))
       return observed;
   }
+}
+
+inline auto find_edge(NodeRecord &record, size_t action) {
+  return std::lower_bound(record.edges.begin(), record.edges.end(), action,
+                          [](const EdgeStats64 &edge, size_t requested) {
+                            return static_cast<size_t>(edge.action) < requested;
+                          });
+}
+
+inline auto find_edge(const NodeRecord &record, size_t action) {
+  return std::lower_bound(record.edges.begin(), record.edges.end(), action,
+                          [](const EdgeStats64 &edge, size_t requested) {
+                            return static_cast<size_t>(edge.action) < requested;
+                          });
+}
+
+inline EdgeStats64 &ensure_edge(NodeRecord &record, size_t action) {
+  auto iterator = find_edge(record, action);
+  if (iterator == record.edges.end() || iterator->action != action) {
+    EdgeStats64 edge;
+    edge.action = static_cast<uint8_t>(action);
+    iterator = record.edges.insert(iterator, edge);
+  }
+  record.information_set_union |= mcts_action_mask::bit(action);
+  return *iterator;
+}
+
+inline void ensure_edges(NodeRecord &record, ActionMaskBits mask) {
+  mask &= mcts_action_mask::ALL;
+  const ActionMaskBits missing = mask & ~record.information_set_union;
+  if (missing == 0)
+    return;
+  record.edges.reserve(record.edges.size() +
+                       mcts_action_mask::popcount(missing));
+  mcts_action_mask::for_each(
+      missing, [&](size_t action) { ensure_edge(record, action); });
+}
+
+inline void decrement_nonzero(std::atomic<uint64_t> &counter) noexcept {
+  const uint64_t previous = counter.fetch_sub(1, std::memory_order_relaxed);
+  if (previous == 0)
+    std::terminate();
 }
 
 } // namespace detail
@@ -217,9 +273,12 @@ private:
       throw std::logic_error("invalid reservation");
     const bool valid = detail::with_node_lock(
         tree_, node_, [&](const detail::NodeRecord &record) {
+          const auto edge =
+              detail::find_edge(record, static_cast<size_t>(action_));
           return record.generation == node_generation_ &&
                  record.live_reservations.count(reservation_id_) == 1 &&
-                 record.stats.virtual_loss[static_cast<size_t>(action_)] > 0;
+                 edge != record.edges.end() && edge->action == action_ &&
+                 edge->virtual_loss > 0;
         });
     if (!valid)
       throw std::logic_error("reservation token is not live");
@@ -228,14 +287,16 @@ private:
   void commit_unchecked(double value) noexcept {
     detail::with_node_lock(tree_, node_, [&](detail::NodeRecord &record) {
       const size_t action_index = static_cast<size_t>(action_);
+      auto edge = detail::find_edge(record, action_index);
       record.live_reservations.erase(reservation_id_);
-      --record.stats.virtual_loss[action_index];
-      ++record.stats.N[action_index];
-      ++record.stats.total_visits;
-      const double count = static_cast<double>(record.stats.N[action_index]);
-      record.stats.Q[action_index] +=
-          (value - record.stats.Q[action_index]) / count;
+      --edge->virtual_loss;
+      ++edge->N;
+      ++record.total_visits;
+      const double count = static_cast<double>(edge->N);
+      edge->Q += (value - edge->Q) / count;
     });
+    detail::decrement_nonzero(tree_->virtual_loss_count);
+    detail::decrement_nonzero(tree_->live_reservation_count);
     state_ = ReservationState::Committed;
     if (ledger_) {
       ledger_->virtual_loss_released.fetch_add(1, std::memory_order_relaxed);
@@ -247,12 +308,18 @@ private:
     bool released = false;
     detail::with_node_lock(tree_, node_, [&](detail::NodeRecord &record) {
       const size_t action_index = static_cast<size_t>(action_);
+      auto edge = detail::find_edge(record, action_index);
       const auto erased = record.live_reservations.erase(reservation_id_);
-      if (erased == 1 && record.stats.virtual_loss[action_index] > 0) {
-        --record.stats.virtual_loss[action_index];
+      if (erased == 1 && edge != record.edges.end() &&
+          edge->action == action_index && edge->virtual_loss > 0) {
+        --edge->virtual_loss;
         released = true;
       }
     });
+    if (released) {
+      detail::decrement_nonzero(tree_->virtual_loss_count);
+      detail::decrement_nonzero(tree_->live_reservation_count);
+    }
     state_ = ReservationState::Aborted;
     if (ledger_) {
       if (released) {
@@ -520,6 +587,12 @@ public:
 
   void expand(const NodeHandle &node, const Policy &base_policy,
               const Value &value, const ActionMask &initial_mask) {
+    expand_bits(node, base_policy, value,
+                mcts_action_mask::from_dense(initial_mask));
+  }
+
+  void expand_bits(const NodeHandle &node, const Policy &base_policy,
+                   const Value &value, ActionMaskBits initial_mask) {
     validate_policy(base_policy);
     if (!finite_value(value))
       throw std::invalid_argument("node value must be finite");
@@ -531,10 +604,9 @@ public:
         throw std::logic_error("cannot expand a terminal node");
       if (record.state == ExpansionState::Expanded)
         throw std::logic_error("node has already been expanded");
+      detail::ensure_edges(record, initial_mask);
       record.base_policy = base_policy;
-      record.stats.value = value;
-      for (size_t action = 0; action < MAX_ACTIONS; ++action)
-        record.information_set_union[action] |= initial_mask[action];
+      record.value = value;
       record.state = ExpansionState::Expanded;
     });
   }
@@ -549,11 +621,11 @@ public:
       if (record.state == ExpansionState::Expanded)
         throw std::logic_error("cannot replace an expanded node with terminal");
       if (record.state == ExpansionState::Terminal) {
-        if (record.stats.value != value)
+        if (record.value != value)
           throw std::logic_error("terminal node value is inconsistent");
         return;
       }
-      record.stats.value = value;
+      record.value = value;
       record.state = ExpansionState::Terminal;
     });
   }
@@ -562,12 +634,22 @@ public:
   select_and_reserve(const NodeHandle &node, const ActionMask &world_mask,
                      const SelectionContext &context, uint8_t player,
                      const std::shared_ptr<SearchLedger> &ledger) {
+    return select_and_reserve_bits(node,
+                                   mcts_action_mask::from_dense(world_mask),
+                                   context, player, ledger);
+  }
+
+  std::optional<SelectionReservation>
+  select_and_reserve_bits(const NodeHandle &node, ActionMaskBits world_mask,
+                          const SelectionContext &context, uint8_t player,
+                          const std::shared_ptr<SearchLedger> &ledger) {
     if (!node)
       throw std::invalid_argument("node handle is empty");
     if (player >= NUM_PLAYERS)
       throw std::invalid_argument("reservation player is out of range");
     if (context.tree_generation != generation())
       throw std::logic_error("selection uses a stale tree generation");
+    world_mask &= mcts_action_mask::ALL;
     uint64_t reservation_id = 0;
     int selected_action = -1;
 
@@ -580,37 +662,42 @@ public:
 
       constexpr uint64_t counter_max = std::numeric_limits<uint64_t>::max();
       double policy_sum = 0.0;
-      size_t candidate_count = 0;
-      for (size_t action = 0; action < MAX_ACTIONS; ++action) {
-        if (!world_mask[action])
-          continue;
+      const size_t candidate_count = mcts_action_mask::popcount(world_mask);
+      mcts_action_mask::for_each(world_mask, [&](size_t action) {
         // Validate every candidate before any availability/union mutation.
-        // Folding the preflight into the policy scan keeps the hot selection
-        // path at the same number of full action-array passes.
-        if (record.availability_count[action] == counter_max)
+        const auto edge = detail::find_edge(record, action);
+        if (edge != record.edges.end() && edge->action == action &&
+            edge->availability_count == counter_max)
           throw std::overflow_error(
               "parallel action availability counter is exhausted");
-        ++candidate_count;
         const float prior = record.base_policy[action];
         if (std::isfinite(prior) && prior > 0.0f)
           policy_sum += static_cast<double>(prior);
-      }
+      });
       if (candidate_count == 0)
         return;
 
       constexpr double virtual_loss_weight = 0.3;
       double total_virtual_loss = 0.0;
-      for (uint64_t count : record.stats.virtual_loss)
-        total_virtual_loss += static_cast<double>(count) * virtual_loss_weight;
+      for (const auto &edge : record.edges)
+        total_virtual_loss +=
+            static_cast<double>(edge.virtual_loss) * virtual_loss_weight;
       const double sqrt_total =
-          std::sqrt(static_cast<double>(record.stats.total_visits) +
+          std::sqrt(static_cast<double>(record.total_visits) +
                     total_virtual_loss + static_cast<double>(EPS));
       const double fpu = context.fpu == 0.0 ? 0.0 : -std::abs(context.fpu);
       double best_score = -std::numeric_limits<double>::infinity();
+      bool forced_choice = false;
 
-      for (size_t action = 0; action < MAX_ACTIONS; ++action) {
-        if (!world_mask[action])
-          continue;
+      mcts_action_mask::for_each(world_mask, [&](size_t action) {
+        if (forced_choice)
+          return;
+        const auto edge = detail::find_edge(record, action);
+        const bool has_edge =
+            edge != record.edges.end() && edge->action == action;
+        const uint64_t visits = has_edge ? edge->N : 0;
+        const uint64_t virtual_loss = has_edge ? edge->virtual_loss : 0;
+        const uint64_t availability = has_edge ? edge->availability_count : 0;
         const double raw_prior =
             std::isfinite(record.base_policy[action]) &&
                     record.base_policy[action] > 0.0f
@@ -626,7 +713,7 @@ public:
         }
 
         if (context.forced_playouts) {
-          const uint64_t opportunity = record.availability_count[action] + 1;
+          const uint64_t opportunity = availability + 1;
           const long double radicand = std::max<long double>(
               0.0L, static_cast<long double>(context.forced_playouts_k) *
                         static_cast<long double>(prior) *
@@ -637,26 +724,22 @@ public:
                                      std::numeric_limits<uint64_t>::max())
                   ? std::numeric_limits<uint64_t>::max()
                   : static_cast<uint64_t>(threshold_value);
-          const uint64_t visits = record.stats.N[action];
-          const uint64_t live = record.stats.virtual_loss[action];
-          if (visits < threshold && live < threshold - visits) {
+          if (visits < threshold && virtual_loss < threshold - visits) {
             selected_action = static_cast<int>(action);
-            break;
+            forced_choice = true;
+            return;
           }
         }
 
-        const double live =
-            static_cast<double>(record.stats.virtual_loss[action]);
-        const double effective_n = static_cast<double>(record.stats.N[action]) +
-                                   live * virtual_loss_weight;
+        const double live = static_cast<double>(virtual_loss);
+        const double effective_n =
+            static_cast<double>(visits) + live * virtual_loss_weight;
         double q = fpu;
-        if (record.stats.N[action] > 0) {
+        if (visits > 0) {
           const double penalty = live * virtual_loss_weight * 0.5;
-          q = (record.stats.Q[action] *
-                   static_cast<double>(record.stats.N[action]) -
-               penalty) /
-              (static_cast<double>(record.stats.N[action]) + penalty);
-        } else if (record.stats.virtual_loss[action] > 0) {
+          q = (edge->Q * static_cast<double>(visits) - penalty) /
+              (static_cast<double>(visits) + penalty);
+        } else if (virtual_loss > 0) {
           q = fpu - 0.2;
         }
         const double score =
@@ -665,22 +748,34 @@ public:
           best_score = score;
           selected_action = static_cast<int>(action);
         }
-      }
+      });
 
       if (selected_action >= 0) {
         const size_t action = static_cast<size_t>(selected_action);
-        if (record.stats.virtual_loss[action] == counter_max)
+        const auto selected_edge = detail::find_edge(record, action);
+        const uint64_t selected_virtual_loss =
+            selected_edge != record.edges.end() &&
+                    selected_edge->action == action
+                ? selected_edge->virtual_loss
+                : 0;
+        const uint64_t selected_visits = selected_edge != record.edges.end() &&
+                                                 selected_edge->action == action
+                                             ? selected_edge->N
+                                             : 0;
+        if (selected_virtual_loss == counter_max)
           throw std::overflow_error(
               "parallel action virtual loss counter is exhausted");
-        if (record.stats.N[action] >=
-            counter_max - record.stats.virtual_loss[action])
+        if (selected_visits >= counter_max - selected_virtual_loss)
           throw std::overflow_error(
               "parallel action visit counter is exhausted");
-        const uint64_t remaining_visits =
-            counter_max - record.stats.total_visits;
+        const uint64_t remaining_visits = counter_max - record.total_visits;
         if (record.live_reservations.size() >= remaining_visits)
           throw std::overflow_error("parallel node visit counter is exhausted");
 
+        const ActionMaskBits missing =
+            world_mask & ~record.information_set_union;
+        record.edges.reserve(record.edges.size() +
+                             mcts_action_mask::popcount(missing));
         reservation_id = detail::claim_monotonic_id(
             state_->next_reservation_id,
             "parallel reservation identifier is exhausted");
@@ -690,18 +785,22 @@ public:
           throw std::logic_error("duplicate reservation identifier");
       }
 
-      for (size_t action = 0; action < MAX_ACTIONS; ++action) {
-        if (!world_mask[action])
-          continue;
-        record.information_set_union[action] = 1;
-        ++record.availability_count[action];
+      detail::ensure_edges(record, world_mask);
+      for (auto &edge : record.edges) {
+        if (mcts_action_mask::contains(world_mask, edge.action))
+          ++edge.availability_count;
       }
-      if (selected_action >= 0)
-        ++record.stats.virtual_loss[static_cast<size_t>(selected_action)];
+      if (selected_action >= 0) {
+        auto edge =
+            detail::find_edge(record, static_cast<size_t>(selected_action));
+        ++edge->virtual_loss;
+      }
     });
 
     if (selected_action < 0)
       return std::nullopt;
+    state_->live_reservation_count.fetch_add(1, std::memory_order_relaxed);
+    state_->virtual_loss_count.fetch_add(1, std::memory_order_relaxed);
     if (ledger) {
       ledger->selected.fetch_add(1, std::memory_order_relaxed);
       ledger->virtual_loss_added.fetch_add(1, std::memory_order_relaxed);
@@ -716,8 +815,20 @@ public:
                   const std::array<float, FEATURE_SIZE> &features,
                   const ActionMask &owner_world_mask,
                   const std::shared_ptr<SearchLedger> &ledger) {
+    return claim_or_attach_bits(node, ticket_id, feature_digest, features,
+                                mcts_action_mask::from_dense(owner_world_mask),
+                                ledger);
+  }
+
+  ExpansionClaim
+  claim_or_attach_bits(const NodeHandle &node, uint64_t ticket_id,
+                       uint64_t feature_digest,
+                       const std::array<float, FEATURE_SIZE> &features,
+                       ActionMaskBits owner_world_mask,
+                       const std::shared_ptr<SearchLedger> &ledger) {
     if (!node)
       throw std::invalid_argument("node handle is empty");
+    owner_world_mask &= mcts_action_mask::ALL;
 
     ExpansionClaim result;
     detail::with_node_lock(state_, node, [&](detail::NodeRecord &record) {
@@ -737,7 +848,8 @@ public:
         pending->request.owner_simulation_id = ticket_id;
         pending->request.key = record.key;
         pending->request.features = features;
-        pending->request.owner_world_mask = owner_world_mask;
+        pending->request.owner_world_mask =
+            mcts_action_mask::to_dense(owner_world_mask);
         record.pending = pending;
         record.state = ExpansionState::Evaluating;
         result.kind = ExpansionClaimKind::Owner;
@@ -751,16 +863,18 @@ public:
         break;
       case ExpansionState::Expanded:
         result.kind = ExpansionClaimKind::Expanded;
-        result.cached_value = record.stats.value;
+        result.cached_value = record.value;
         break;
       case ExpansionState::Terminal:
         result.kind = ExpansionClaimKind::Terminal;
-        result.cached_value = record.stats.value;
+        result.cached_value = record.value;
         break;
       }
     });
 
     if (result.kind == ExpansionClaimKind::Owner) {
+      state_->evaluating_node_count.fetch_add(1, std::memory_order_relaxed);
+      state_->pending_evaluation_count.fetch_add(1, std::memory_order_relaxed);
       if (ledger) {
         ledger->evaluation_owner.fetch_add(1, std::memory_order_relaxed);
         ledger->expansion_claimed.fetch_add(1, std::memory_order_relaxed);
@@ -807,11 +921,10 @@ public:
     try {
       detail::with_node_lock(state_, node, [&](detail::NodeRecord &record) {
         require_pending(record, pending);
+        detail::ensure_edges(record, mcts_action_mask::from_dense(
+                                         pending->request.owner_world_mask));
         record.base_policy = base_policy;
-        record.stats.value = value;
-        for (size_t action = 0; action < MAX_ACTIONS; ++action)
-          record.information_set_union[action] |=
-              pending->request.owner_world_mask[action];
+        record.value = value;
         record.pending.reset();
         record.state = ExpansionState::Expanded;
       });
@@ -820,7 +933,9 @@ public:
       throw;
     }
 
+    detail::decrement_nonzero(state_->evaluating_node_count);
     auto tickets = finish_pending(pending, PendingState::Published);
+    detail::decrement_nonzero(state_->pending_evaluation_count);
     if (ledger) {
       ledger->expansion_published.fetch_add(1, std::memory_order_relaxed);
       ledger->evaluation_requested.fetch_add(1, std::memory_order_relaxed);
@@ -843,19 +958,18 @@ public:
   MCTSNodeSnapshot64 snapshot(const NodeHandle &node) const {
     if (!node)
       throw std::invalid_argument("node handle is empty");
+    return detail::with_node_lock(state_, node,
+                                  [&](const detail::NodeRecord &record) {
+                                    return make_snapshot(record);
+                                  });
+  }
+
+  NodeStateView state_view(const NodeHandle &node) const {
+    if (!node)
+      throw std::invalid_argument("node handle is empty");
     return detail::with_node_lock(
         state_, node, [&](const detail::NodeRecord &record) {
-          MCTSNodeSnapshot64 out;
-          out.key = record.key;
-          out.generation = record.generation;
-          out.valid_actions = record.information_set_union;
-          out.base_policy = record.base_policy;
-          out.stats = record.stats;
-          out.availability_count = record.availability_count;
-          out.live_reservation_count = record.live_reservations.size();
-          out.has_pending_evaluation = !record.pending.expired();
-          out.state = record.state;
-          return out;
+          return NodeStateView{record.value, record.state};
         });
   }
 
@@ -877,19 +991,8 @@ public:
       // avoids recursively taking the same mutex through snapshot().
       std::vector<MCTSNodeSnapshot64> result;
       result.reserve(handles.size());
-      for (const auto &node : handles) {
-        MCTSNodeSnapshot64 out;
-        out.key = node->key;
-        out.generation = node->generation;
-        out.valid_actions = node->information_set_union;
-        out.base_policy = node->base_policy;
-        out.stats = node->stats;
-        out.availability_count = node->availability_count;
-        out.live_reservation_count = node->live_reservations.size();
-        out.has_pending_evaluation = !node->pending.expired();
-        out.state = node->state;
-        result.push_back(out);
-      }
+      for (const auto &node : handles)
+        result.push_back(make_snapshot(*node));
       return result;
     }
 
@@ -905,7 +1008,18 @@ public:
     return result;
   }
 
-  void validate_quiescent() const {
+  void validate_quiescent_fast() const {
+    if (state_->virtual_loss_count.load(std::memory_order_acquire) != 0)
+      throw std::logic_error("parallel tree retains virtual loss");
+    if (state_->live_reservation_count.load(std::memory_order_acquire) != 0)
+      throw std::logic_error("parallel tree retains reservation tokens");
+    if (state_->evaluating_node_count.load(std::memory_order_acquire) != 0)
+      throw std::logic_error("parallel tree retains evaluating node");
+    if (state_->pending_evaluation_count.load(std::memory_order_acquire) != 0)
+      throw std::logic_error("parallel tree retains pending evaluation");
+  }
+
+  void validate_quiescent_full() const {
     for (const auto &node : snapshot_all()) {
       const uint64_t total = std::accumulate(node.stats.N.begin(),
                                              node.stats.N.end(), uint64_t{0});
@@ -937,18 +1051,38 @@ public:
               "parallel availability is outside its information-set union");
       }
     }
+    // Also catches outstanding handles removed from the current generation's
+    // node map, which a snapshot-only audit cannot see.
+    validate_quiescent_fast();
+  }
+
+  void validate_quiescent() const { validate_quiescent_full(); }
+
+  void validate_quiescent_for_search() const {
+#if !defined(NDEBUG) || defined(CSPLENDOR_MCTS_FULL_AUDIT)
+    validate_quiescent_full();
+#else
+    validate_quiescent_fast();
+#endif
   }
 
 #ifdef CSPLENDOR_MCTS_TESTING
+  size_t compact_edge_count_for_testing(const NodeHandle &node) const {
+    return detail::with_node_lock(
+        state_, node,
+        [](const detail::NodeRecord &record) { return record.edges.size(); });
+  }
+
   void set_stats_for_testing(const NodeHandle &node, size_t action,
                              uint64_t visits, double q) {
     if (action >= MAX_ACTIONS || !std::isfinite(q))
       throw std::invalid_argument("invalid test statistics");
     detail::with_node_lock(state_, node, [&](detail::NodeRecord &record) {
-      const uint64_t old = record.stats.N[action];
-      record.stats.N[action] = visits;
-      record.stats.total_visits = record.stats.total_visits - old + visits;
-      record.stats.Q[action] = q;
+      auto &edge = detail::ensure_edge(record, action);
+      const uint64_t old = edge.N;
+      edge.N = visits;
+      record.total_visits = record.total_visits - old + visits;
+      edge.Q = q;
     });
   }
 
@@ -960,15 +1094,46 @@ public:
     if (action >= MAX_ACTIONS)
       throw std::invalid_argument("invalid test counter action");
     detail::with_node_lock(state_, node, [&](detail::NodeRecord &record) {
-      record.stats.N[action] = visits;
-      record.stats.total_visits = total_visits;
-      record.stats.virtual_loss[action] = virtual_loss;
-      record.availability_count[action] = availability_count;
+      auto &edge = detail::ensure_edge(record, action);
+      const uint64_t old_virtual_loss = edge.virtual_loss;
+      edge.N = visits;
+      record.total_visits = total_visits;
+      edge.virtual_loss = virtual_loss;
+      edge.availability_count = availability_count;
+      if (virtual_loss > old_virtual_loss) {
+        state_->virtual_loss_count.fetch_add(virtual_loss - old_virtual_loss,
+                                             std::memory_order_relaxed);
+      } else if (old_virtual_loss > virtual_loss) {
+        state_->virtual_loss_count.fetch_sub(old_virtual_loss - virtual_loss,
+                                             std::memory_order_relaxed);
+      }
     });
   }
 #endif
 
 private:
+  static MCTSNodeSnapshot64 make_snapshot(const detail::NodeRecord &record) {
+    MCTSNodeSnapshot64 out;
+    out.key = record.key;
+    out.generation = record.generation;
+    out.valid_actions =
+        mcts_action_mask::to_dense(record.information_set_union);
+    out.base_policy = record.base_policy;
+    out.stats.value = record.value;
+    out.stats.total_visits = record.total_visits;
+    for (const auto &edge : record.edges) {
+      const size_t action = edge.action;
+      out.stats.N[action] = edge.N;
+      out.stats.virtual_loss[action] = edge.virtual_loss;
+      out.stats.Q[action] = edge.Q;
+      out.availability_count[action] = edge.availability_count;
+    }
+    out.live_reservation_count = record.live_reservations.size();
+    out.has_pending_evaluation = !record.pending.expired();
+    out.state = record.state;
+    return out;
+  }
+
   void require_current(const detail::NodeRecord &record) const {
     if (record.generation != generation())
       throw std::logic_error("node belongs to a stale tree generation");
@@ -1013,15 +1178,23 @@ private:
   finish_pending_failure(const NodeHandle &node,
                          const std::shared_ptr<PendingEvaluation> &pending,
                          PendingState state) {
+    bool released_evaluating = false;
     detail::with_node_lock(state_, node, [&](detail::NodeRecord &record) {
       const auto registered = record.pending.lock();
       if (record.state == ExpansionState::Evaluating && registered &&
           registered.get() == pending.get()) {
         record.pending.reset();
         record.state = ExpansionState::Unexpanded;
+        released_evaluating = true;
       }
     });
-    return finish_pending(pending, state);
+    if (released_evaluating) {
+      detail::decrement_nonzero(state_->evaluating_node_count);
+    }
+    auto tickets = finish_pending(pending, state);
+    if (released_evaluating)
+      detail::decrement_nonzero(state_->pending_evaluation_count);
+    return tickets;
   }
 
   std::shared_ptr<detail::ConcurrentTreeState> state_;
