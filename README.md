@@ -35,11 +35,30 @@ countが330,000から981,149回/秒で2.97倍、自己対戦が160,000から740,
 moves/secで4.63倍です。リファクタリング効果の評価には、測定条件を揃えた上表または
 paired A/Bの倍率を用いてください。
 
-NN推論を除いた256 simulationのnative MCTS synthetic searchでは、非決定化が
-70,690から94,427 simulations/sec（1.34倍）、決定化ありが65,001から108,441
-simulations/sec（1.67倍）でした。履歴200・決定化ありのcopy中心microbenchmarkは
-14.7倍ですが、履歴0ではほぼ同速です。実モデル込みの速度向上はNN推論時間の割合に
-依存します。詳細と注意点は[リファクタリング計画の最終計測](https://github.com/kuboyoo/csplendor/blob/main/doc/refactoring_plan/README.md#phase-0--7-%E6%9C%80%E7%B5%82%E6%80%A7%E8%83%BD%E5%86%8D%E8%A8%882026-07-13)を参照してください。
+#### MCTS探索性能
+
+2026-08-04に同じRyzen 9 7900X、GCC 13、portable Release buildで、高速化前の`main`
+（`6ddb47c`）とMCTSホットパス高速化後を同一host・seed・tree size・batch sizeで比較した
+結果です。zero-latency native evaluatorを使い、5標本の中央値を示しています。
+
+| mode/backend | 高速化前`main` | 高速化後 | 高速化 |
+|---|---:|---:|---:|
+| exact legacy 1 thread | 37,487 sim/s | 387,132 sim/s | 10.33倍 |
+| exact sharded 1 thread | 31,773 sim/s | 222,253 sim/s | 7.00倍 |
+| exact sharded 4 threads | 94,819 sim/s | 217,910 sim/s | 2.30倍 |
+| exact sharded 8 threads | 125,095 sim/s | 194,405 sim/s | 1.55倍 |
+| exact root-parallel 8 workers | 286,487 sim/s | 1,418,195 sim/s | 4.95倍 |
+| determinized legacy 1 thread | 56,969 sim/s | 358,261 sim/s | 6.29倍 |
+| determinized sharded 4 threads | 156,161 sim/s | 294,279 sim/s | 1.88倍 |
+| determinized root-parallel 8 workers | 440,313 sim/s | 1,584,560 sim/s | 3.60倍 |
+
+構成要素のmicrobenchmarkでは、48手action maskが624.6 nsから32.7 ns（19.10倍）、
+action decodeが3,240.5 nsから15.4 ns（210.07倍）、dense mask走査が22.0 nsから
+4.7 ns（4.69倍）になりました。40,000 simulationのsharded 8-thread実行では最大RSSが
+159,832 KiBから44,644 KiBへ約72%減少しています。
+
+実モデル込みの速度向上はNN推論時間の割合に依存します。測定方法、O(1)監査、compact
+edgeの詳細は[MCTSホットパス高速化](https://github.com/kuboyoo/csplendor/blob/main/doc/mcts_hotpath_optimizations.md)を参照してください。
 
 ### 実験的な並列MCTS
 

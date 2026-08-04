@@ -35,12 +35,33 @@ Compared numerically with the old README claims, the new values are 1.33x for
 981,149 calls/sec), and 4.63x for self-play (160,000 to 740,538 moves/sec).
 Use the same-condition table or paired A/B ratios to assess the refactoring.
 
-With NN inference excluded, a 256-simulation native synthetic MCTS search
-improved from 70,690 to 94,427 simulations/sec without determinization (1.34x)
-and from 65,001 to 108,441 simulations/sec with determinization (1.67x). A
-copy-focused microbenchmark with history length 200 and determinization is
-14.7x faster, while history-free searches are roughly unchanged. End-to-end
-speedup with a real model depends on the fraction of time spent in inference.
+#### MCTS search performance
+
+Measured on 2026-08-04 on the same Ryzen 9 7900X with GCC 13 and a portable
+Release build. The table compares the pre-optimization `main` (`6ddb47c`) with
+the MCTS hot-path optimizations on the same host, seeds, tree size, and batch
+size. Each result is the median of five samples using a zero-latency native
+evaluator.
+
+| Mode/backend | Pre-optimization `main` | Optimized | Speedup |
+|---|---:|---:|---:|
+| Exact legacy, 1 thread | 37,487 sim/s | 387,132 sim/s | 10.33x |
+| Exact sharded, 1 thread | 31,773 sim/s | 222,253 sim/s | 7.00x |
+| Exact sharded, 4 threads | 94,819 sim/s | 217,910 sim/s | 2.30x |
+| Exact sharded, 8 threads | 125,095 sim/s | 194,405 sim/s | 1.55x |
+| Exact root-parallel, 8 workers | 286,487 sim/s | 1,418,195 sim/s | 4.95x |
+| Determinized legacy, 1 thread | 56,969 sim/s | 358,261 sim/s | 6.29x |
+| Determinized sharded, 4 threads | 156,161 sim/s | 294,279 sim/s | 1.88x |
+| Determinized root-parallel, 8 workers | 440,313 sim/s | 1,584,560 sim/s | 3.60x |
+
+Component microbenchmarks improved the 48-action mask from 624.6 ns to 32.7
+ns (19.10x), action decoding from 3,240.5 ns to 15.4 ns (210.07x), and dense
+mask iteration from 22.0 ns to 4.7 ns (4.69x). Peak RSS for a 40,000-simulation
+sharded eight-thread run fell by about 72%, from 159,832 KiB to 44,644 KiB.
+
+End-to-end speedup with a real model depends on the fraction of time spent in
+NN inference. See [MCTS hot-path optimizations](https://github.com/kuboyoo/csplendor/blob/main/doc/mcts_hotpath_optimizations.md)
+for the methodology and details of the O(1) audit and compact-edge layout.
 
 ### Experimental parallel MCTS
 
