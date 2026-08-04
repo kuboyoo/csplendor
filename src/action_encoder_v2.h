@@ -246,7 +246,7 @@ public:
     case VISIT_NOBLE: {
       for (size_t i = 0; i < board.nobles.size() && i < 3; ++i) {
         if (board.nobles[i] == action.noble_choice) {
-          return OFFSET_VISIT_NOBLE + i;
+          return OFFSET_VISIT_NOBLE + static_cast<int>(i);
         }
       }
       return -1;

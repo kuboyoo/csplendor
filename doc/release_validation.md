@@ -23,7 +23,7 @@
 
 | 区分 | 結果 | 確認内容 |
 |---|---:|---|
-| Python通常test | 435 passed, 4 deselected | performance markerを除くpytest全体、warningをerror化 |
+| Python通常test | 439 passed, 4 deselected | performance markerを除くpytest全体、warningをerror化 |
 | Python性能test | 4 passed | performance markerを明示実行 |
 | Python coverage | 56.15% | 50% gate通過。action space 86%、features 96%、replay 90% |
 | Python lint/security | 成功 | Ruff default/import/whitespace/security rulesをPython 3.8 targetで実行 |
@@ -59,8 +59,10 @@ Pull Requestと`main`へのpushでは、Python 3.12を使って次の構成を�
 
 各構成でeditable install、Python compile、pytest、native CTestを実行します。
 `portable`構成ではwheelも作成し、wheelへ入れ替えた後にimportと合法手生成を
-smoke testします。長時間のnightly soakとは分離し、定期scheduleでは既存のLinux
-x64検証だけを実行します。
+smoke testします。macOSではuniversal2 Pythonをarm64プロセスとして実行する
+editable buildを検証し、配布用arm64 wheelは明示的なplatform tagで別途buildして
+Mach-Oがarm64専用であることを確認します。長時間のnightly soakとは分離し、
+定期scheduleでは既存のLinux x64検証だけを実行します。
 
 ## Packagingで確認した境界
 

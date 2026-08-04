@@ -8,6 +8,7 @@ from _build_support import (
     cpu_target_from_environment,
     macos_architectures,
     macos_deployment_target,
+    validate_macos_native_build,
     validate_macos_wheel_architectures,
     validate_wheel_build,
 )
@@ -83,6 +84,28 @@ def test_macos_architectures_reject_invalid_and_conflicting_requests():
                 "ARCHFLAGS": "-arch x86_64",
             }
         )
+
+
+def test_macos_native_build_accepts_arm64_process_with_arm64_extension():
+    # A universal2 Python can run natively as arm64 and load an arm64-only
+    # local extension. Its distributable wheel tag is validated separately.
+    validate_macos_native_build("native", ("arm64",), "arm64")
+    validate_macos_native_build("portable", ("arm64", "x86_64"), "x86_64")
+
+
+@pytest.mark.parametrize(
+    ("architectures", "machine"),
+    [
+        (("arm64", "x86_64"), "arm64"),
+        (("x86_64",), "arm64"),
+        (("arm64",), "x86_64"),
+    ],
+)
+def test_macos_native_build_rejects_non_arm64_only_execution(
+    architectures, machine
+):
+    with pytest.raises(ValueError, match="arm64 process"):
+        validate_macos_native_build("native", architectures, machine)
 
 
 def test_macos_wheel_architectures_must_match_platform_tag():

@@ -91,7 +91,7 @@ public:
 
   void init(uint64_t seed) {
     reset();
-    std::mt19937 rng(seed);
+    std::mt19937 rng(static_cast<std::mt19937::result_type>(seed));
 
     // Gems
     for (int i = 0; i < 5; ++i)
@@ -437,7 +437,7 @@ public:
   }
 
   void randomize_hidden_information(uint8_t observer_player, uint64_t seed) {
-    std::mt19937 rng(seed);
+    std::mt19937 rng(static_cast<std::mt19937::result_type>(seed));
     randomize_hidden_information_impl(
         observer_player, [&rng](auto first, auto last) {
           portable_mt19937_shuffle(first, last, rng);

@@ -139,12 +139,18 @@ jobs:
         with:
           python-version: "3.12"
           architecture: ${{ matrix.machine == 'amd64' && 'x64' || 'arm64' }}
-      - name: Verify runner architecture
+      - name: Verify runtime architecture
         run: >-
           python -c "import platform;
           actual = platform.machine().lower();
           expected = '${{ matrix.machine }}';
           assert actual == expected, (actual, expected)"
+      - name: Verify universal2 Python on Apple Silicon
+        if: runner.os == 'macOS'
+        run: >-
+          python -c "import sysconfig;
+          python_platform = sysconfig.get_platform().lower();
+          assert python_platform.endswith('universal2'), python_platform"
       - name: Install editable profile
         run: |
           python -m pip install --upgrade pip
@@ -168,8 +174,31 @@ jobs:
           ctest --test-dir build/cross-platform -C Release
           --output-on-failure
       - name: Build portable wheel
-        if: matrix.cpu-target == 'portable'
+        if: matrix.cpu-target == 'portable' && runner.os != 'macOS'
         run: python -m pip wheel . --no-deps --wheel-dir dist/platform
+      - name: Build portable macOS arm64 wheel
+        if: matrix.cpu-target == 'portable' && runner.os == 'macOS'
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+          _PYTHON_HOST_PLATFORM: macosx-11.0-arm64
+        run: python -m pip wheel . --no-deps --wheel-dir dist/platform
+      - name: Verify portable macOS wheel architecture
+        if: matrix.cpu-target == 'portable' && runner.os == 'macOS'
+        run: >-
+          python -c "import glob, pathlib, subprocess, zipfile;
+          wheels = glob.glob('dist/platform/*.whl');
+          assert len(wheels) == 1, wheels;
+          wheel = wheels[0];
+          assert wheel.endswith('macosx_11_0_arm64.whl'), wheel;
+          output = pathlib.Path('build/wheel-inspect');
+          archive = zipfile.ZipFile(wheel);
+          archive.extractall(output);
+          archive.close();
+          extensions = list(output.glob('csplendor/_csplendor*.so'));
+          assert len(extensions) == 1, extensions;
+          architectures = subprocess.check_output(
+          ['lipo', '-archs', str(extensions[0])], text=True).split();
+          assert architectures == ['arm64'], architectures"
       - name: Install portable wheel
         if: matrix.cpu-target == 'portable'
         run: >-

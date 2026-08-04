@@ -133,6 +133,17 @@ def macos_architectures(environment=None, python_platform=None, machine=None):
     return _architectures_from_platform(machine)
 
 
+def validate_macos_native_build(cpu_target, architectures, machine):
+    if cpu_target != "native":
+        return
+
+    if architectures != ("arm64",) or str(machine).strip().lower() != "arm64":
+        raise ValueError(
+            "CSPLENDOR_CPU_TARGET=native requires an arm64 process and "
+            "an arm64-only extension build"
+        )
+
+
 def validate_macos_wheel_architectures(architectures, wheel_platform):
     tagged_architectures = _architectures_from_platform(wheel_platform)
     if tagged_architectures is None:
