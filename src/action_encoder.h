@@ -646,7 +646,7 @@ private:
       for (int color = 0; color < 5; ++color)
         available_count += board.bank[color] > 0 ? 1 : 0;
       if (available_count >= 3) {
-        for (uint8_t color : TAKE_DIFF_COMBINATIONS[index])
+        for (int color : TAKE_DIFF_COMBINATIONS[index])
           action.take[color] = 1;
       } else {
         for (int color = 0; color < 5; ++color)
