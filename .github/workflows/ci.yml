@@ -9,6 +9,9 @@ on:
     - cron: "17 18 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -17,8 +20,8 @@ jobs:
       matrix:
         python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install
@@ -43,8 +46,8 @@ jobs:
   package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Build release artifacts
@@ -75,7 +78,7 @@ jobs:
           PY
       - name: Upload package diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: python-package-${{ github.run_id }}
           path: dist/
@@ -85,7 +88,7 @@ jobs:
   native:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Configure native tests
         run: >-
           cmake -S . -B build/native
@@ -98,6 +101,92 @@ jobs:
       - name: Run native tests
         run: ctest --test-dir build/native --output-on-failure
 
+  cross-platform:
+    if: github.event_name != 'schedule'
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS 15 arm64 portable
+            os: macos-15
+            machine: arm64
+            cpu-target: portable
+            osx-architectures: arm64
+          - name: macOS 15 arm64 native
+            os: macos-15
+            machine: arm64
+            cpu-target: native
+            osx-architectures: arm64
+          - name: Ubuntu 24.04 arm64 portable
+            os: ubuntu-24.04-arm
+            machine: aarch64
+            cpu-target: portable
+            osx-architectures: ''
+          - name: Windows 2025 x64 portable
+            os: windows-2025
+            machine: amd64
+            cpu-target: portable
+            osx-architectures: ''
+    env:
+      CSPLENDOR_CPU_TARGET: ${{ matrix.cpu-target }}
+      CSPLENDOR_OSX_ARCHITECTURES: ${{ matrix.osx-architectures }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          architecture: ${{ matrix.machine == 'amd64' && 'x64' || 'arm64' }}
+      - name: Verify runner architecture
+        run: >-
+          python -c "import platform;
+          actual = platform.machine().lower();
+          expected = '${{ matrix.machine }}';
+          assert actual == expected, (actual, expected)"
+      - name: Install editable profile
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,web]"
+      - name: Compile Python
+        run: python -m compileall -q csplendor
+      - name: Test Python bindings
+        run: python -m pytest -W error
+      - name: Configure native tests
+        run: >-
+          cmake -S . -B build/cross-platform
+          -DCMAKE_BUILD_TYPE=Release
+          -DCSPLENDOR_BUILD_PYTHON_MODULE=OFF
+          -DCSPLENDOR_BUILD_NATIVE_TESTS=ON
+          -DCSPLENDOR_CPU_TARGET=${{ matrix.cpu-target }}
+          -DCSPLENDOR_SANITIZER=none
+      - name: Build native tests
+        run: cmake --build build/cross-platform --config Release --parallel 2
+      - name: Run native tests
+        run: >-
+          ctest --test-dir build/cross-platform -C Release
+          --output-on-failure
+      - name: Build portable wheel
+        if: matrix.cpu-target == 'portable'
+        run: python -m pip wheel . --no-deps --wheel-dir dist/platform
+      - name: Install portable wheel
+        if: matrix.cpu-target == 'portable'
+        run: >-
+          python -c "import glob, subprocess, sys;
+          wheels = glob.glob('dist/platform/*.whl');
+          assert len(wheels) == 1, wheels;
+          subprocess.check_call([sys.executable, '-m', 'pip', 'install',
+          '--force-reinstall', '--no-deps', wheels[0]])"
+      - name: Smoke-test installed wheel
+        if: matrix.cpu-target == 'portable'
+        run: >-
+          python -c "import os, tempfile;
+          os.chdir(tempfile.gettempdir());
+          import csplendor;
+          game = csplendor.Game(seed=42);
+          assert game.legal_action_count == len(game.legal_actions) > 0"
+
   strict-bindings:
     runs-on: ubuntu-latest
     strategy:
@@ -105,8 +194,8 @@ jobs:
       matrix:
         compiler: [g++, clang++]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install binding build dependency
@@ -130,7 +219,7 @@ jobs:
       matrix:
         sanitizer: [thread, address-undefined]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Record sanitizer metadata
         run: |
           mkdir -p artifacts
@@ -169,7 +258,7 @@ jobs:
             | tee artifacts/address-undefined-ctest.log
       - name: Upload sanitizer diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sanitizer-${{ matrix.sanitizer }}-${{ github.run_id }}
           path: artifacts/
@@ -181,7 +270,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Record nightly metadata
         run: |
           mkdir -p artifacts
@@ -207,7 +296,7 @@ jobs:
             --repeat until-fail:25 2>&1 | tee artifacts/nightly-ctest.log
       - name: Upload nightly diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nightly-native-soak-${{ github.run_id }}
           path: artifacts/
