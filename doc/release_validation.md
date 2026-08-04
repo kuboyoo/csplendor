@@ -1,6 +1,6 @@
 # リリース検証記録
 
-最終更新: 2026-07-18
+最終更新: 2026-08-04
 
 この文書は、Phase 0--7のリファクタリングと並列探索実装を含む作業ツリーに対して
 実施したローカル検証の記録です。ローカルで通過した項目と、PyPI公開前に別環境で
@@ -23,7 +23,7 @@
 
 | 区分 | 結果 | 確認内容 |
 |---|---:|---|
-| Python通常test | 415 passed, 4 deselected | performance markerを除くpytest全体、warningをerror化 |
+| Python通常test | 439 passed, 4 deselected | performance markerを除くpytest全体、warningをerror化 |
 | Python性能test | 4 passed | performance markerを明示実行 |
 | Python coverage | 56.15% | 50% gate通過。action space 86%、features 96%、replay 90% |
 | Python lint/security | 成功 | Ruff default/import/whitespace/security rulesをPython 3.8 targetで実行 |
@@ -48,6 +48,21 @@ python -m compileall -q csplendor
 LeakSanitizerの`detect_leaks=1`は、このsandboxで必要なptrace動作が許可されないため
 実行できませんでした。これはtest failureではなく環境制約ですが、公開前に制約のない
 CIまたはhostで通過させる必要があります。
+
+## 継続的なクロスプラットフォーム検証
+
+Pull Requestと`main`へのpushでは、Python 3.12を使って次の構成を検証します。
+
+- macOS 15 arm64の`portable`および`native` CPU target。
+- Ubuntu 24.04 arm64の`portable` CPU target。
+- Windows 2025 x64の`portable` CPU target。
+
+各構成でeditable install、Python compile、pytest、native CTestを実行します。
+`portable`構成ではwheelも作成し、wheelへ入れ替えた後にimportと合法手生成を
+smoke testします。macOSではuniversal2 Pythonをarm64プロセスとして実行する
+editable buildを検証し、配布用arm64 wheelは明示的なplatform tagで別途buildして
+Mach-Oがarm64専用であることを確認します。長時間のnightly soakとは分離し、
+定期scheduleでは既存のLinux x64検証だけを実行します。
 
 ## Packagingで確認した境界
 
@@ -81,12 +96,13 @@ legacy replay APIはpickleを実行可能な形式として扱います。
 |---|---|
 | manylinux | 対象manylinux imageでwheelをbuild/repairし、隔離installとnative smokeを行う |
 | `auditwheel` | `auditwheel show`と必要な`repair`を実施し、platform tagと共有library依存を確認する |
-| macOS | 対応architectureでwheel build、install、pytest/native smokeを行う |
-| Windows | MSVCでwheel build、install、pytest/native smokeを行う |
+| macOS | arm64 CIに加え、公開wheelのMach-O minimum OSとplatform tagを検査する |
+| Windows | x64 CIに加え、公開対象wheelを隔離環境で最終確認する |
 | Python 3.8 | 宣言済み最小versionでsdist/wheel build、install、testを行う |
 | `twine` | 最終sdist/wheelへ`twine check`を実行する |
 | TestPyPI | upload後、公開artifactだけを使う新規venv install/import smokeを行う |
 | LeakSanitizer | ptrace制約のないLinux環境で`detect_leaks=1`を通す |
 
-CIのPython 3.8--3.12 matrix、native sanitizer、package buildをrelease候補の同一revisionで
-再実行し、上記artifact検査が成功するまではbinary distributionを公開可能とは判定しません。
+CIのPython 3.8--3.12 matrix、cross-platform matrix、native sanitizer、package buildを
+release候補の同一revisionで再実行し、上記artifact検査が成功するまではbinary
+distributionを公開可能とは判定しません。

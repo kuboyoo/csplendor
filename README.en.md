@@ -145,14 +145,20 @@ cmake --build build/macos-m4-native --parallel 2
 A `native` build is limited to editable installs or direct CMake builds. A
 normal wheel tag cannot express an M4-only requirement, so native wheel builds
 fail. Wheel builds also reject `--skip-build` so a binary from an earlier CPU
-profile cannot be included. The examples use macOS 11.0, the minimum Apple
-Silicon OS, as the deployment target; raise it to match the supported OS range
-when needed. When the environment variable is omitted, Python builds pass that
-Python installation's deployment target through to CMake. The `native` target
-is rejected under Rosetta, for universal2 builds, and on non-Apple platforms.
-The wheel compatibility tag is also constrained by the build Python's own
-minimum target, so release validation must inspect both the Mach-O minimum OS
-and the wheel tag.
+profile cannot be included. The temporary wheel used internally by a PEP 660
+editable install is not distributable, so the distribution wheel
+architecture/tag check does not apply to it. The examples use macOS 11.0, the
+minimum Apple Silicon OS, as the deployment target; raise it to match the
+supported OS range when needed. When the environment variable is omitted,
+Python builds pass that Python installation's deployment target through to
+CMake. A universal2 Python may use the `native` target for an editable or
+direct CMake build when its process is running as arm64 and the extension is
+arm64-only. The resulting extension cannot be loaded if that same Python is
+launched as x86_64 under Rosetta. Native builds under Rosetta, universal2
+native extensions, and non-Apple platforms remain unsupported. The wheel
+compatibility tag is also constrained by the build Python's own minimum target,
+so release validation must inspect both the Mach-O minimum OS and the wheel
+tag.
 
 ## Basic Usage (Python)
 

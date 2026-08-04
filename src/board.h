@@ -91,7 +91,7 @@ public:
 
   void init(uint64_t seed) {
     reset();
-    std::mt19937 rng(seed);
+    std::mt19937 rng(static_cast<std::mt19937::result_type>(seed));
 
     // Gems
     for (int i = 0; i < 5; ++i)
@@ -121,7 +121,7 @@ public:
     // Nobles - use fixed-size array for shuffling
     std::array<uint8_t, NOBLE_COUNT> all_nobles;
     for (int i = 0; i < NOBLE_COUNT; ++i)
-      all_nobles[i] = i;
+      all_nobles[i] = static_cast<uint8_t>(i);
     portable_mt19937_shuffle(all_nobles.begin(), all_nobles.end(), rng);
     for (int i = 0; i < NUM_NOBLES; ++i) {
       nobles.push_back(all_nobles[i]);
@@ -437,7 +437,7 @@ public:
   }
 
   void randomize_hidden_information(uint8_t observer_player, uint64_t seed) {
-    std::mt19937 rng(seed);
+    std::mt19937 rng(static_cast<std::mt19937::result_type>(seed));
     randomize_hidden_information_impl(
         observer_player, [&rng](auto first, auto last) {
           portable_mt19937_shuffle(first, last, rng);

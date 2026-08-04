@@ -290,7 +290,7 @@ private:
       if (!board.decks[level].empty()) {
         Action action;
         action.type = RESERVE_DECK;
-        action.deck_level = level;
+        action.deck_level = static_cast<int8_t>(level);
         if (!sink(action))
           return false;
       }

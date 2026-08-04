@@ -67,11 +67,11 @@ def _max_defender_responses(dag: dict[str, Any], defender: int) -> int:
 def _write_manifest(output_dir: Path, problem: dict[str, Any]) -> None:
     manifest: dict[str, Any] = {
         "id": problem["id"],
-        "path": str(_output_problem_dir(
+        "path": _output_problem_dir(
             output_dir,
             int(problem["forced_win_depth"]),
             str(problem["id"]),
-        ).relative_to(output_dir)),
+        ).relative_to(output_dir).as_posix(),
         "attacker": int(problem["attacker"]),
         "forced_win_depth": int(problem["forced_win_depth"]),
         "initial_scores": problem["initial_scores"],

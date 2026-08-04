@@ -23,6 +23,7 @@ from _build_support import (  # noqa: E402
     cpu_target_from_environment,
     macos_architectures,
     macos_deployment_target,
+    validate_macos_native_build,
     validate_macos_wheel_architectures,
     validate_wheel_build,
 )
@@ -65,23 +66,11 @@ class CMakeBuild(build_ext):
                     python_platform=sysconfig.get_platform(),
                     machine=platform.machine(),
                 )
+                validate_macos_native_build(
+                    cpu_target, architectures, platform.machine()
+                )
             except ValueError as error:
                 raise RuntimeError(str(error)) from error
-            if cpu_target == "native":
-                python_architectures = macos_architectures(
-                    {},
-                    python_platform=sysconfig.get_platform(),
-                    machine=platform.machine(),
-                )
-                if (
-                    architectures != ("arm64",)
-                    or python_architectures != ("arm64",)
-                    or platform.machine().lower() != "arm64"
-                ):
-                    raise RuntimeError(
-                        "CSPLENDOR_CPU_TARGET=native requires a native "
-                        "arm64-only Python build"
-                    )
 
         architecture_key = (
             "-".join(architectures) if architectures is not None else "default"
@@ -147,19 +136,31 @@ class CMakeBuild(build_ext):
 
 
 class PortableWheel(bdist_wheel):
+    _validate_distribution_tag = False
+
     def run(self):
         try:
             cpu_target = cpu_target_from_environment()
             validate_wheel_build(cpu_target, skip_build=self.skip_build)
         except ValueError as error:
             raise RuntimeError(str(error)) from error
-        if platform.system() == "Darwin":
-            self.get_tag()
-        super().run()
+
+        # Setuptools also asks bdist_wheel for a tag while creating the
+        # ephemeral PEP 660 editable wheel. An arm64-only local extension may
+        # legitimately be built by a universal2 Python process running as
+        # arm64, so enforce distributable tag consistency only for a real
+        # bdist_wheel run.
+        self._validate_distribution_tag = True
+        try:
+            if platform.system() == "Darwin":
+                self.get_tag()
+            super().run()
+        finally:
+            self._validate_distribution_tag = False
 
     def get_tag(self):
         tag = super().get_tag()
-        if platform.system() != "Darwin":
+        if platform.system() != "Darwin" or not self._validate_distribution_tag:
             return tag
 
         try:

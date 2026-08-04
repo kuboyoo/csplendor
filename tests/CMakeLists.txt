@@ -1,8 +1,8 @@
 function(csplendor_add_native_test target source labels timeout)
   add_executable(${target} ${source})
   target_link_libraries(
-      ${target} PRIVATE csplendor_core csplendor_sanitizer Threads::Threads)
-  target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+      ${target} PRIVATE csplendor_core csplendor_sanitizer csplendor_warnings
+                        Threads::Threads)
   add_test(NAME ${target} COMMAND ${target})
   set_tests_properties(${target} PROPERTIES LABELS "${labels}"
                                            TIMEOUT "${timeout}")

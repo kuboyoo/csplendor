@@ -23,6 +23,14 @@ target_include_directories(
     csplendor_core INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
 target_compile_features(csplendor_core INTERFACE cxx_std_17)
 
+add_library(csplendor_warnings INTERFACE)
+if(MSVC)
+  target_compile_options(csplendor_warnings INTERFACE /W4 /WX /permissive-)
+else()
+  target_compile_options(csplendor_warnings INTERFACE
+                         -Wall -Wextra -Wpedantic -Werror)
+endif()
+
 if(CSPLENDOR_CPU_TARGET STREQUAL "portable")
   message(STATUS "csplendor CPU target: portable")
 elseif(CSPLENDOR_CPU_TARGET STREQUAL "native")
@@ -104,7 +112,5 @@ if(CSPLENDOR_BUILD_PARALLEL_BENCHMARK)
   add_executable(benchmark_mcts_parallel scripts/benchmark_mcts_parallel.cpp)
   target_link_libraries(
       benchmark_mcts_parallel PRIVATE csplendor_core csplendor_sanitizer
-                                      Threads::Threads)
-  target_compile_options(benchmark_mcts_parallel PRIVATE -Wall -Wextra
-                                                        -Wpedantic -Werror)
+                                      csplendor_warnings Threads::Threads)
 endif()

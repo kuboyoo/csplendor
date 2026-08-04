@@ -69,16 +69,20 @@ inline bool purchase_card(Board &board, const Card &card,
       if (from_gold > cost || from_gems > player.gems[color])
         return false;
     }
-    player.gems[color] -= from_gems;
-    board.bank[color] += from_gems;
+    player.gems[color] = static_cast<uint8_t>(
+        static_cast<int>(player.gems[color]) - from_gems);
+    board.bank[color] = static_cast<uint8_t>(
+        static_cast<int>(board.bank[color]) + from_gems);
     gold_used += from_gold;
   }
   if constexpr (ValidatePayment) {
     if (gold_used > player.gems[GOLD])
       return false;
   }
-  player.gems[GOLD] -= gold_used;
-  board.bank[GOLD] += gold_used;
+  player.gems[GOLD] = static_cast<uint8_t>(
+      static_cast<int>(player.gems[GOLD]) - gold_used);
+  board.bank[GOLD] = static_cast<uint8_t>(
+      static_cast<int>(board.bank[GOLD]) + gold_used);
 
   player.purchased_cards.push_back(card.id);
   ++player.purchased_count;

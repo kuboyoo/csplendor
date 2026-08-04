@@ -24,7 +24,7 @@ public:
   uint64_t uniform_bounded(uint64_t bound) {
     if (bound == 0)
       throw std::invalid_argument("portable RNG bound must be positive");
-    const uint64_t threshold = static_cast<uint64_t>(-bound) % bound;
+    const uint64_t threshold = (uint64_t{0} - bound) % bound;
     for (;;) {
       const uint64_t value = next_u64();
       if (value >= threshold)

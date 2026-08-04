@@ -175,13 +175,17 @@ cmake --build build/macos-m4-native --parallel 2
 `native`はeditable installまたはCMake直接ビルド専用です。通常wheelと同じ互換性tag
 ではM4専用であることを表現できないため、native wheelの作成はエラーになります。
 また、以前のprofileのバイナリを混入させないため、wheelの`--skip-build`も
-使用できません。
+使用できません。PEP 660 editable installが内部で作る一時wheelは配布物ではないため、
+配布wheel向けのarchitecture/tag照合は適用しません。
 例ではApple Siliconの最小OSであるmacOS 11.0をdeployment targetにしています。
 サポート方針に応じて、これより新しい値へ変更できます。環境変数を省略したPython
 ビルドでは、そのPython自身のdeployment targetをCMakeへ引き継ぎます。
 wheelの互換性tagはビルドに使うPython自身の下限にも制約されるため、リリース時は
 Mach-Oのminimum OSとwheel tagの両方を確認してください。
-Rosetta、universal2、非Apple環境では`native`を使用できません。
+universal2 Pythonも、arm64プロセスとして実行し、arm64専用拡張を選択したeditable
+installまたはCMake直接ビルドでは`native`を使用できます。生成物はarm64専用なので、
+同じPythonをRosettaでx86_64として実行した場合には読み込めません。Rosetta上のbuild、
+universal2拡張、非Apple環境では`native`を使用できません。
 
 ## 基本的な使い方 (Python)
 

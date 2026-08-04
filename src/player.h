@@ -80,7 +80,8 @@ struct PlayerState {
         for (int i = 0; i < 5; ++i) {
           int cost = std::max(0, (int)card.cost[i] - (int)bonuses[i]);
           if (gems[i] < cost) {
-            (*gold_usage)[i] = cost - gems[i];
+            (*gold_usage)[i] = static_cast<uint8_t>(
+                cost - static_cast<int>(gems[i]));
           } else {
             (*gold_usage)[i] = 0;
           }

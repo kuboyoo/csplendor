@@ -93,8 +93,8 @@ make_python_parallel_inference(py::function &inference_fn) {
           item["value"].cast<py::array_t<
               float, py::array::c_style | py::array::forcecast>>();
       if (policy.ndim() != 1 || value.ndim() != 1 ||
-          policy.shape(0) < static_cast<ssize_t>(MAX_ACTIONS) ||
-          value.shape(0) < static_cast<ssize_t>(NUM_PLAYERS))
+          policy.shape(0) < static_cast<py::ssize_t>(MAX_ACTIONS) ||
+          value.shape(0) < static_cast<py::ssize_t>(NUM_PLAYERS))
         throw py::value_error(
             "parallel policy/value arrays have invalid shape");
       mcts_parallel::ParallelInferenceResult result;
@@ -349,8 +349,8 @@ public:
     py::array_t<float> arr = result.cast<py::array_t<float>>();
     std::array<float, 196> features = {0};
     auto r = arr.unchecked<1>();
-    for (ssize_t i = 0; i < std::min(static_cast<ssize_t>(196), r.shape(0));
-         ++i) {
+    for (py::ssize_t i = 0;
+         i < std::min(static_cast<py::ssize_t>(196), r.shape(0)); ++i) {
       features[i] = r(i);
     }
     return features;
@@ -399,8 +399,9 @@ private:
     py::array_t<uint8_t> arr = result.cast<py::array_t<uint8_t>>();
     std::array<uint8_t, MAX_ACTIONS> mask = {0};
     auto r = arr.unchecked<1>();
-    for (ssize_t i = 0;
-         i < std::min(static_cast<ssize_t>(MAX_ACTIONS), r.shape(0)); ++i) {
+    for (py::ssize_t i = 0;
+         i < std::min(static_cast<py::ssize_t>(MAX_ACTIONS), r.shape(0));
+         ++i) {
       mask[i] = r(i);
     }
     return mask;
@@ -466,9 +467,9 @@ PYBIND11_MODULE(_csplendor, m) {
             for (int i = 0; i < 3; ++i) {
               p.reserved[i] = (i < (int)r.size()) ? r[i] : -1;
             }
-            p.reserved_count =
+            p.reserved_count = static_cast<uint8_t>(
                 std::count_if(p.reserved.begin(), p.reserved.end(),
-                              [](int8_t id) { return id != -1; });
+                              [](int8_t id) { return id != -1; }));
           })
       .def_readwrite("acquired_nobles", &PlayerState::acquired_nobles)
       .def_readwrite("purchased_cards", &PlayerState::purchased_cards);
@@ -1546,11 +1547,13 @@ PYBIND11_MODULE(_csplendor, m) {
                 py::array_t<uint8_t> valid =
                     flat_valids[result_idx].cast<py::array_t<uint8_t>>();
                 auto valid_mask = valid.unchecked<1>();
-                if (valid_mask.shape(0) < static_cast<ssize_t>(MAX_ACTIONS))
+                if (valid_mask.shape(0) <
+                    static_cast<py::ssize_t>(MAX_ACTIONS))
                   throw py::value_error("valid-action mask is too short");
                 std::array<uint8_t, MAX_ACTIONS> mask{};
                 for (size_t action = 0; action < MAX_ACTIONS; ++action)
-                  mask[action] = valid_mask(static_cast<ssize_t>(action));
+                  mask[action] =
+                      valid_mask(static_cast<py::ssize_t>(action));
                 leaf.valid_actions.push_back(mask);
                 result_idx++;
               }
@@ -1595,17 +1598,19 @@ PYBIND11_MODULE(_csplendor, m) {
                   values[index].cast<py::array_t<float>>();
               auto policy_view = policy.unchecked<1>();
               auto value_view = value.unchecked<1>();
-              if (policy_view.shape(0) < static_cast<ssize_t>(MAX_ACTIONS) ||
-                  value_view.shape(0) < static_cast<ssize_t>(NUM_PLAYERS))
+              if (policy_view.shape(0) <
+                      static_cast<py::ssize_t>(MAX_ACTIONS) ||
+                  value_view.shape(0) <
+                      static_cast<py::ssize_t>(NUM_PLAYERS))
                 throw py::value_error("batch policy/value array is too short");
               std::array<float, MAX_ACTIONS> policy_array{};
               std::array<float, NUM_PLAYERS> value_array{};
               for (size_t action = 0; action < MAX_ACTIONS; ++action)
                 policy_array[action] =
-                    policy_view(static_cast<ssize_t>(action));
+                    policy_view(static_cast<py::ssize_t>(action));
               for (size_t player = 0; player < NUM_PLAYERS; ++player)
                 value_array[player] =
-                    value_view(static_cast<ssize_t>(player));
+                    value_view(static_cast<py::ssize_t>(player));
               native_policies.push_back(policy_array);
               native_values.push_back(value_array);
             }
@@ -1789,14 +1794,16 @@ PYBIND11_MODULE(_csplendor, m) {
             py::array_t<float> value = d["value"].cast<py::array_t<float>>();
 
             auto p = policy.unchecked<1>();
-            for (ssize_t i = 0;
-                 i < std::min(static_cast<ssize_t>(MAX_ACTIONS), p.shape(0));
+            for (py::ssize_t i = 0;
+                 i < std::min(static_cast<py::ssize_t>(MAX_ACTIONS),
+                              p.shape(0));
                  ++i)
               ir.policy[i] = p(i);
 
             auto v = value.unchecked<1>();
-            for (ssize_t i = 0;
-                 i < std::min(static_cast<ssize_t>(NUM_PLAYERS), v.shape(0));
+            for (py::ssize_t i = 0;
+                 i < std::min(static_cast<py::ssize_t>(NUM_PLAYERS),
+                              v.shape(0));
                  ++i)
               ir.value[i] = v(i);
 
