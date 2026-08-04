@@ -895,7 +895,7 @@ def save_puzzle(
 
     manifest = {
         "id": puzzle_id,
-        "path": str(puzzle_dir.relative_to(output_dir)),
+        "path": puzzle_dir.relative_to(output_dir).as_posix(),
         "attacker": attacker,
         "forced_win_depth": depth,
         "initial_scores": problem["initial_scores"],
