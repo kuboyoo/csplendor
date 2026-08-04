@@ -26,7 +26,9 @@ public:
       : std::runtime_error(message) {}
 };
 
-using ActionMask = std::array<uint8_t, MAX_ACTIONS>;
+// Dense masks remain the public DTO/binding representation. Search and tree
+// internals use ActionMaskBits from mcts_types.h.
+using ActionMask = DenseActionMask;
 using Policy = std::array<float, MAX_ACTIONS>;
 using Value = std::array<double, NUM_PLAYERS>;
 
@@ -118,6 +120,11 @@ struct MCTSNodeSnapshot64 {
   std::array<uint64_t, MAX_ACTIONS> availability_count{};
   uint64_t live_reservation_count = 0;
   bool has_pending_evaluation = false;
+  ExpansionState state = ExpansionState::Unexpanded;
+};
+
+struct NodeStateView {
+  Value value{};
   ExpansionState state = ExpansionState::Unexpanded;
 };
 

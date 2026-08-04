@@ -113,4 +113,13 @@ if(CSPLENDOR_BUILD_PARALLEL_BENCHMARK)
   target_link_libraries(
       benchmark_mcts_parallel PRIVATE csplendor_core csplendor_sanitizer
                                       csplendor_warnings Threads::Threads)
+  add_executable(benchmark_mcts_optimizations
+                 scripts/benchmark_mcts_optimizations.cpp)
+  target_compile_definitions(
+      benchmark_mcts_optimizations
+      PRIVATE CSPLENDOR_ACTION_ENCODER_REFERENCE=1)
+  target_link_libraries(
+      benchmark_mcts_optimizations
+      PRIVATE csplendor_core csplendor_sanitizer csplendor_warnings
+              Threads::Threads)
 endif()

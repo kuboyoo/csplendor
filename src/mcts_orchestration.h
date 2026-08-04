@@ -132,8 +132,8 @@ inline BatchSimulationRequest MCTS::prepare_batch_simulations(
 
       // Select action with virtual loss
       bool is_root = (depth == 0);
-      const auto world_mask = GameAdapter::native_action_mask(search_game);
-      int action = select_action_with_virtual_loss_for_world(
+      const auto world_mask = GameAdapter::native_action_mask_bits(search_game);
+      int action = select_action_with_virtual_loss_for_world_bits(
           current_hash, world_mask, is_root, dirichlet_noise, sim);
 
       if (action < 0) {

@@ -462,7 +462,7 @@ public:
         guard, options.tree_backend, options.shard_count,
         static_cast<size_t>(options.max_tree_nodes));
     tree.bind_evaluator(options.evaluator_version);
-    tree.validate_quiescent();
+    tree.validate_quiescent_for_search();
 
     const uint8_t observer = static_cast<uint8_t>(
         mcts_internal::GameAdapter::current_player(root_game));
@@ -685,7 +685,7 @@ public:
     cleanup_tickets(active_tickets, failure != nullptr, *ledger);
 
     try {
-      tree.validate_quiescent();
+      tree.validate_quiescent_for_search();
       const auto snapshot = ledger->snapshot();
       if (!snapshot.virtual_loss_balanced())
         throw std::logic_error("parallel virtual-loss ledger is unbalanced");
@@ -872,11 +872,12 @@ private:
 
     const auto features =
         mcts_internal::GameAdapter::native_features(root.root, root.observer);
-    const auto mask = mcts_internal::GameAdapter::native_action_mask(root.root);
+    const auto mask =
+        mcts_internal::GameAdapter::native_action_mask_bits(root.root);
     const uint64_t bootstrap_id = std::numeric_limits<uint64_t>::max();
-    auto claim = tree.claim_or_attach(root_node, bootstrap_id,
-                                      detail::feature_digest(features),
-                                      features, mask, nullptr);
+    auto claim = tree.claim_or_attach_bits(root_node, bootstrap_id,
+                                           detail::feature_digest(features),
+                                           features, mask, nullptr);
     if (claim.kind != ExpansionClaimKind::Owner)
       throw std::logic_error("root bootstrap did not own expansion");
     try {
@@ -970,8 +971,8 @@ private:
         const auto terminal =
             mcts_internal::GameAdapter::terminal_value(game, 0.0f);
         const Value value = checked_value(terminal);
-        const auto node_snapshot = tree.snapshot(node);
-        if (node_snapshot.state != ExpansionState::Terminal)
+        const auto node_state = tree.state_view(node);
+        if (node_state.state != ExpansionState::Terminal)
           tree.set_terminal(node, value);
         emit_completion(event_queue, ticket, value, CompletionKind::Terminal);
         return;
@@ -984,16 +985,17 @@ private:
         continue;
       }
 
-      auto snapshot = tree.snapshot(node);
-      if (snapshot.state == ExpansionState::Terminal) {
-        emit_completion(event_queue, ticket, snapshot.stats.value,
+      const auto node_state = tree.state_view(node);
+      if (node_state.state == ExpansionState::Terminal) {
+        emit_completion(event_queue, ticket, node_state.value,
                         CompletionKind::Terminal);
         return;
       }
-      if (snapshot.state != ExpansionState::Expanded) {
+      if (node_state.state != ExpansionState::Expanded) {
         const auto features =
             mcts_internal::GameAdapter::native_features(game, root.observer);
-        const auto mask = mcts_internal::GameAdapter::native_action_mask(game);
+        const auto mask =
+            mcts_internal::GameAdapter::native_action_mask_bits(game);
         const uint64_t public_feature_digest = detail::feature_digest(features);
         ticket->trace_data.leaf_key = current_key;
         ticket->trace_data.feature_digest = public_feature_digest;
@@ -1002,9 +1004,9 @@ private:
         // which publishes the complete path to the coordinator.
         ticket->state.store(TicketState::WaitingInference,
                             std::memory_order_release);
-        auto claim =
-            tree.claim_or_attach(node, ticket->simulation_id,
-                                 public_feature_digest, features, mask, ledger);
+        auto claim = tree.claim_or_attach_bits(node, ticket->simulation_id,
+                                               public_feature_digest, features,
+                                               mask, ledger);
         if (claim.kind == ExpansionClaimKind::Owner) {
           ticket->trace_data.leaf_role = TraceLeafRole::Owner;
           ticket->trace_data.pending_id = claim.pending->id;
@@ -1038,7 +1040,7 @@ private:
       }
 
       const auto world_mask =
-          mcts_internal::GameAdapter::native_action_mask(game);
+          mcts_internal::GameAdapter::native_action_mask_bits(game);
       SelectionContext context;
       context.cpuct = root.config.cpuct;
       context.fpu = root.config.fpu;
@@ -1050,7 +1052,7 @@ private:
       context.tree_generation = root.tree_generation;
       context.root_noise =
           context.is_root && root.has_root_noise ? &root.root_noise : nullptr;
-      auto reservation = tree.select_and_reserve(
+      auto reservation = tree.select_and_reserve_bits(
           node, world_mask, context,
           static_cast<uint8_t>(
               mcts_internal::GameAdapter::current_player(game)),
@@ -1094,8 +1096,8 @@ private:
       if (mcts_internal::GameAdapter::is_terminal(game)) {
         const Value value = checked_value(
             mcts_internal::GameAdapter::terminal_value(game, 0.0f));
-        const auto snapshot = tree.snapshot(node);
-        if (snapshot.state != ExpansionState::Terminal)
+        const auto node_state = tree.state_view(node);
+        if (node_state.state != ExpansionState::Terminal)
           tree.set_terminal(node, value);
         detail::WorkerEvent event;
         event.kind = detail::WorkerEventKind::DirectCompletion;
@@ -1112,28 +1114,29 @@ private:
         continue;
       }
 
-      const auto snapshot = tree.snapshot(node);
-      if (snapshot.state == ExpansionState::Terminal) {
+      const auto node_state = tree.state_view(node);
+      if (node_state.state == ExpansionState::Terminal) {
         detail::WorkerEvent event;
         event.kind = detail::WorkerEventKind::DirectCompletion;
         event.ticket = ticket;
-        event.value = snapshot.stats.value;
+        event.value = node_state.value;
         event.completion = CompletionKind::Terminal;
         return event;
       }
-      if (snapshot.state != ExpansionState::Expanded) {
+      if (node_state.state != ExpansionState::Expanded) {
         const auto features =
             mcts_internal::GameAdapter::native_features(game, root.observer);
-        const auto mask = mcts_internal::GameAdapter::native_action_mask(game);
+        const auto mask =
+            mcts_internal::GameAdapter::native_action_mask_bits(game);
         const uint64_t public_feature_digest = detail::feature_digest(features);
         ticket->trace_data.leaf_key = current_key;
         ticket->trace_data.feature_digest = public_feature_digest;
         ticket->trace_data.world_mask_digest = trace_detail::mask_digest(mask);
         ticket->state.store(TicketState::WaitingInference,
                             std::memory_order_release);
-        auto claim =
-            tree.claim_or_attach(node, ticket->simulation_id,
-                                 public_feature_digest, features, mask, ledger);
+        auto claim = tree.claim_or_attach_bits(node, ticket->simulation_id,
+                                               public_feature_digest, features,
+                                               mask, ledger);
         if (claim.kind == ExpansionClaimKind::Owner) {
           ticket->trace_data.leaf_role = TraceLeafRole::Owner;
           ticket->trace_data.pending_id = claim.pending->id;
@@ -1171,7 +1174,7 @@ private:
       }
 
       const auto world_mask =
-          mcts_internal::GameAdapter::native_action_mask(game);
+          mcts_internal::GameAdapter::native_action_mask_bits(game);
       SelectionContext context;
       context.cpuct = root.config.cpuct;
       context.fpu = root.config.fpu;
@@ -1183,7 +1186,7 @@ private:
       context.tree_generation = root.tree_generation;
       context.root_noise =
           context.is_root && root.has_root_noise ? &root.root_noise : nullptr;
-      auto reservation = tree.select_and_reserve(
+      auto reservation = tree.select_and_reserve_bits(
           node, world_mask, context,
           static_cast<uint8_t>(
               mcts_internal::GameAdapter::current_player(game)),
@@ -1401,7 +1404,7 @@ private:
         guard, options.tree_backend, options.shard_count,
         static_cast<size_t>(options.max_tree_nodes));
     tree.bind_evaluator(options.evaluator_version);
-    tree.validate_quiescent();
+    tree.validate_quiescent_for_search();
     const MCTSConfig config = guard.config();
 
     const uint8_t observer = static_cast<uint8_t>(
@@ -1606,10 +1609,10 @@ private:
         }
         epoch_tickets.clear();
 #ifndef NDEBUG
-        // Full-tree scans are a debug oracle. The final scan remains enabled
-        // in every build, but repeating an O(tree-size) scan after every epoch
-        // would turn long deterministic searches quadratic.
-        tree.validate_quiescent();
+        // Debug builds retain the full-tree oracle after every deterministic
+        // epoch. Release builds use only the O(1) counters at search
+        // boundaries.
+        tree.validate_quiescent_for_search();
 #endif
       }
       if (trace)
@@ -1636,7 +1639,7 @@ private:
     cleanup_pending(tree, registry);
     cleanup_tickets(epoch_tickets, failure != nullptr, *ledger);
     try {
-      tree.validate_quiescent();
+      tree.validate_quiescent_for_search();
       const auto snapshot = ledger->snapshot();
       if (!snapshot.virtual_loss_balanced() ||
           snapshot.issued !=

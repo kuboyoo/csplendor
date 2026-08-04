@@ -139,7 +139,7 @@ struct GameAdapter final {
   }
 
   static inline bool decode_and_apply_native(Game &game, int action_index) {
-    Action decoded = ActionEncoderCpp::decode(action_index, game);
+    Action decoded = ActionEncoderCpp::decode_trusted(action_index, game);
     if (decoded.type == ACTION_TYPE_COUNT)
       return false;
     return game.apply_trusted(decoded, false);
@@ -152,7 +152,12 @@ struct GameAdapter final {
 
   static inline std::array<uint8_t, MAX_ACTIONS>
   native_action_mask(const Game &game) {
-    return ActionEncoderCpp::get_action_mask(game);
+    return mcts_action_mask::to_dense(
+        ActionEncoderCpp::get_action_mask_bits_trusted(game));
+  }
+
+  static inline ActionMaskBits native_action_mask_bits(const Game &game) {
+    return ActionEncoderCpp::get_action_mask_bits_trusted(game);
   }
 };
 

@@ -27,10 +27,10 @@
 | Python性能test | 4 passed | performance markerを明示実行 |
 | Python coverage | 56.15% | 50% gate通過。action space 86%、features 96%、replay 90% |
 | Python lint/security | 成功 | Ruff default/import/whitespace/security rulesをPython 3.8 targetで実行 |
-| native CTest | 4/4 passed | native unit/stress/replayを含む構成 |
+| native CTest | 5/5 passed | native unit/stress/replayとMCTS高速化同値testを含む構成 |
 | native反復 | 100/100成功 | 4 testを各25回反復 |
-| ThreadSanitizer | 4/4 passed | Clang TSAN build |
-| Address/UndefinedBehaviorSanitizer | 4/4 passed | Clang ASan+UBSan build |
+| ThreadSanitizer | 5/5 passed | Clang TSAN build |
+| Address/UndefinedBehaviorSanitizer | 5/5 passed | GCC ASan+UBSan build |
 | strict warning build | 成功 | GCC/Clang `-Wall -Wextra -Wpedantic -Werror` |
 | Clang static analysis | 成功 | binding translation unitへ`clang-tidy`を実行 |
 | source distribution | 成功 | sdistからCPython 3.12 wheelを再build |

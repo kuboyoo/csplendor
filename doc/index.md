@@ -11,6 +11,7 @@ Welcome to the technical documentation for the `csplendor` engine.
 - [Versioned Game Snapshot](game_snapshot.md) - Portable current-state snapshots for replay and Reanalyze.
 - [Web API Reference](web_api.md) - Usage of the FastAPI backend.
 - [Release Validation Record](release_validation.md) - Local release checks and remaining platform/publication gates.
+- [MCTS Hot-path Optimizations](mcts_hotpath_optimizations.md) - Internal bitsets, compact edges, equivalence tests, and benchmark results.
 
 ---
 
