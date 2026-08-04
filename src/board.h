@@ -121,7 +121,7 @@ public:
     // Nobles - use fixed-size array for shuffling
     std::array<uint8_t, NOBLE_COUNT> all_nobles;
     for (int i = 0; i < NOBLE_COUNT; ++i)
-      all_nobles[i] = i;
+      all_nobles[i] = static_cast<uint8_t>(i);
     portable_mt19937_shuffle(all_nobles.begin(), all_nobles.end(), rng);
     for (int i = 0; i < NUM_NOBLES; ++i) {
       nobles.push_back(all_nobles[i]);

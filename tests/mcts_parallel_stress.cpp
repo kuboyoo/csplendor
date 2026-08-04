@@ -210,7 +210,20 @@ void test_same_leaf_claim_dedup(TreeBackend backend) {
 
 uint32_t stress_multiplier() {
   static const uint32_t multiplier = [] {
+#if defined(_MSC_VER)
+    char *raw_buffer = nullptr;
+    size_t raw_size = 0;
+    const auto error = _dupenv_s(
+        &raw_buffer, &raw_size, "CSPLENDOR_NATIVE_STRESS_MULTIPLIER");
+    const std::unique_ptr<char, decltype(&std::free)> raw_owner(raw_buffer,
+                                                                &std::free);
+    if (error != 0)
+      throw std::runtime_error(
+          "failed to read CSPLENDOR_NATIVE_STRESS_MULTIPLIER");
+    const char *raw = raw_owner.get();
+#else
     const char *raw = std::getenv("CSPLENDOR_NATIVE_STRESS_MULTIPLIER");
+#endif
     if (!raw || *raw == '\0')
       return uint32_t{1};
     char *end = nullptr;

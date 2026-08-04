@@ -304,7 +304,7 @@ public:
 
       action.type = RESERVE_VISIBLE;
       action.card_id = board.visible[level][s];
-      action.deck_level = level;
+      action.deck_level = static_cast<int8_t>(level);
       action.return_gems = decode_return(ret_pat);
 
     } else if (action_id < OFFSET_PURCHASE_VISIBLE) {
@@ -314,7 +314,7 @@ public:
       int ret_pat = local % RESERVE_RETURN_PATTERNS;
 
       action.type = RESERVE_DECK;
-      action.deck_level = level;
+      action.deck_level = static_cast<int8_t>(level);
       action.card_id = -1;
       action.return_gems = decode_return(ret_pat);
 
