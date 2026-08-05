@@ -1,5 +1,9 @@
 # ActionEncoderV3 Action Space Specification
 
+> Schema metadata: `ActionEncoderV3.schema_version()`,
+> `schema_fingerprint()`, `schema_sections()`。sizeとsection offsetのC++正本は
+> `encoding_schema.h`の`ActionSpaceV3`である。
+
 > **Version**: V3.1 (3133 actions)
 > **Header**: `src/action_encoder_v3.h`
 > **Python**: `csplendor.ActionEncoderV3`

@@ -4,6 +4,11 @@ import numpy as np
 
 from . import _csplendor as core
 
+_V1_OFFSETS = {
+    section["name"]: section["offset"]
+    for section in core.ActionEncoderCpp.schema_sections()
+}
+
 
 class ActionEncoder:
     """
@@ -21,7 +26,7 @@ class ActionEncoder:
     of the action (e.g. heuristic return) if multiple exist for a base index.
     """
 
-    BASE_ACTION_COUNT = 48  # Extended from 45 to 48 for VISIT_NOBLE
+    BASE_ACTION_COUNT = core.ActionEncoderCpp.BASE_ACTION_COUNT
 
     def __init__(self):
         # 1. TAKE_DIFFERENT (10)
@@ -34,67 +39,31 @@ class ActionEncoder:
         """
         Maps a core.Action to an integer index [0, 47].
         """
-        board = game.board
-
         if action.type == core.ActionType.TAKE_DIFFERENT:
-            # Find which colors were taken
-            colors = []
-            for i in range(5):
-                if action.take[i] > 0:
-                    colors.append(i)
-            if len(colors) == 3:
-                colors = tuple(sorted(colors))
-                return self.take_diff_combinations.index(colors)
-            else:
-                # If less than 3 were taken (only possible if bank < 3 colors)
-                for idx, comb in enumerate(self.take_diff_combinations):
-                    if all(c in comb for c in colors):
-                        return idx
-                return 0
+            colors = [index for index, count in enumerate(action.take) if count > 0]
+            if len(colors) > 3:
+                return _V1_OFFSETS["take_different"]
 
-        elif action.type == core.ActionType.TAKE_SAME:
-            for i in range(5):
-                if action.take[i] == 2:
-                    return 10 + i
-            return 10
+        encoded = core.ActionEncoderCpp.encode(action, game)
+        if encoded >= 0:
+            return encoded
 
-        elif action.type == core.ActionType.RESERVE_VISIBLE:
-            for level in range(3):
-                for s in range(4):
-                    if board.visible[level][s] == action.card_id:
-                        return 15 + level * 4 + s
-            return 15
-
-        elif action.type == core.ActionType.RESERVE_DECK:
-            return 27 + action.deck_level
-
-        elif action.type == core.ActionType.PURCHASE:
-            if action.from_reserved:
-                # Find index in player's reserved cards
-                p = board.players[board.current_player]
-                for i in range(3):
-                    if p.reserved[i] == action.card_id:
-                        return 42 + i
-                return 42
-            else:
-                # Visible on board
-                for level in range(3):
-                    for s in range(4):
-                        if board.visible[level][s] == action.card_id:
-                            return 30 + level * 4 + s
-                return 30
-
-        elif action.type == core.ActionType.VISIT_NOBLE:
-            # noble_choice is the noble ID (0-9 typically), but we only have 3 nobles on board
-            # Map to the position (0-2) in the current nobles list
-            noble_id = action.noble_choice
-            for i, nid in enumerate(board.nobles):
-                if nid == noble_id:
-                    return 45 + i
-            # Fallback to first noble slot if not found
-            return 45
-
-        return -1
+        # Preserve the historical Python-only fallback contract for malformed
+        # or state-mismatched actions. Legal actions always use the native path.
+        if action.type == core.ActionType.TAKE_SAME:
+            return _V1_OFFSETS["take_same"]
+        if action.type == core.ActionType.RESERVE_VISIBLE:
+            return _V1_OFFSETS["reserve_visible"]
+        if action.type == core.ActionType.RESERVE_DECK:
+            return _V1_OFFSETS["reserve_deck"] + action.deck_level
+        if action.type == core.ActionType.PURCHASE:
+            section = (
+                "purchase_reserved" if action.from_reserved else "purchase_visible"
+            )
+            return _V1_OFFSETS[section]
+        if action.type == core.ActionType.VISIT_NOBLE:
+            return _V1_OFFSETS["visit_noble"]
+        return encoded
 
     def decode(self, index: int, game: core.Game) -> core.Action:
         """
@@ -104,22 +73,12 @@ class ActionEncoder:
         For PURCHASE actions with multiple payment options, uses a heuristic
         to select the best payment method (minimize gold usage).
         """
-        legal_actions = game.legal_actions
-        matching_actions = []
-
-        for action in legal_actions:
-            if self.encode(action, game) == index:
-                matching_actions.append(action)
-
-        if not matching_actions:
+        if index < 0 or index >= self.BASE_ACTION_COUNT:
             return None
-
-        if len(matching_actions) == 1:
-            return matching_actions[0]
-
-        # Multiple actions match the same index (different payment methods)
-        # Use heuristic: minimize gold usage, then minimize total gems returned
-        return self._select_best_payment(matching_actions)
+        mask = core.ActionEncoderCpp.get_action_mask(game)
+        if not mask[index]:
+            return None
+        return core.ActionEncoderCpp.decode(index, game)
 
     def _select_best_payment(self, actions: list) -> core.Action:
         """
@@ -141,10 +100,4 @@ class ActionEncoder:
         """
         Returns a boolean mask of size 48 where True means legal.
         """
-        mask = np.zeros(self.BASE_ACTION_COUNT, dtype=bool)
-        legal_actions = game.legal_actions
-        for action in legal_actions:
-            idx = self.encode(action, game)
-            if idx != -1:
-                mask[idx] = True
-        return mask
+        return np.asarray(core.ActionEncoderCpp.get_action_mask(game), dtype=bool)

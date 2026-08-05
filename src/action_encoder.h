@@ -3,6 +3,7 @@
 
 #include "action.h"
 #include "action_encoder_common.h"
+#include "encoding_schema.h"
 #include "game.h"
 #include <algorithm>
 #include <array>
@@ -24,22 +25,32 @@
  */
 class ActionEncoderCpp {
 public:
-  static constexpr int BASE_ACTION_COUNT = 48;
+  using Schema = csplendor::encoding::ActionSpaceV1;
+  static constexpr int BASE_ACTION_COUNT = Schema::SIZE;
+  static constexpr int OFFSET_TAKE_DIFFERENT = Schema::OFFSET_TAKE_DIFFERENT;
+  static constexpr int OFFSET_TAKE_SAME = Schema::OFFSET_TAKE_SAME;
+  static constexpr int OFFSET_RESERVE_VISIBLE = Schema::OFFSET_RESERVE_VISIBLE;
+  static constexpr int OFFSET_RESERVE_DECK = Schema::OFFSET_RESERVE_DECK;
+  static constexpr int OFFSET_PURCHASE_VISIBLE =
+      Schema::OFFSET_PURCHASE_VISIBLE;
+  static constexpr int OFFSET_PURCHASE_RESERVED =
+      Schema::OFFSET_PURCHASE_RESERVED;
+  static constexpr int OFFSET_VISIT_NOBLE = Schema::OFFSET_VISIT_NOBLE;
 
   // Pre-computed C(5,3) combinations for TAKE_DIFFERENT
   // (0,1,2), (0,1,3), (0,1,4), (0,2,3), (0,2,4), (0,3,4), (1,2,3), (1,2,4),
   // (1,3,4), (2,3,4)
-  static constexpr std::array<std::array<int, 3>, 10> TAKE_DIFF_COMBINATIONS = {
-      {{{0, 1, 2}},
-       {{0, 1, 3}},
-       {{0, 1, 4}},
-       {{0, 2, 3}},
-       {{0, 2, 4}},
-       {{0, 3, 4}},
-       {{1, 2, 3}},
-       {{1, 2, 4}},
-       {{1, 3, 4}},
-       {{2, 3, 4}}}};
+  static constexpr std::array<std::array<int, 3>, Schema::NUM_TAKE_DIFFERENT>
+      TAKE_DIFF_COMBINATIONS = {{{{0, 1, 2}},
+                                 {{0, 1, 3}},
+                                 {{0, 1, 4}},
+                                 {{0, 2, 3}},
+                                 {{0, 2, 4}},
+                                 {{0, 3, 4}},
+                                 {{1, 2, 3}},
+                                 {{1, 2, 4}},
+                                 {{1, 3, 4}},
+                                 {{2, 3, 4}}}};
 
   /**
    * Encode an action to an index [0, 47].
@@ -61,7 +72,7 @@ public:
 
       if (color_count == 3) {
         // Find matching combination
-        for (int idx = 0; idx < 10; ++idx) {
+        for (int idx = 0; idx < Schema::NUM_TAKE_DIFFERENT; ++idx) {
           if (colors[0] == TAKE_DIFF_COMBINATIONS[idx][0] &&
               colors[1] == TAKE_DIFF_COMBINATIONS[idx][1] &&
               colors[2] == TAKE_DIFF_COMBINATIONS[idx][2]) {
@@ -71,7 +82,7 @@ public:
       } else {
         // Less than 3 colors taken (bank shortage)
         // Find first combination that contains all taken colors
-        for (int idx = 0; idx < 10; ++idx) {
+        for (int idx = 0; idx < Schema::NUM_TAKE_DIFFERENT; ++idx) {
           bool all_match = true;
           for (int c = 0; c < color_count; ++c) {
             bool found = false;
@@ -97,7 +108,7 @@ public:
     case TAKE_SAME: {
       for (int i = 0; i < 5; ++i) {
         if (action.take[i] == 2) {
-          return 10 + i;
+          return OFFSET_TAKE_SAME + i;
         }
       }
       return -1;
@@ -106,13 +117,13 @@ public:
     case RESERVE_VISIBLE: {
       const int slot =
           action_encoder_detail::find_visible_slot(action.card_id, board);
-      return slot >= 0 ? 15 + slot : -1;
+      return slot >= 0 ? OFFSET_RESERVE_VISIBLE + slot : -1;
     }
 
     case RESERVE_DECK: {
       if (action.deck_level < 0 || action.deck_level >= 3)
         return -1;
-      return 27 + action.deck_level;
+      return OFFSET_RESERVE_DECK + action.deck_level;
     }
 
     case PURCHASE: {
@@ -120,11 +131,11 @@ public:
         const PlayerState &player = board.players[board.current_player];
         const int slot =
             action_encoder_detail::find_reserved_slot(action.card_id, player);
-        return slot >= 0 ? 42 + slot : -1;
+        return slot >= 0 ? OFFSET_PURCHASE_RESERVED + slot : -1;
       } else {
         const int slot =
             action_encoder_detail::find_visible_slot(action.card_id, board);
-        return slot >= 0 ? 30 + slot : -1;
+        return slot >= 0 ? OFFSET_PURCHASE_VISIBLE + slot : -1;
       }
     }
 
@@ -133,7 +144,7 @@ public:
       int8_t noble_id = action.noble_choice;
       for (size_t i = 0; i < board.nobles.size() && i < 3; ++i) {
         if (board.nobles[i] == noble_id) {
-          return 45 + static_cast<int>(i);
+          return OFFSET_VISIT_NOBLE + static_cast<int>(i);
         }
       }
       return -1;
@@ -206,8 +217,8 @@ public:
         return Action{};
       Action action;
       action.type = VISIT_NOBLE;
-      action.noble_choice =
-          static_cast<int8_t>(board.nobles[static_cast<size_t>(index - 45)]);
+      action.noble_choice = static_cast<int8_t>(
+          board.nobles[static_cast<size_t>(index - OFFSET_VISIT_NOBLE)]);
       return action;
     }
 
@@ -229,8 +240,8 @@ public:
     if (board.current_player >= Board::NUM_PLAYERS || board.is_game_over())
       return Action{};
     if (board.waiting_noble) {
-      const int slot = index - 45;
-      if (slot < 0 || slot >= 3 ||
+      const int slot = index - OFFSET_VISIT_NOBLE;
+      if (slot < 0 || slot >= Schema::NUM_VISIT_NOBLE ||
           static_cast<size_t>(slot) >= board.nobles.size())
         return Action{};
       Action action;
@@ -293,16 +304,17 @@ public:
     for (int index = 0; index < BASE_ACTION_COUNT; ++index) {
       if (!mask[index])
         continue;
-      if (index < 15) {
+      if (index < OFFSET_RESERVE_VISIBLE) {
         scores[index] = 0.2f;
-      } else if (index < 30) {
+      } else if (index < OFFSET_PURCHASE_VISIBLE) {
         scores[index] = 0.5f;
-      } else if (index < 42) {
-        const int slot = index - 30;
+      } else if (index < OFFSET_PURCHASE_RESERVED) {
+        const int slot = index - OFFSET_PURCHASE_VISIBLE;
         const Card &card = get_card(board.visible[slot / 4][slot % 4]);
         scores[index] = 1.0f + calculate_card_cp(card, player) * 2.0f;
-      } else if (index < 45) {
-        const Card &card = get_card(player.reserved[index - 42]);
+      } else if (index < OFFSET_VISIT_NOBLE) {
+        const Card &card =
+            get_card(player.reserved[index - OFFSET_PURCHASE_RESERVED]);
         scores[index] = 1.0f + calculate_card_cp(card, player) * 2.0f;
       } else {
         scores[index] = 5.0f;
@@ -436,11 +448,13 @@ private:
   static uint64_t get_noble_mask_bits(const Board &board) {
     const PlayerState &player = board.players[board.current_player];
     uint64_t mask = 0;
-    for (size_t slot = 0; slot < board.nobles.size() && slot < 3; ++slot) {
+    for (size_t slot = 0; slot < board.nobles.size() &&
+                          slot < static_cast<size_t>(Schema::NUM_VISIT_NOBLE);
+         ++slot) {
       const uint8_t noble_id = board.nobles[slot];
       if (is_valid_noble_id(noble_id) &&
           (player.noble_eligibility_mask & (uint16_t{1} << noble_id)))
-        mask |= uint64_t{1} << (45 + slot);
+        mask |= uint64_t{1} << (OFFSET_VISIT_NOBLE + slot);
     }
     return mask;
   }
@@ -575,7 +589,7 @@ private:
       }
     }
     if (available_colors >= 3) {
-      for (int index = 0; index < 10; ++index) {
+      for (int index = 0; index < Schema::NUM_TAKE_DIFFERENT; ++index) {
         const auto &colors = TAKE_DIFF_COMBINATIONS[index];
         if (board.bank[colors[0]] > 0 && board.bank[colors[1]] > 0 &&
             board.bank[colors[2]] > 0)
@@ -590,17 +604,17 @@ private:
 
     for (int color = 0; color < 5; ++color) {
       if (board.bank[color] >= 4)
-        mask |= uint64_t{1} << (10 + color);
+        mask |= uint64_t{1} << (OFFSET_TAKE_SAME + color);
     }
 
     if (player.can_reserve()) {
       for (int level = 0; level < 3; ++level) {
         for (int slot = 0; slot < 4; ++slot) {
           if (board.visible[level][slot] >= 0)
-            mask |= uint64_t{1} << (15 + level * 4 + slot);
+            mask |= uint64_t{1} << (OFFSET_RESERVE_VISIBLE + level * 4 + slot);
         }
         if (!board.decks[level].empty())
-          mask |= uint64_t{1} << (27 + level);
+          mask |= uint64_t{1} << (OFFSET_RESERVE_DECK + level);
       }
     }
 
@@ -608,24 +622,24 @@ private:
       for (int slot = 0; slot < 4; ++slot) {
         const int8_t card_id = board.visible[level][slot];
         if (card_id >= 0 && player.can_afford(get_card(card_id)))
-          mask |= uint64_t{1} << (30 + level * 4 + slot);
+          mask |= uint64_t{1} << (OFFSET_PURCHASE_VISIBLE + level * 4 + slot);
       }
     }
     for (int slot = 0; slot < 3; ++slot) {
       const int8_t card_id = player.reserved[slot];
       if (card_id >= 0 && player.can_afford(get_card(card_id)))
-        mask |= uint64_t{1} << (42 + slot);
+        mask |= uint64_t{1} << (OFFSET_PURCHASE_RESERVED + slot);
     }
     return mask;
   }
 
   static Action decode_direct(int index, const Game &game) {
-    if (index < 0 || index >= 45)
+    if (index < 0 || index >= OFFSET_VISIT_NOBLE)
       return Action{};
     const Board &board = game.board;
     const PlayerState &player = board.players[board.current_player];
     Action action;
-    if (index < 10) {
+    if (index < OFFSET_TAKE_SAME) {
       action.type = TAKE_DIFFERENT;
       int available_count = 0;
       for (int color = 0; color < 5; ++color)
@@ -637,25 +651,27 @@ private:
         for (int color = 0; color < 5; ++color)
           action.take[color] = board.bank[color] > 0 ? 1 : 0;
       }
-    } else if (index < 15) {
+    } else if (index < OFFSET_RESERVE_VISIBLE) {
       action.type = TAKE_SAME;
-      action.take[static_cast<size_t>(index - 10)] = 2;
-    } else if (index < 27) {
-      const int slot = index - 15;
+      action.take[static_cast<size_t>(index - OFFSET_TAKE_SAME)] = 2;
+    } else if (index < OFFSET_RESERVE_DECK) {
+      const int slot = index - OFFSET_RESERVE_VISIBLE;
       action.type = RESERVE_VISIBLE;
       action.card_id = board.visible[slot / 4][slot % 4];
-    } else if (index < 30) {
+    } else if (index < OFFSET_PURCHASE_VISIBLE) {
       action.type = RESERVE_DECK;
-      action.deck_level = static_cast<int8_t>(index - 27);
-    } else if (index < 42) {
-      const int slot = index - 30;
+      action.deck_level = static_cast<int8_t>(index - OFFSET_RESERVE_DECK);
+    } else if (index < OFFSET_PURCHASE_RESERVED) {
+      const int slot = index - OFFSET_PURCHASE_VISIBLE;
       action.type = PURCHASE;
       action.card_id = board.visible[slot / 4][slot % 4];
       player.can_afford(get_card(action.card_id), &action.gold_as);
     } else {
       action.type = PURCHASE;
       action.from_reserved = true;
-      action.card_id = player.reserved[static_cast<size_t>(index - 42)];
+      action.card_id =
+          player
+              .reserved[static_cast<size_t>(index - OFFSET_PURCHASE_RESERVED)];
       player.can_afford(get_card(action.card_id), &action.gold_as);
     }
     set_first_canonical_return(board, action);

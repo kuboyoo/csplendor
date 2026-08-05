@@ -3,6 +3,9 @@
 `csplendor` provides specialized tools to bridge the gap between game logic and neural network training.
 
 ## 1. State Featurization (`StateFeaturizer`)
+
+`StateEncoder.feature_shape()`、`schema_sections()`、`gem_color_ids()`でversioned schema
+metadataを取得できる。無指定時は既存モデル互換のstate schema v1を使用する。
 The `StateFeaturizer` class converts the current game state into a fixed-length NumPy vector of size **196**. All values are normalized to a range of [0, 1] to facilitate training.
 
 ### Feature Map (196 elements)

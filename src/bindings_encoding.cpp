@@ -1,16 +1,19 @@
-#include "bindings.h"
-#include "bindings_array.h"
 #include "action.h"
 #include "action_encoder.h"
 #include "action_encoder_v2.h"
 #include "action_encoder_v3.h"
+#include "bindings.h"
+#include "bindings_array.h"
+#include "encoding_schema.h"
 #include "game.h"
 #include "state_encoder.h"
 #include "types.h"
-#include <pybind11/stl.h>
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <pybind11/stl.h>
+#include <string>
+#include <utility>
 #include <vector>
 
 using csplendor::python::detail::owning_array_copy;
@@ -19,10 +22,67 @@ namespace py = pybind11;
 
 namespace csplendor::python {
 
+namespace {
+
+template <typename Schema> py::list action_schema_sections() {
+  py::list result;
+  for (const auto &section : Schema::SECTIONS) {
+    py::dict item;
+    item["name"] = section.name;
+    item["action_type"] = section.action_type;
+    item["offset"] = section.offset;
+    item["size"] = section.size;
+    result.append(std::move(item));
+  }
+  return result;
+}
+
+py::list state_schema_sections() {
+  py::list result;
+  for (const auto &section : encoding::StateFeatureV1::SECTIONS) {
+    py::dict item;
+    item["name"] = section.name;
+    item["offset"] = section.offset;
+    item["size"] = section.size;
+    result.append(std::move(item));
+  }
+  return result;
+}
+
+} // namespace
+
 void bind_encoding(py::module_ &m) {
   py::class_<StateEncoder>(m, "StateEncoder")
       .def_static("schema_version", &StateEncoder::schema_version)
       .def_static("schema_fingerprint", &StateEncoder::schema_fingerprint)
+      .def_static("schema_sections", &state_schema_sections)
+      .def_static("feature_shape",
+                  []() {
+                    return std::vector<size_t>(
+                        encoding::StateFeatureV1::SHAPE.begin(),
+                        encoding::StateFeatureV1::SHAPE.end());
+                  })
+      .def_static("feature_size",
+                  []() { return encoding::StateFeatureV1::SIZE; })
+      .def_static("card_feature_size",
+                  []() { return encoding::StateFeatureV1::CARD_FEATURE_SIZE; })
+      .def_static("noble_feature_size",
+                  []() { return encoding::StateFeatureV1::NOBLE_FEATURE_SIZE; })
+      .def_static(
+          "player_feature_size",
+          []() { return encoding::StateFeatureV1::PLAYER_FEATURE_SIZE; })
+      .def_static("gem_color_ids",
+                  []() {
+                    return std::vector<uint8_t>(
+                        encoding::StateFeatureV1::GEM_COLOR_IDS.begin(),
+                        encoding::StateFeatureV1::GEM_COLOR_IDS.end());
+                  })
+      .def_static("gem_color_names",
+                  []() {
+                    return std::vector<std::string>(
+                        encoding::StateFeatureV1::GEM_COLOR_NAMES.begin(),
+                        encoding::StateFeatureV1::GEM_COLOR_NAMES.end());
+                  })
       .def_static(
           "encode",
           [](const Game &game, int8_t observer) {
@@ -49,14 +109,20 @@ void bind_encoding(py::module_ &m) {
           },
           py::arg("game"), py::arg("player"), py::arg("observer"),
           "Encode observer-safe posterior statistics for future card reveals")
-      .def_static(
-          "public_card_feature_size",
-          []() { return PUBLIC_CARD_FEATURE_SIZE; });
+      .def_static("public_card_feature_size",
+                  []() { return PUBLIC_CARD_FEATURE_SIZE; });
 
   // ActionEncoderCpp bindings (native C++ implementation)
   py::class_<ActionEncoderCpp>(m, "ActionEncoderCpp")
       .def_readonly_static("BASE_ACTION_COUNT",
                            &ActionEncoderCpp::BASE_ACTION_COUNT)
+      .def_static("schema_version",
+                  []() { return ActionEncoderCpp::Schema::VERSION; })
+      .def_static("schema_fingerprint",
+                  []() { return ActionEncoderCpp::Schema::fingerprint(); })
+      .def_static(
+          "schema_sections",
+          []() { return action_schema_sections<ActionEncoderCpp::Schema>(); })
       .def_static(
           "encode",
           [](const Action &action, const Game &game) {
@@ -96,7 +162,8 @@ void bind_encoding(py::module_ &m) {
           },
           py::arg("game"), "Get normalized heuristic policy distribution");
 
-  // ActionEncoderV2 bindings (full 4869-action space with return + payment patterns)
+  // ActionEncoderV2 bindings (full 4869-action space with return + payment
+  // patterns)
   py::class_<ActionEncoderV2>(m, "ActionEncoderV2")
       .def_readonly_static("ACTION_SIZE", &ActionEncoderV2::ACTION_SIZE)
       .def_readonly_static("OFFSET_PASS", &ActionEncoderV2::OFFSET_PASS)
@@ -108,6 +175,13 @@ void bind_encoding(py::module_ &m) {
                            &ActionEncoderV2::RESERVE_RETURN_PATTERNS)
       .def_readonly_static("PURCHASE_PAYMENT_PATTERNS",
                            &ActionEncoderV2::PURCHASE_PAYMENT_PATTERNS)
+      .def_static("schema_version",
+                  []() { return ActionEncoderV2::Schema::VERSION; })
+      .def_static("schema_fingerprint",
+                  []() { return ActionEncoderV2::Schema::fingerprint(); })
+      .def_static(
+          "schema_sections",
+          []() { return action_schema_sections<ActionEncoderV2::Schema>(); })
       .def_static(
           "encode",
           [](const Action &action, const Game &game) {
@@ -146,6 +220,13 @@ void bind_encoding(py::module_ &m) {
                            &ActionEncoderV3::OFFSET_VISIT_NOBLE)
       .def_readonly_static("OFFSET_PASS", &ActionEncoderV3::OFFSET_PASS)
       .def_readonly_static("TOTAL_PURCHASE", &ActionEncoderV3::TOTAL_PURCHASE)
+      .def_static("schema_version",
+                  []() { return ActionEncoderV3::Schema::VERSION; })
+      .def_static("schema_fingerprint",
+                  []() { return ActionEncoderV3::Schema::fingerprint(); })
+      .def_static(
+          "schema_sections",
+          []() { return action_schema_sections<ActionEncoderV3::Schema>(); })
       .def_static(
           "encode",
           [](const Action &action, const Game &game) {
@@ -175,10 +256,9 @@ void bind_encoding(py::module_ &m) {
           },
           py::arg("game"),
           "Get a boolean mask of size 3133 where 1 means legal")
-      .def_static(
-          "compute_pattern_count", &ActionEncoderV3::compute_pattern_count,
-          py::arg("card_id"),
-          "Compute the number of valid payment patterns for a card")
+      .def_static("compute_pattern_count",
+                  &ActionEncoderV3::compute_pattern_count, py::arg("card_id"),
+                  "Compute the number of valid payment patterns for a card")
       .def_static(
           "encode_payment_for_card",
           [](const std::vector<uint8_t> &gold_as, int card_id) {
@@ -192,7 +272,8 @@ void bind_encoding(py::module_ &m) {
       .def_static(
           "decode_payment_for_card",
           [](int pattern, int card_id) {
-            auto ga = ActionEncoderV3::decode_payment_for_card(pattern, card_id);
+            auto ga =
+                ActionEncoderV3::decode_payment_for_card(pattern, card_id);
             return std::vector<uint8_t>(ga.begin(), ga.end());
           },
           py::arg("pattern"), py::arg("card_id"),
@@ -200,7 +281,8 @@ void bind_encoding(py::module_ &m) {
       .def_static(
           "get_card_payment_offset",
           [](int card_id) {
-            if (card_id < 0 || card_id >= 90) return -1;
+            if (card_id < 0 || card_id >= 90)
+              return -1;
             return (int)ActionEncoderV3::CARD_PAYMENT_OFFSET[card_id];
           },
           py::arg("card_id"),
@@ -208,11 +290,11 @@ void bind_encoding(py::module_ &m) {
       .def_static(
           "get_card_pattern_count",
           [](int card_id) {
-            if (card_id < 0 || card_id >= 90) return -1;
+            if (card_id < 0 || card_id >= 90)
+              return -1;
             return (int)ActionEncoderV3::CARD_PATTERN_COUNT[card_id];
           },
-          py::arg("card_id"),
-          "Get the stored pattern count for a card");
+          py::arg("card_id"), "Get the stored pattern count for a card");
 }
 
 } // namespace csplendor::python
