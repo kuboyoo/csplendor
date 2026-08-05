@@ -80,6 +80,15 @@ tie-breakに使うcanonical fieldとして扱う。
 
 ## copy、参照、メモリ所有権
 
+- `Game::clone()`はaction/undo journalを含むfull copy、`clone_light()`と
+  `shuffled_clone*()`は現在局面とmodeだけを所有するsearch copyである。
+- versioned game snapshotは現在局面とmodeを永続化し、action/undo journalとlazy hash
+  cacheを含めない。復元時のjournalは空、hashはinvalidから再計算する。
+- production `undo()`は公開editorでapply後に変更された局面もaction前へ戻すため、完全
+  `Board` snapshotを正とする。`UndoRecord`はdebug/differential検証用で本番履歴ではない。
+- fieldごとのcanonical、derived、provenance、cache分類は
+  `state_field_roles.h`を機械検査可能な正本とする。
+
 - `Game.board` はGameが所有するboardへの参照であり、board setterは元のGameを更新する。
 - `Board.players` と `Board.get_player()` はplayerのcopyを返す。変更は
   `Board.set_player()` で明示的に書き戻す。
