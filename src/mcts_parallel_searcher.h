@@ -2,7 +2,9 @@
 #define CSPLENDOR_MCTS_PARALLEL_SEARCHER_H
 
 #include "mcts_bounded_queue.h"
+#include "mcts_config_validator.h"
 #include "mcts_game_adapter.h"
+#include "mcts_parallel_session.h"
 #include "mcts_parallel_trace.h"
 #include "mcts_tree.h"
 
@@ -238,89 +240,6 @@ inline Policy probabilities_from_root_prior(const MCTSNodeSnapshot64 &snapshot,
   return probabilities;
 }
 
-struct SimulationTicket {
-  SimulationTicket(uint64_t ticket_id, uint64_t generation)
-      : simulation_id(ticket_id), tree_generation(generation) {}
-
-  SimulationTicket(const SimulationTicket &) = delete;
-  SimulationTicket &operator=(const SimulationTicket &) = delete;
-
-  const uint64_t simulation_id;
-  const uint64_t tree_generation;
-  ReservedPath path;
-  std::atomic<TicketState> state{TicketState::Created};
-  CompletionKind completion = CompletionKind::None;
-  std::atomic<uint64_t> pending_id{0};
-  DeterministicTraceTicketData trace_data{};
-};
-
-using ActiveTicketRegistry =
-    std::unordered_map<uint64_t, std::shared_ptr<SimulationTicket>>;
-
-enum class WorkerEventKind : uint8_t {
-  EvaluationOwner = 0,
-  DirectCompletion = 1,
-  Waiting = 2,
-  Invalid = 3,
-};
-
-struct WorkerEvent {
-  WorkerEventKind kind = WorkerEventKind::Invalid;
-  std::shared_ptr<SimulationTicket> ticket;
-  NodeHandle node;
-  std::shared_ptr<PendingEvaluation> pending;
-  Value value{};
-  CompletionKind completion = CompletionKind::None;
-};
-
-struct SessionRegistry {
-  struct PendingEntry {
-    NodeHandle node;
-    std::shared_ptr<PendingEvaluation> pending;
-  };
-
-  void register_pending(const NodeHandle &node,
-                        const std::shared_ptr<PendingEvaluation> &pending) {
-    std::lock_guard<std::mutex> lock(mutex);
-    const auto inserted =
-        pending_by_id.emplace(pending->id, PendingEntry{node, pending}).second;
-    if (!inserted)
-      throw std::logic_error("duplicate pending evaluation identifier");
-  }
-
-  void erase_pending(uint64_t id) {
-    std::lock_guard<std::mutex> lock(mutex);
-    pending_by_id.erase(id);
-  }
-
-  template <typename Function>
-  void drain_pending(Function &&function) noexcept {
-    std::lock_guard<std::mutex> lock(mutex);
-    for (auto &entry : pending_by_id)
-      function(entry.second);
-    pending_by_id.clear();
-  }
-
-  std::mutex mutex;
-  std::unordered_map<uint64_t, PendingEntry> pending_by_id;
-};
-
-struct WorkerFailureState {
-  void publish(std::exception_ptr value) noexcept {
-    std::lock_guard<std::mutex> lock(mutex);
-    if (!error)
-      error = std::move(value);
-  }
-
-  std::exception_ptr snapshot() const noexcept {
-    std::lock_guard<std::mutex> lock(mutex);
-    return error;
-  }
-
-  mutable std::mutex mutex;
-  std::exception_ptr error;
-};
-
 struct TimeoutReached final {};
 struct CancellationReached final {};
 
@@ -357,7 +276,7 @@ call_inference_callback(const ParallelInferenceFunction &inference,
 class ParallelMCTSSearcher {
 public:
   static void validate_config_snapshot(const MCTSConfig &config) {
-    validate_config(config);
+    mcts_internal::MCTSConfigValidator::validate_parallel(config);
   }
 
   static void
@@ -428,7 +347,7 @@ public:
       float temperature = 1.0f, DeterministicTrace *trace = nullptr) const {
     validate_entry_options(options, inference, temperature, trace);
     const MCTSConfig config = guard.config();
-    validate_config(config);
+    mcts_internal::MCTSConfigValidator::validate_parallel(config);
     normalize_and_validate_options(options, config);
     if (trace && options.num_simulations > MCTS_PARALLEL_TRACE_MAX_EVENTS)
       throw std::length_error(
@@ -479,22 +398,20 @@ public:
                                options.simulation_id_base, MCTS_RNG_VERSION};
     detail::RootSnapshot root(std::move(root_copy), config, observer, root_key,
                               guard.tree_generation(), random);
-    auto ledger = std::make_shared<SearchLedger>();
-
-    detail::ActiveTicketRegistry active_tickets;
-    std::vector<std::thread> workers;
     std::exception_ptr failure;
     SearchStopReason stop_reason = SearchStopReason::Completed;
     bool partial = false;
 
     const size_t queue_capacity =
         std::max<size_t>(1, static_cast<size_t>(options.max_inflight));
-    BoundedQueue<std::shared_ptr<detail::SimulationTicket>> work_queue(
-        queue_capacity);
-    BoundedQueue<detail::WorkerEvent> event_queue(queue_capacity);
-    detail::SessionRegistry registry;
-    detail::WorkerFailureState worker_failure;
-    std::atomic<bool> stop_requested{false};
+    detail::ParallelSessionController session(queue_capacity);
+    const auto ledger = session.ledger();
+    auto &active_tickets = session.active_tickets();
+    auto &work_queue = session.work_queue();
+    auto &event_queue = session.event_queue();
+    auto &registry = session.registry();
+    auto &worker_failure = session.worker_failure();
+    auto &stop_requested = session.stop_requested();
 
     uint64_t issued = 0;
     uint64_t terminalized = 0;
@@ -529,9 +446,9 @@ public:
 
       const uint32_t worker_count = static_cast<uint32_t>(std::min<uint64_t>(
           options.num_threads, std::max<uint64_t>(1, options.num_simulations)));
-      workers.reserve(worker_count);
+      session.reserve_workers(worker_count);
       for (uint32_t worker = 0; worker < worker_count; ++worker) {
-        workers.emplace_back([&, worker] {
+        session.start_worker([&, worker] {
           worker_loop(worker, root, tree, work_queue, event_queue, registry,
                       ledger, options, stop_requested, worker_failure);
         });
@@ -671,15 +588,8 @@ public:
       partial = true;
     }
 
-    stop_requested.store(true, std::memory_order_release);
-    work_queue.close();
-    if (failure || partial)
-      event_queue.close();
-    for (auto &worker : workers) {
-      if (worker.joinable())
-        worker.join();
-    }
-    event_queue.close();
+    session.request_stop(failure != nullptr || partial);
+    session.join_workers();
 
     cleanup_pending(tree, registry);
     cleanup_tickets(active_tickets, failure != nullptr, *ledger);
@@ -818,22 +728,6 @@ private:
           std::min<uint64_t>(preferred, std::numeric_limits<uint32_t>::max()));
     }
     options.max_inflight = std::max<uint32_t>(1, options.max_inflight);
-  }
-
-  static void validate_config(const MCTSConfig &config) {
-    if (!std::isfinite(config.cpuct) || config.cpuct < 0.0f ||
-        !std::isfinite(config.fpu) ||
-        !std::isfinite(config.forced_playouts_k) ||
-        config.forced_playouts_k < 0.0f || config.num_simulations < 0 ||
-        !std::isfinite(config.dirichlet_epsilon) ||
-        config.dirichlet_epsilon < 0.0f || config.dirichlet_epsilon > 1.0f)
-      throw std::invalid_argument("parallel MCTS config is invalid");
-    if (config.use_dirichlet_noise && (!std::isfinite(config.dirichlet_alpha) ||
-                                       config.dirichlet_alpha <= 0.0f))
-      throw std::invalid_argument("Dirichlet alpha must be positive");
-    if (config.use_determinization && config.num_determinizations != 1)
-      throw std::invalid_argument(
-          "parallel hidden-information search requires one world");
   }
 
   static void register_pending_or_rollback(
