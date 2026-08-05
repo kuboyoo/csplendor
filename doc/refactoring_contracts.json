@@ -69,6 +69,8 @@
     ],
     "internal": [
       "action_encoder_common.h",
+      "bindings.h",
+      "bindings_array.h",
       "cli_utils.h",
       "mcts_bounded_queue.h",
       "mcts_concurrent_tree.h",
