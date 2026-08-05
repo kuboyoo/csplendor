@@ -7,6 +7,7 @@ from collections import Counter
 import pytest
 
 import csplendor as cs
+from tests.support import game_state_signature as _game_signature
 
 TARGET_TYPES = {
     cs.ActionType.RESERVE_VISIBLE,
@@ -14,41 +15,6 @@ TARGET_TYPES = {
     cs.ActionType.PURCHASE,
     cs.ActionType.VISIT_NOBLE,
 }
-
-
-def _player_signature(player):
-    return [
-        int(player.points),
-        list(map(int, player.gems)),
-        int(player.packed_gems),
-        list(map(int, player.bonuses)),
-        int(player.packed_bonuses),
-        int(player.reserved_count),
-        list(map(int, player.reserved)),
-        list(map(bool, player.reserved_is_hidden)),
-        int(player.purchased_count),
-        list(map(int, player.purchased_cards)),
-        list(map(int, player.acquired_nobles)),
-    ]
-
-
-def _game_signature(game):
-    board = game.board
-    return [
-        list(map(int, board.bank)),
-        [list(map(int, level)) for level in board.visible],
-        [list(map(int, level)) for level in board.decks],
-        list(map(int, board.nobles)),
-        [_player_signature(board.get_player(i)) for i in range(2)],
-        int(board.current_player),
-        int(board.turn),
-        bool(board.final_round),
-        bool(board.waiting_noble),
-        int(board.winner),
-        bool(game.simple_payment_mode),
-        bool(game.blank_refill_mode),
-        int(game.board_hash()),
-    ]
 
 
 def _sha256(payload):
@@ -90,7 +56,7 @@ def test_reserve_and_purchase_full_state_corpus_digest():
                             int(action.pack()),
                             blank_refill,
                             applied,
-                            _game_signature(child),
+                            _game_signature(child, include_hash=True),
                         ]
                     )
 
@@ -170,7 +136,7 @@ def test_noble_and_end_turn_full_state_corpus_digest():
                                 purchased_counts,
                                 int(action.pack()),
                                 applied,
-                                _game_signature(game),
+                                _game_signature(game, include_hash=True),
                             ]
                         )
                         if game.board.waiting_noble:
@@ -187,7 +153,7 @@ def test_noble_and_end_turn_full_state_corpus_digest():
                                         purchased_counts,
                                         int(noble_action.pack()),
                                         applied,
-                                        _game_signature(child),
+                                        _game_signature(child, include_hash=True),
                                     ]
                                 )
 
