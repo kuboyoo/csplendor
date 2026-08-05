@@ -102,6 +102,10 @@ tie-breakに使うcanonical fieldとして扱う。
 ## 変更時の確認
 
 公開名と分類は `tests/test_refactoring_contracts.py`、具体的な順序・hash・ownershipは
-`tests/test_phase0_contracts.py`、gem色とschema fingerprintは
+`tests/test_engine_baseline_contracts.py`、gem色とschema fingerprintは
 `tests/test_gem_color_contract.py` が固定する。digestの変更が生じた場合はgolden値を
 更新して通すのではなく、第2次計画の停止ゲートに従って仕様変更として分離する。
+
+public C++ header一覧は`tests/CMakeLists.txt`のstandalone compile matrixと
+`tests/test_public_header_matrix.py`でmanifestとの一致を確認する。C++ coverageはCI artifactとして
+report-onlyで収集し、現時点では互換性gateの閾値に使わない。

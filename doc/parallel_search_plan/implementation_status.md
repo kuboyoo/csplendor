@@ -210,8 +210,8 @@ nightly・実NN・品質canary・広範な計測matrixのstable化gateは継続�
 - concurrency、hash、determinization、GIL、lifetimeの横断reviewを行い、上記のGIL下snapshotと
   root-parallel少数budget問題を修正した。
 - native、Clang TSAN、Clang ASan+UBSan、Python integrationのCI jobを追加した。
-- scheduled CIは既存4 native testを25回ずつ反復する約100 test実行のinterleaving soakを追加した。
-  test binaryはseed引数を持たないため、これは100種類のscheduler seed sweepではない。
+- scheduled CIは`stress`/`replay` labelのnative testを各25回反復するinterleaving soakを実行する。
+  test binaryはseed引数を持たないため、これはscheduler seed sweepではない。
 - featureはexperimental opt-in、既定値は1 threadとした。問題時はlegacy API、または
   `num_threads=1`へ戻すだけでparallel rolloutを停止できる。
 - Stage Bでは複数threadをexperimental opt-inのままにする。stable化にはremote CI/nightlyの継続成功、
@@ -260,7 +260,8 @@ local ASan+UBSanはsandboxのptrace制約によりLeakSanitizerを起動でき�
 `ASAN_OPTIONS=detect_leaks=0`で実行した。CIでは`detect_leaks=1`を指定する。上記はlocal実行結果であり、
 remote CIの実行成功を意味しない。
 
-通常native testは`mcts_parallel_unit`、`mcts_parallel_stress`、`mcts_parallel_scheduler`、
+通常の並列系native testは`mcts_parallel_unit`、`mcts_parallel_stress`、
+`mcts_scheduler_lifecycle`、`mcts_scheduler_limits`、`mcts_scheduler_hidden`、
 `mcts_parallel_replay`である。ここに記録した結果はlocal snapshotであり、scheduled workflowの成功、
 100種類のscheduler seed、長時間nightly、実NN/品質canaryは別gateである。
 全named fault hook実装はgateとせず、public API fixtureで未被覆の競合に限って最小hookを追加する。

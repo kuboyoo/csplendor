@@ -1341,41 +1341,41 @@ void test_hidden_determinization_integration(uint32_t threads,
 
 } // namespace
 
-int main() {
-  try {
-    test_bounded_queue_close_and_wakeup();
-    for (TreeBackend backend : {TreeBackend::Coarse, TreeBackend::Sharded}) {
-      for (uint32_t threads : {1U, 2U, 4U, 8U})
-        test_fake_evaluator_search(threads, backend);
-    }
-    test_active_mutation_rejected();
-    test_callback_exception_cleanup_and_reuse();
-    test_malformed_result_cleanup_and_reuse();
-    test_timeout_returns_balanced_partial_result();
-    test_sharded_layout_reuse_and_reset();
-    test_entry_validation_is_transactional();
-    test_evaluator_overflow_is_rethrown_and_reusable();
-    test_capacity_named_callback_exception_is_rethrown_and_reusable();
-    test_zero_resolved_budget_skips_evaluator();
-    test_pre_cancel_is_side_effect_free();
-    test_root_noise_seed_is_storage_domain_independent();
-    test_inflight_cooperative_cancellation(ParallelSearchMode::Throughput);
-    test_inflight_cooperative_cancellation(
-        ParallelSearchMode::DeterministicEpoch);
-    test_huge_budget_uses_bounded_ticket_storage(
-        ParallelSearchMode::Throughput);
-    test_huge_budget_uses_bounded_ticket_storage(
-        ParallelSearchMode::DeterministicEpoch);
-    test_capacity_partial_and_root_failure();
-    test_pending_terminal_duplicate_and_stale_races();
-    test_max_depth_sized_path_cleanup();
-    for (TreeBackend backend : {TreeBackend::Coarse, TreeBackend::Sharded}) {
-      for (uint32_t threads : {1U, 2U, 4U, 8U})
-        test_hidden_determinization_integration(threads, backend);
-    }
-    return 0;
-  } catch (const std::exception &error) {
-    std::cerr << "mcts_parallel_scheduler: " << error.what() << '\n';
-    return 1;
+void run_mcts_scheduler_lifecycle_suite() {
+  test_bounded_queue_close_and_wakeup();
+  for (TreeBackend backend : {TreeBackend::Coarse, TreeBackend::Sharded}) {
+    for (uint32_t threads : {1U, 2U, 4U, 8U})
+      test_fake_evaluator_search(threads, backend);
+  }
+  test_active_mutation_rejected();
+  test_sharded_layout_reuse_and_reset();
+  test_entry_validation_is_transactional();
+  test_root_noise_seed_is_storage_domain_independent();
+}
+
+void run_mcts_scheduler_limits_suite() {
+  test_callback_exception_cleanup_and_reuse();
+  test_malformed_result_cleanup_and_reuse();
+  test_timeout_returns_balanced_partial_result();
+  test_evaluator_overflow_is_rethrown_and_reusable();
+  test_capacity_named_callback_exception_is_rethrown_and_reusable();
+  test_zero_resolved_budget_skips_evaluator();
+  test_pre_cancel_is_side_effect_free();
+  test_inflight_cooperative_cancellation(ParallelSearchMode::Throughput);
+  test_inflight_cooperative_cancellation(
+      ParallelSearchMode::DeterministicEpoch);
+  test_huge_budget_uses_bounded_ticket_storage(
+      ParallelSearchMode::Throughput);
+  test_huge_budget_uses_bounded_ticket_storage(
+      ParallelSearchMode::DeterministicEpoch);
+  test_capacity_partial_and_root_failure();
+  test_pending_terminal_duplicate_and_stale_races();
+  test_max_depth_sized_path_cleanup();
+}
+
+void run_mcts_scheduler_hidden_information_suite() {
+  for (TreeBackend backend : {TreeBackend::Coarse, TreeBackend::Sharded}) {
+    for (uint32_t threads : {1U, 2U, 4U, 8U})
+      test_hidden_determinization_integration(threads, backend);
   }
 }

@@ -1,4 +1,4 @@
-"""Phase 0: public, rule, packed-state, hash, and MCTS safety contracts.
+"""Public, rule, packed-state, hash, and MCTS baseline contracts.
 
 These tests deliberately describe the current public behaviour, including the
 full-information board hash contract used for game-position identity.

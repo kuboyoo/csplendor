@@ -1,4 +1,4 @@
-"""Phase 3 contracts for the MCTSSearcher-owned simulation Game."""
+"""MCTSSearcher ownership and simulation Game contracts."""
 
 import csplendor._csplendor as core
 import numpy as np
@@ -226,7 +226,7 @@ def test_callback_exception_preserves_root_and_propagates(
         history_depths[name].append(_history_depth(callback_game))
         callback_game.board.bank = [0, 0, 0, 0, 0, 0]
         callback_game.board.winner = 1
-        raise RuntimeError(f"phase3 {name} failure")
+        raise RuntimeError(f"mcts {name} failure")
 
     class RaisingFeaturizer:
         def featurize(self, callback_game):
@@ -251,7 +251,7 @@ def test_callback_exception_preserves_root_and_propagates(
                 record_and_raise("get_action_mask", game)
             return self.encoder.get_action_mask(game)
 
-    with pytest.raises(RuntimeError, match=f"phase3 {callback_name} failure"):
+    with pytest.raises(RuntimeError, match=f"mcts {callback_name} failure"):
         core.mcts_search(
             MCTS(_config(determinization=determinization)),
             RaisingFeaturizer(),

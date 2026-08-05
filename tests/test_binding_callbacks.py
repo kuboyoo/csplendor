@@ -1,3 +1,5 @@
+"""Binding ownership, batch schema, and GIL contracts."""
+
 import gc
 
 import numpy as np

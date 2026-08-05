@@ -8,6 +8,9 @@
 
 既存の [`doc/refactoring_plan/README.md`](refactoring_plan/README.md) は、第1次リファクタリングの実施記録として保持する。本書は、その完了後に追加された MCTS、並列探索、ソルバー、Web API を含む現在の構成を対象とする第2次計画である。
 
+> 完了記録（2026-08-05）: R0--R8をすべて完了した。本書は互換性判断と実施履歴として
+> 保持し、今後の独立課題は[`tasks.md`](tasks.md)で管理する。
+
 ## 2. 目的
 
 第2次リファクタリングの目的は、現在の速度と互換性を維持しながら、次の変更を安全に行える構造へ移行することである。
@@ -235,7 +238,7 @@ external AI provider protocol <--> dlsplendor / model repositories
 
 ## 7. 実施フェーズ
 
-### R0: 契約と基準値の固定
+### R0: 契約と基準値の固定（完了）
 
 最初に、構造変更を評価するための基準を揃える。
 
@@ -255,7 +258,7 @@ external AI provider protocol <--> dlsplendor / model repositories
 - 公開契約の一覧と golden test が CI で実行される。
 - refactor 前 benchmark を同一環境で再現できる。
 
-### R1: build と binding の分割
+### R1: build と binding の分割（完了）
 
 最初の製品コード変更は、挙動を変えにくく効果を確認しやすいコンパイル境界から始める。
 
@@ -275,7 +278,7 @@ external AI provider protocol <--> dlsplendor / model repositories
 - clean/incremental build time と wheel 内容を比較し、悪化がない。
 - Linux/macOS/Windows の package CI が通る。
 
-### R2: domain state と mutation gateway の整理
+### R2: domain state と mutation gateway の整理（完了）
 
 実施項目:
 
@@ -294,7 +297,7 @@ external AI provider protocol <--> dlsplendor / model repositories
 - hash/cache の stale state を sanitizer/debug build で検出できる。
 - copy 数、simulation/s、合法手生成速度が基準を下回らない。
 
-### R3: rule query、validation、transition の整理
+### R3: rule query、validation、transition の整理（完了）
 
 実施項目:
 
@@ -389,7 +392,7 @@ external AI provider protocol <--> dlsplendor / model repositories
 - 外部 AI の有無を fake provider で再現できる。
 - cross-repository 移行には双方の互換期間と rollback 手順がある。
 
-### R8: テスト・文書・残存 debt の整理
+### R8: テスト・文書・残存 debt の整理（完了）
 
 実施項目:
 
@@ -555,4 +558,8 @@ sibling path操作をcompatibility bridgeへ集約した。通常importでは外
 探索せず、既存503とresponse schemaを維持する。
 詳細は[`refactoring_plan/r7_api_services.md`](refactoring_plan/r7_api_services.md)に記録する。
 
-R7のapplication境界整理は完了した。次の独立変更はR8のテスト・文書・残存debt整理とする。
+R8では履歴名だったPython testをsubsystem名へ移し、巨大なMCTS scheduler testを
+lifecycle、limits/failure、hidden-informationの3 executableへ分割した。共有property/differential
+support、公開header 16本の単独compile matrix、report-onlyのC++ coverage CIを追加した。
+主要文書と第1次計画の完了記録も現行実装へ同期し、全R0--R8を完了した。
+詳細は[`refactoring_plan/r8_quality_docs.md`](refactoring_plan/r8_quality_docs.md)に記録する。

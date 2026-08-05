@@ -125,8 +125,8 @@ public:
     std::stringstream ss;
     ss << "Turn " << turn << ", Player " << (int)current_player << "'s turn"
        << std::endl;
-    ss << "Bank: [E:" << (int)bank[0] << " S:" << (int)bank[1]
-       << " R:" << (int)bank[2] << " D:" << (int)bank[3]
+    ss << "Bank: [D:" << (int)bank[0] << " S:" << (int)bank[1]
+       << " E:" << (int)bank[2] << " R:" << (int)bank[3]
        << " O:" << (int)bank[4] << " G:" << (int)bank[5] << "]" << std::endl;
 
     ss << "Nobles: [";
@@ -151,12 +151,12 @@ public:
       const auto &p = players[i];
       ss << "--- Player " << i << " (" << (int)p.points << "pts) ---"
          << std::endl;
-      ss << "Gems: [E:" << (int)p.gems[0] << " S:" << (int)p.gems[1]
-         << " R:" << (int)p.gems[2] << " D:" << (int)p.gems[3]
+      ss << "Gems: [D:" << (int)p.gems[0] << " S:" << (int)p.gems[1]
+         << " E:" << (int)p.gems[2] << " R:" << (int)p.gems[3]
          << " O:" << (int)p.gems[4] << " G:" << (int)p.gems[5] << "] ("
          << p.total_gems() << ")" << std::endl;
-      ss << "Bonuses: [E:" << (int)p.bonuses[0] << " S:" << (int)p.bonuses[1]
-         << " R:" << (int)p.bonuses[2] << " D:" << (int)p.bonuses[3]
+      ss << "Bonuses: [D:" << (int)p.bonuses[0] << " S:" << (int)p.bonuses[1]
+         << " E:" << (int)p.bonuses[2] << " R:" << (int)p.bonuses[3]
          << " O:" << (int)p.bonuses[4] << "]" << std::endl;
       ss << "Reserved: [";
       for (int r = 0; r < 3; ++r) {

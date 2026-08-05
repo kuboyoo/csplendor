@@ -1,4 +1,4 @@
-"""Regression tests added by the Phase 0-7 cross-phase review."""
+"""Regression contracts spanning domain, rules, encoding and search."""
 
 import os
 import shutil

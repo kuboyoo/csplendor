@@ -1,3 +1,5 @@
+"""Shared action-encoding infrastructure contracts."""
+
 import pytest
 
 from csplendor import Action, ActionEncoderV2, ActionEncoderV3, ActionType, Game

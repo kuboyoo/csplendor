@@ -73,3 +73,17 @@ def test_state_schema_identifier_covers_the_frozen_color_layout() -> None:
         "csplendor.state.v1;base=196;public=117;gems="
         "diamond,sapphire,emerald,ruby,onyx,gold"
     )
+
+
+def test_board_debug_output_uses_the_canonical_color_order() -> None:
+    game = csplendor.Game(seed=0)
+    game.board.bank = [1, 2, 3, 4, 5, 6]
+    player = game.board.get_player(0)
+    player.gems = [6, 5, 4, 3, 2, 1]
+    player.bonuses = [1, 2, 3, 4, 5]
+    game.board.set_player(0, player)
+
+    rendered = repr(game.board)
+    assert "Bank: [D:1 S:2 E:3 R:4 O:5 G:6]" in rendered
+    assert "Gems: [D:6 S:5 E:4 R:3 O:2 G:1]" in rendered
+    assert "Bonuses: [D:1 S:2 E:3 R:4 O:5]" in rendered

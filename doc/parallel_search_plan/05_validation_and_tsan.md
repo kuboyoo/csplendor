@@ -68,18 +68,20 @@ set(CSPLENDOR_SANITIZER "none" CACHE STRING
 native sanitizer jobではPython moduleを必須にせず、project header/sourceとtest harnessを
 すべて同じsanitizer flagsでbuildする。
 
-現行`csplendor_core`は`INTERFACE` targetなので、PS-5以降のparallel coreは当面header-onlyで
-追加する。native testとPython moduleが同じheader定義・sanitizer optionを使うことをbuild
-matrixで確認し、`.cpp`を前提にtarget構成を分岐しない。
+現行`csplendor_core`は非template実装を持つ`STATIC` targetで、parallel探索本体の主要templateは
+headerに置く。native testとPython moduleが同じheader定義・sanitizer optionを使うことをbuild
+matrixで確認する。
 
 ### 3.2 CMake target
 
 ```text
-csplendor_core (INTERFACE)
+csplendor_core (STATIC)
 csplendor_sanitizer (INTERFACE)
 mcts_parallel_unit
 mcts_parallel_stress
-mcts_parallel_scheduler
+mcts_scheduler_lifecycle
+mcts_scheduler_limits
+mcts_scheduler_hidden
 mcts_parallel_replay
 benchmark_mcts_parallel
 _csplendor (optional pybind module)
@@ -172,6 +174,9 @@ toolchain/runtime起因の起動失敗はrace成功扱いにせず、Clang prima
 tests/mcts_parallel_unit.cpp
 tests/mcts_parallel_stress.cpp
 tests/mcts_parallel_scheduler.cpp
+tests/mcts_scheduler_lifecycle_main.cpp
+tests/mcts_scheduler_limits_main.cpp
+tests/mcts_scheduler_hidden_main.cpp
 tests/mcts_parallel_replay.cpp
 ```
 

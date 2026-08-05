@@ -6,7 +6,7 @@ correctness修正として変更し、ゲームルールと合法手生成は変
 
 ## 追加物
 
-- `tests/test_phase0_contracts.py`
+- `tests/test_engine_baseline_contracts.py`
   - 公開 `__all__`、encoder の mask shape/dtype/返却後の独立性、固定seedの
     合法手code順序、code/index/applyの同値性を固定する。
   - `PlayerState` の通常setterと `Board.set_player` が packed fieldを同期する
@@ -26,13 +26,13 @@ correctness修正として変更し、ゲームルールと合法手生成は変
   - fixed corpusのraw rate samplesをJSONに保存し、baseline/candidateを
     paired bootstrap CIで比較する。raw artifactはCI artifactまたは外部保存先に
     置き、repoには入れない。
-- `tests/test_phase0_benchmark_runner.py`
+- `tests/test_benchmark_contracts.py`
   - 比較統計が決定的に動作し、明白な回帰を検出することを確認する。
 
 ## 実行方法
 
 ```bash
-python -m pytest -o addopts= tests/test_phase0_contracts.py tests/test_phase0_benchmark_runner.py -q
+python -m pytest -o addopts= tests/test_engine_baseline_contracts.py tests/test_benchmark_contracts.py -q
 python scripts/phase0_native_probe.py --output /tmp/csplendor-phase0-native.json
 python scripts/benchmark_phase0.py --label baseline --samples 15 --output /tmp/baseline.json
 python scripts/benchmark_phase0.py --label candidate --samples 15 --output /tmp/candidate.json

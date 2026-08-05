@@ -1,4 +1,4 @@
-"""Phase 6.4 compatibility contracts for DFPN output and CLI modules."""
+"""DFPN output and CLI module compatibility contracts."""
 
 from __future__ import annotations
 

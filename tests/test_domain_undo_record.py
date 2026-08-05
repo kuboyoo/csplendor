@@ -1,4 +1,4 @@
-"""Phase 7 delta-undo candidate correctness and cost checks."""
+"""Domain delta-undo correctness and cost contracts."""
 
 import json
 import os
@@ -21,8 +21,8 @@ def _compiler():
 
 def test_undo_record_matches_snapshot_for_all_transitions_and_is_smaller():
     compiler = _compiler()
-    with tempfile.TemporaryDirectory(prefix="csplendor-phase7-") as directory:
-        binary = Path(directory) / "phase7_undo_probe"
+    with tempfile.TemporaryDirectory(prefix="csplendor-undo-") as directory:
+        binary = Path(directory) / "undo_record_probe"
         subprocess.run(
             [
                 compiler,
@@ -30,7 +30,7 @@ def test_undo_record_matches_snapshot_for_all_transitions_and_is_smaller():
                 "-O3",
                 "-DCSPLENDOR_VERIFY_DELTA_UNDO",
                 f"-I{ROOT / 'src'}",
-                str(ROOT / "tests" / "phase7_undo_probe.cpp"),
+                str(ROOT / "tests" / "undo_record_probe.cpp"),
                 "-o",
                 str(binary),
             ],

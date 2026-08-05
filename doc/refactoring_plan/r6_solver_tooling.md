@@ -62,7 +62,7 @@ node limitとtime limitはそれぞれ`node limit exceeded`、`time limit exceed
 区別される。solverには公開cancel APIがなく、Python root-parallel DFPNのfuture cancelと
 worker shutdown経路は変更していない。既存のsequential/parallel同値testを維持した。
 
-CLI/outputは既存の`test_phase6_dfpn_modules.py`でstdout/stderr/exit code、strategy JSON、
+CLI/outputは既存の`test_solver_dfpn_modules.py`でstdout/stderr/exit code、strategy JSON、
 KIFU digestを継続固定する。puzzle testはdepth directory、problem/strategy/KIFU、manifest、
 hidden reserved cardの再現性を固定する。
 

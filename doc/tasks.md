@@ -1,54 +1,44 @@
-# Engine Refinement Tasks
+# csplendor 継続課題
 
-This document outlines planned improvements to the `csplendor` engine to reach the performance and efficiency levels of world-class game engines (e.g., Shogi/Chess engines).
+最終更新: 2026-08-05
 
-## 1. Zero Allocation & Memory Efficiency
-Aim to eliminate all heap allocations during the MCTS search loop.
+第1次リファクタリング（Phase 0--7）と第2次リファクタリング（R0--R8）は完了した。
+完了内容は[`refactoring_plan/README.md`](refactoring_plan/README.md)と
+[`refactoring_plan_v2.md`](refactoring_plan_v2.md)に残し、この文書では未完了の独立課題だけを扱う。
 
-- [x] **Static Decks & Arrays**: Replace `std::vector` in `Board::decks` and `Board::nobles` with fixed-size `FixedStack` (stack-allocated).
-- [x] **Fixed-Size Move List**: Implement a `MoveList` container (stack-allocated) to avoid `std::vector<Action>` allocations in `MoveGenerator`.
-- [ ] **History Pre-allocation**: Pre-allocate `board_history` and `action_history` or use a fixed circular buffer for Undo support.
+## 並列MCTSのstable化
 
-## 2. Incremental State Updates
-Transition from "from scratch" calculations to incremental "delta" updates.
+複数threadは引き続きexperimental opt-inである。stable/defaultへ昇格する前に次を満たす。
 
-- [x] **Incremental Zobrist Hashing**: Implemented hash caching with invalidation on state changes. Hash is computed once and cached until invalidated.
-- [ ] **Resource/Score Caching**: Maintain `packed_gems`, `packed_bonuses`, and `points` strictly via incremental updates to avoid periodic re-syncing.
-- [x] **Noble Eligibility Mask**: Maintain a bitmask of eligible nobles for each player, updated only when a player's bonuses change via `sync_packed()`.
+- scheduled sanitizer/soakの継続成功と可変scheduler seedによるinterleaving拡張。
+- 展開済みnodeへ再到達した場合の二次feature signature照合。
+- 実NN/GPUでのlatency・batch・utilization計測。
+- fixed-time探索品質とself-play canary。
+- soft timeoutを補う外部watchdog運用の確認。
 
-## 3. High-Performance Bit Manipulation
-Leverage advanced bitwise operations and SIMD for low-level logic.
+## 性能候補
 
-- [ ] **SIMD-based Affordability Check**: Explore 128-bit SIMD (SSE/AVX) to check card affordability across all 5 colors in a single clock cycle.
-- [ ] **Bank & Inventory Masks**: Use bitmasking to quickly check if the bank has enough gems for a "Take 3" or "Take 2 same" action without looping.
-- [ ] **Action Compression**: Compress the `Action` struct to the smallest possible bit-representation for cache efficiency.
+現在のMCTS hot pathでは直接action mask/decode、bitset走査、compact edge、O(1) quiescence監査を
+導入済みである。次の変更はprofileで支配項を確認してから独立A/Bとして行う。
 
-## 4. Architectural Enhancements
-Optimize the boundary between simulation and neural network inference.
+- platform別SIMD affordabilityの試作とportable scalar実装との比較。
+- bank/inventory maskの追加がbranch/cache missを実際に減らすかの検証。
+- `Action`の内部compact表現。公開layout/packed codeは維持する。
+- inference batch変換と実model待ち時間の分離計測。
+- solver別のnodes/s、peak RSS、proof変換costの継続計測。
 
-- [~] **C++ MCTS Core Integration**: Migrate the MCTS search logic from Python to C++. Use Python only for neural network batch inference.
-    - [x] Phase 1: Core data structures (`MCTSNode`, `MCTSConfig`, `MCTS` class) - DONE
-    - [x] Phase 1: PUCT selection, backpropagation, node expansion - DONE
-    - [x] Phase 1: Python bindings for MCTS classes - DONE
-    - [ ] Phase 2: Batch inference interface and Python callback integration
-    - [ ] Phase 3: Replace Python MCTS with C++ MCTS in training loop
-- [ ] **Lightweight Undo (Copy-on-Write)**: Optimize `Board::clone_light()` or implement a robust `undo()` that is faster than cloning for node expansion.
-- [ ] **Transposition Table Optimization**: Use a fixed-size, lock-less (if multithreaded) transposition table for storing search results across the MCTS tree.
+## Domainと互換性
 
-## 5. Benchmarking & Profiling
-Set up rigorous performance tracking.
+- 公開C++ fieldを将来private化する場合の互換shimとmajor-version移行。
+- production undoをdelta化するかは、full snapshotより優位な実workloadが確認できた場合だけ再評価する。
+- legacy replay pickleを非実行形式へ移行する。現行readerは管理者配置の信頼済みローカルfile専用。
+- encoder/feature/snapshot/traceの新version追加時に旧version readerと移行期間を定義する。
 
-- [ ] **Instruction Level Profiling**: Use `perf` or `valgrind --tool=callgrind` to identify remaining bottlenecks.
-- [ ] **NPS (Nodes Per Second) Tracking**: Add a benchmark script to measure absolute search speed after each major optimization.
+## Release運用
 
-## 6. Hidden Information & Determinization (Combatting "Clairvoyance")
-Address the problem where MCTS "knows" the future deck order during search, leading to unrealistic play.
+- C++ coverageはreport-onlyを継続し、複数回の分布と未被覆領域を確認後に閾値を提案する。
+- PyPI公開前にmanylinux repair、TestPyPI、配布wheelのmacOS/Windows隔離installを行う。
+- setuptoolsの2027年非互換化より前にlicense metadataをSPDX文字列へ移行する。
+- `usi`仕様や`dlsplendor` consumer変更時はcross-repository compatibility testを同時に更新する。
 
-- [x] **Observer-Aware Randomization**: Enhanced `randomize_hidden_information` to preserve only observer's knowledge while shuffling hidden info (deck order, opponent's hidden reserved cards).
-- [x] **MCTS Search Determinization**:
-    - **Implementation**: Added `--useDeterminization` flag to enable shuffled clones during MCTS search.
-    - **Observable Hash**: Added `observable_hash(observer)` to ensure same observable states hash identically across determinizations.
-- [ ] **Pool-based Deck Management**: Maintain a "seen cards" list to ensure randomization only recruits cards from the pool of truly unknown cards (e.g., cards already burned, on board, or in player hands must be excluded from shuffling).
-- [x] **MCTS-Friendly Interface**:
-    - [x] Added `Game.shuffled_clone(observer_player, seed)` to the C++ bindings. This allows `MCTS.py` to easily create a "fair" mental model of the game for simulation.
-    - [x] `clone_light()` remains fast; `shuffled_clone()` adds randomization for MCTS expansion.
+完了済み項目をこの一覧へ戻さず、仕様変更・性能改善・release作業はそれぞれ独立PRとして扱う。
