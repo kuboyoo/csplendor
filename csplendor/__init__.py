@@ -38,6 +38,7 @@ from ._csplendor import (
 )
 from .action_space import ActionEncoder
 from .features import StateFeaturizer
+from .gem_colors import GEM_NAMES, GEM_SYMBOLS, GEM_USI_SYMBOLS
 
 try:
     __version__ = _distribution_version("csplendor")
@@ -61,6 +62,3 @@ __all__ = [
     "solve_reveal_verified_mate_cpp",
     "solve_visible_only_winner_cpp",
 ]
-
-GEM_NAMES = ["Emerald", "Sapphire", "Ruby", "Diamond", "Onyx", "Gold"]
-GEM_SYMBOLS = ["E", "S", "R", "D", "O", "G"]

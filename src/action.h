@@ -11,7 +11,7 @@ struct Action {
   ActionType type = ACTION_TYPE_COUNT; // Initialized to an invalid type
 
   // For TAKE_DIFFERENT, TAKE_SAME
-  std::array<uint8_t, 5> take = {0}; // [E, S, R, D, O]
+  std::array<uint8_t, 5> take = {0}; // [Diamond, Sapphire, Emerald, Ruby, Onyx]
 
   // For RESERVE_VISIBLE, RESERVE_DECK, PURCHASE
   int8_t card_id = -1;        // Card ID
@@ -22,7 +22,7 @@ struct Action {
   std::array<uint8_t, 5> gold_as = {0};
 
   // For token return (when exceeding 10 gems)
-  std::array<uint8_t, 6> return_gems = {0}; // [E, S, R, D, O, G]
+  std::array<uint8_t, 6> return_gems = {0}; // Five colors above, then Gold
 
   // For noble choice (if multiple are eligible)
   int8_t noble_choice = -1; // ID of the noble chosen

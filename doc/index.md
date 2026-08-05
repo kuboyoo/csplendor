@@ -12,6 +12,7 @@ Welcome to the technical documentation for the `csplendor` engine.
 - [Web API Reference](web_api.md) - Usage of the FastAPI backend.
 - [Release Validation Record](release_validation.md) - Local release checks and remaining platform/publication gates.
 - [MCTS Hot-path Optimizations](mcts_hotpath_optimizations.md) - Internal bitsets, compact edges, equivalence tests, and benchmark results.
+- [Second Refactoring Plan](refactoring_plan_v2.md) - Current architecture, compatibility contracts, priorities, and phased refactoring roadmap.
 
 ---
 

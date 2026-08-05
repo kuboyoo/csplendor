@@ -11,7 +11,7 @@
 
 struct PlayerState {
   std::array<uint8_t, 6> gems = {
-      0};                   // Emerald, Sapphire, Ruby, Diamond, Onyx, Gold
+      0};                   // Diamond, Sapphire, Emerald, Ruby, Onyx, Gold
   uint64_t packed_gems = 0; // Packed 5 colors (excluding Gold)
   std::array<uint8_t, 5> bonuses = {0}; // Bonuses from purchased cards
   uint64_t packed_bonuses = 0;

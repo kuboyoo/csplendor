@@ -907,6 +907,8 @@ PYBIND11_MODULE(_csplendor, m) {
 
   // StateEncoder bindings
   py::class_<StateEncoder>(m, "StateEncoder")
+      .def_static("schema_version", &StateEncoder::schema_version)
+      .def_static("schema_fingerprint", &StateEncoder::schema_fingerprint)
       .def_static(
           "encode",
           [](const Game &game, int8_t observer) {
