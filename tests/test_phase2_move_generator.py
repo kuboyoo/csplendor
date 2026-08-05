@@ -15,6 +15,15 @@ from csplendor import (
     get_card,
     get_noble,
 )
+from tests.support import (
+    action_signature as _action_signature,
+)
+from tests.support import (
+    game_state_signature as _board_signature,
+)
+from tests.support import (
+    set_current_player as _set_player,
+)
 
 
 def _digest_ints(values):
@@ -24,60 +33,6 @@ def _digest_ints(values):
 
 def _digest_mask(mask):
     return hashlib.sha256(np.asarray(mask, dtype=np.uint8).tobytes()).hexdigest()
-
-
-def _action_signature(action):
-    return (
-        int(action.type),
-        tuple(map(int, action.take)),
-        int(action.card_id),
-        int(action.deck_level),
-        bool(action.from_reserved),
-        tuple(map(int, action.gold_as)),
-        tuple(map(int, action.return_gems)),
-        int(action.noble_choice),
-    )
-
-
-def _set_player(game, *, gems=None, bonuses=None, reserved=None):
-    player = game.board.players[game.current_player]
-    if gems is not None:
-        player.gems = list(gems)
-    if bonuses is not None:
-        player.bonuses = list(bonuses)
-    if reserved is not None:
-        player.reserved = list(reserved)
-    game.board.set_player(game.current_player, player)
-
-
-def _player_signature(player):
-    return (
-        int(player.points),
-        tuple(map(int, player.gems)),
-        tuple(map(int, player.bonuses)),
-        tuple(map(int, player.reserved)),
-        tuple(map(bool, player.reserved_is_hidden)),
-        int(player.reserved_count),
-        int(player.purchased_count),
-        tuple(map(int, player.purchased_cards)),
-        tuple(map(int, player.acquired_nobles)),
-    )
-
-
-def _board_signature(game):
-    board = game.board
-    return (
-        tuple(map(int, board.bank)),
-        tuple(tuple(map(int, level)) for level in board.visible),
-        tuple(tuple(map(int, level)) for level in board.decks),
-        tuple(map(int, board.nobles)),
-        tuple(_player_signature(player) for player in board.players),
-        int(board.turn),
-        int(board.current_player),
-        bool(board.final_round),
-        bool(board.waiting_noble),
-        int(board.winner),
-    )
 
 
 def _uncapped_exchange_prefix(game, limit):

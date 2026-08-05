@@ -19,6 +19,7 @@ from csplendor import (
     PlayerState,
     StateEncoder,
 )
+from tests.support import reachable_state_corpus
 
 EXPECTED_PUBLIC_EXPORTS = {
     "GemType", "ActionType", "Card", "Noble", "Action", "PlayerState",
@@ -53,20 +54,6 @@ def _pack_12bit(values):
     return sum(int(value) << (12 * index) for index, value in enumerate(values))
 
 
-def _corpus_games():
-    for seed in (0, 1, 42, 123):
-        game = Game(seed=seed)
-        yield game
-        # Use action codes so this fixture itself does not rely on Python list
-        # object identity.  No history is intentionally retained here.
-        for ply in range(5):
-            codes = game.legal_action_codes
-            if not codes or game.is_game_over():
-                break
-            assert game.apply_action_code_trusted(codes[ply % len(codes)], False)
-            yield game
-
-
 def test_public_python_surface_and_encoder_result_ownership_contract():
     assert set(csplendor.__all__) == EXPECTED_PUBLIC_EXPORTS
 
@@ -97,7 +84,7 @@ def test_legal_action_codes_are_golden_and_indexed_in_the_same_order():
 
 
 def test_generated_actions_are_unique_pack_roundtrippable_and_applicable():
-    for game in _corpus_games():
+    for game in reachable_state_corpus():
         actions = game.legal_actions
         codes = [int(action.pack()) for action in actions]
         assert codes == list(game.legal_action_codes)

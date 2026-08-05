@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from csplendor import MCTS, ActionEncoder, ActionType, Game, MCTSConfig
+from tests.support import game_state_signature as _game_signature
 
 
 def _make_history(length):
@@ -35,40 +36,6 @@ def _make_history(length):
         assert game.apply(action, True)
     assert _history_depth(game) == length
     return game
-
-
-def _player_signature(player):
-    return (
-        int(player.points),
-        tuple(map(int, player.gems)),
-        int(player.packed_gems),
-        tuple(map(int, player.bonuses)),
-        int(player.packed_bonuses),
-        int(player.reserved_count),
-        tuple(map(int, player.reserved)),
-        tuple(map(bool, player.reserved_is_hidden)),
-        int(player.purchased_count),
-        tuple(map(int, player.acquired_nobles)),
-        tuple(map(int, player.purchased_cards)),
-    )
-
-
-def _game_signature(game):
-    board = game.board
-    return (
-        tuple(map(int, board.bank)),
-        tuple(tuple(map(int, level)) for level in board.visible),
-        tuple(tuple(map(int, level)) for level in board.decks),
-        tuple(map(int, board.nobles)),
-        tuple(_player_signature(board.get_player(i)) for i in range(2)),
-        int(board.turn),
-        int(board.current_player),
-        bool(board.final_round),
-        bool(board.waiting_noble),
-        int(board.winner),
-        bool(game.simple_payment_mode),
-        bool(game.blank_refill_mode),
-    )
 
 
 def _undo_trace(game):
