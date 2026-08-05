@@ -15,6 +15,7 @@ Welcome to the technical documentation for the `csplendor` engine.
 - [Second Refactoring Plan](refactoring_plan_v2.md) - Current architecture, compatibility contracts, priorities, and phased refactoring roadmap.
 - [Refactoring Compatibility Contracts](refactoring_contracts.md) - Versioned API classification, state invariants, mutation, and ownership contracts.
 - [R0 Refactoring Baseline](refactoring_plan/r0_baseline.md) - Reproducible build/include/runtime measurements and shared test support.
+- [R1-A Binding Split](refactoring_plan/r1a_bindings.md) - Responsibility-specific pybind11 translation units and before/after validation.
 
 ---
 

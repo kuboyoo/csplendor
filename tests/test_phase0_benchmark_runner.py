@@ -19,3 +19,9 @@ def test_bootstrap_ratio_ci_is_deterministic_and_detects_regression():
     second = runner.paired_ratio_confidence_interval(baseline, candidate, iterations=500, seed=7)
     assert first == second
     assert first[1] < 1.0
+
+
+def test_benchmark_has_explicit_nontrivial_warmup():
+    runner = _load_runner()
+    assert runner.WARMUP_WRAPPER_ITERATIONS >= 1_000
+    assert runner.WARMUP_PLAYOUT_GAMES >= 100

@@ -97,7 +97,14 @@ if(CSPLENDOR_BUILD_PYTHON_MODULE)
   set(PYBIND11_FINDPYTHON ON)
   find_package(pybind11 REQUIRED)
 
-  pybind11_add_module(_csplendor src/bindings.cpp)
+  pybind11_add_module(
+      _csplendor
+      src/bindings.cpp
+      src/bindings_domain.cpp
+      src/bindings_rules.cpp
+      src/bindings_encoding.cpp
+      src/bindings_mcts.cpp
+      src/bindings_solvers.cpp)
   target_link_libraries(
       _csplendor PRIVATE csplendor_core csplendor_sanitizer Threads::Threads)
 endif()

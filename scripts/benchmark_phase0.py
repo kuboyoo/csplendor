@@ -28,8 +28,9 @@ from pathlib import Path
 
 from csplendor import Game
 
-
 SCHEMA_VERSION = 1
+WARMUP_WRAPPER_ITERATIONS = 5_000
+WARMUP_PLAYOUT_GAMES = 1_000
 
 
 def paired_ratio_confidence_interval(baseline, candidate, *, iterations=10_000, seed=0):
@@ -93,10 +94,14 @@ def _cpp_playout_rate(games):
 def collect(samples, iterations):
     """Collect paired-order raw samples from a fixed corpus."""
     game = _make_midgame()
-    # Warm caches and extension dispatch before taking samples.
-    game.legal_actions
-    game.legal_action_codes
-    game.legal_action_count
+    # Warm extension dispatch, generated conversion code, caches, and the CPU
+    # governor before taking samples. A single call left the first 5-6 samples
+    # at a visibly different frequency on the R1-A comparison host.
+    for _ in range(WARMUP_WRAPPER_ITERATIONS):
+        game.legal_actions
+        game.legal_action_codes
+        game.legal_action_count
+    _cpp_playout_rate(WARMUP_PLAYOUT_GAMES)
     result = {
         "legal_actions_per_sec": [],
         "legal_action_codes_per_sec": [],
@@ -129,6 +134,8 @@ def report(label, samples, iterations):
             "midgame_seed": 42,
             "samples": samples,
             "iterations": iterations,
+            "warmup_wrapper_iterations": WARMUP_WRAPPER_ITERATIONS,
+            "warmup_playout_games": WARMUP_PLAYOUT_GAMES,
             "rates": rates,
         },
     }
