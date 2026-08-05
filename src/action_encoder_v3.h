@@ -390,7 +390,7 @@ public:
     } else if (action_id < OFFSET_VISIT_NOBLE) {
       // PURCHASE (card ID-based)
       int local_idx = action_id - OFFSET_PURCHASE;
-      int card_id = find_card_id(local_idx);
+      const int8_t card_id = static_cast<int8_t>(find_card_id(local_idx));
       int pat = local_idx - CARD_PAYMENT_OFFSET[card_id];
 
       action.type = PURCHASE;
@@ -400,7 +400,8 @@ public:
 
     } else if (action_id < OFFSET_PASS) {
       // VISIT_NOBLE (noble ID-based)
-      int noble_id = action_id - OFFSET_VISIT_NOBLE;
+      const int8_t noble_id =
+          static_cast<int8_t>(action_id - OFFSET_VISIT_NOBLE);
       action.type = VISIT_NOBLE;
       action.noble_choice = noble_id;
 
