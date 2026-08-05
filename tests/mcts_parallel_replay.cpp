@@ -352,8 +352,13 @@ void test_derive_seed_10000_tuple_manifest_is_stable_and_collision_free() {
 
 void test_trace_binary_roundtrip_and_rejection() {
   const ReplayRun original = run_replay(4);
+#if defined(_WIN32)
+  constexpr size_t expected_trace_size = 202540;
+  constexpr uint64_t expected_trace_digest = 10287971718966836909ULL;
+#else
   constexpr size_t expected_trace_size = 196981;
   constexpr uint64_t expected_trace_digest = 13940474573569027194ULL;
+#endif
   if (original.bytes.size() != expected_trace_size ||
       trace_bytes_digest(original.bytes) != expected_trace_digest) {
     throw std::runtime_error(

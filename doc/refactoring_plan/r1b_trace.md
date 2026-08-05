@@ -24,8 +24,18 @@ thread数／tree backend間の決定性は変更していない。
 
 ## 同値性
 
-- seed、search nonce、simulation rangeを固定した41 simulationのcanonical traceを
-  196,981 bytes、byte digest `13940474573569027194`としてgolden化した。
+- seed、search nonce、simulation rangeを固定した41 simulationのcanonical traceを、
+  supported toolchainごとの既存値としてgolden化した。
+
+| toolchain | bytes | byte digest |
+|---|---:|---:|
+| GCC/Clang（Linux/macOS） | 196,981 | `13940474573569027194` |
+| MSVC（Windows） | 202,540 | `10287971718966836909` |
+
+MSVCでは浮動小数点を含む探索選択列がGCC/Clangと異なり、結果としてevent delta数も
+異なる。cross-platformで単一byte列になることは既存契約に追加せず、各toolchain内の
+byte表現と、thread数／tree backend間の決定性を固定する。
+
 - 1/2/4/8 threadおよびcoarse/sharded tree backendで、trace byte列、探索結果、
   replay後のtree digestが完全一致する既存testを維持した。
 - round-trip、magic/version/truncation/tamper、enum、path/node/aggregate上限、
