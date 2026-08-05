@@ -350,7 +350,7 @@ external AI provider protocol <--> dlsplendor / model repositories
 - exception/cancel/worker failure 後に queue、virtual loss、thread が残らない。
 - serial/parallel とも基準 NPS、latency、RSS を下回らない。
 
-### R6: solver と puzzle tooling の分割
+### R6: solver と puzzle tooling の分割（完了）
 
 実施項目:
 
@@ -539,4 +539,12 @@ stable化gate未通過のためscheduler間の共通化や複数threadの既定�
 opt-inを維持する。
 詳細は[`refactoring_plan/r5_mcts_ownership.md`](refactoring_plan/r5_mcts_ownership.md)に記録する。
 
-R5の責務境界整理は完了した。次の独立変更はR6のsolverとpuzzle tooling分割とする。
+R6ではC++ solverをPImpl facadeとcompiled implementationへ分け、共通value type、
+hidden outcome catalog、oracle metadata、proof DAG storageを独立component化した。
+Python DFPNはtypes/table/proof/output/CLIへ、puzzle generatorは候補生成、外部engine
+adapter、検証、永続化へ分割し、既存script/import/CLIをforwarding surfaceとして維持した。
+solution/action/proof digest、limit理由、生成物、性能とRSSは基準内である。
+詳細は[`refactoring_plan/r6_solver_tooling.md`](refactoring_plan/r6_solver_tooling.md)に記録する。
+
+R6の責務境界整理は完了した。次の独立変更はR7のPython application層と外部AI
+adapter整理とする。

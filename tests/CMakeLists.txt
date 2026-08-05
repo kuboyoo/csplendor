@@ -39,3 +39,5 @@ csplendor_add_native_test(rule_query_unit rule_query_unit.cpp
                           "unit;rules;query;validation;transition;equivalence" 90)
 csplendor_add_native_test(encoding_schema_unit encoding_schema_unit.cpp
                           "unit;encoding;schema;equivalence;golden" 90)
+csplendor_add_native_test(solver_components_unit solver_components_unit.cpp
+                          "unit;solver;ownership;limits;proof;standalone-header" 30)

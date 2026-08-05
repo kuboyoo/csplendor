@@ -2,40 +2,51 @@
 from __future__ import annotations
 
 import argparse
+import json
+import random
+import sys
+import time
 from collections import deque
 from dataclasses import asdict, dataclass
-import hashlib
-import json
 from pathlib import Path
-import random
-import shutil
-import sys
-import tempfile
-import time
-from typing import Callable, Iterator, Optional, Protocol, Sequence
+from typing import Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import csplendor as cs
-from csplendor.api.usi_kifu import action_to_usi, game_to_spn, now_iso
-
+from csplendor.api.usi_kifu import game_to_spn
+from scripts import puzzle_validation as _puzzle_validation
 from scripts.dfpn_mate_solver import (
     PLAYER0_WIN,
     PLAYER1_WIN,
-    compact_proof_dag_to_v1,
-    principal_line_to_kifu_text,
-    proof_dag_to_compact,
     solve_reveal_verified_mate,
     solve_visible_only_winner,
     strategy_dag_max_children,
     strategy_dag_node_count,
 )
 from scripts.mate_solver import MATE, SearchResult, SolverOptions
+from scripts.puzzle_candidates import (
+    generate_candidate_position,
+    generate_candidate_positions,
+)
+from scripts.puzzle_engine_adapter import (
+    DEFAULT_GENBU_WEIGHTS,
+    DLSPLENDOR_ROOT,
+    GenbuPuzzlePlayer,
+    PuzzlePlayer,
+    create_genbu_players,
+)
+from scripts.puzzle_persistence import save_puzzle as _persist_puzzle
 
-DEFAULT_GENBU_WEIGHTS = REPO_ROOT / "scripts" / "weights" / "genbu.pt"
-DLSPLENDOR_ROOT = REPO_ROOT.parent / "dlsplendor"
+_COMPAT_COMPONENT_EXPORTS = (
+    DLSPLENDOR_ROOT,
+    GenbuPuzzlePlayer,
+    PuzzlePlayer,
+    generate_candidate_position,
+    generate_candidate_positions,
+)
 
 
 @dataclass
@@ -106,14 +117,6 @@ class ProgressReporter:
             fh.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
 
 
-def _json_text(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-
-
-def _position_id(position: str) -> str:
-    return hashlib.sha256(position.encode("utf-8")).hexdigest()[:16]
-
-
 def _generator_spn(game: cs.Game, *, reveal_hidden_reserved_ids: bool = False) -> str:
     return game_to_spn(
         game,
@@ -144,155 +147,6 @@ def report_rejected_position(
         reason=reason,
         position=json.dumps(position, ensure_ascii=False),
         **fields,
-    )
-
-
-class PuzzlePlayer(Protocol):
-    def select_action(self, game: cs.Game) -> cs.Action:
-        ...
-
-
-class GenbuPuzzlePlayer:
-    def __init__(
-        self,
-        weights_path: Path,
-        *,
-        time_limit: float,
-        num_simulations: int,
-        rng: random.Random,
-        best_action_rate: float,
-        top_action_rate: float,
-        top_action_count: int,
-    ):
-        if str(DLSPLENDOR_ROOT) not in sys.path:
-            sys.path.insert(0, str(DLSPLENDOR_ROOT))
-        from dlsplendor.search.genbu_adapter import GenbuAdapter
-
-        self.adapter = GenbuAdapter(weights_path=str(weights_path))
-        self.time_limit = time_limit
-        self.num_simulations = num_simulations
-        self.rng = rng
-        self.best_action_rate = best_action_rate
-        self.top_action_rate = top_action_rate
-        self.top_action_count = top_action_count
-
-    def select_action(self, game: cs.Game) -> cs.Action:
-        actions = list(game.legal_actions)
-        if not actions:
-            raise ValueError("cannot select an action without legal actions")
-        nobles = [
-            action for action in actions
-            if int(action.type) == int(cs.ActionType.VISIT_NOBLE)
-        ]
-        if nobles:
-            return nobles[0]
-        if self.rng.random() >= self.best_action_rate + self.top_action_rate:
-            return self.rng.choice(actions)
-        if self.adapter._mcts is None:
-            self.adapter.select_action_with_search(
-                game,
-                time_limit=self.time_limit,
-                num_simulations=self.num_simulations,
-            )
-        action_index, info = self.adapter._mcts.search(
-            game,
-            time_limit=self.time_limit,
-            num_simulations=self.num_simulations,
-        )
-        if self.rng.random() >= self.best_action_rate / (self.best_action_rate + self.top_action_rate):
-            visits = info.get("visit_counts", {})
-            ranked = sorted(visits, key=lambda index: visits[index], reverse=True)
-            if ranked:
-                action_index = self.rng.choice(ranked[:self.top_action_count])
-        if not 0 <= action_index < len(actions):
-            raise RuntimeError(f"Genbu returned invalid legal action index: {action_index}")
-        return actions[action_index]
-
-
-def create_genbu_players(
-    weights_path: Path,
-    *,
-    time_limit: float,
-    num_simulations: int,
-    rng: Optional[random.Random] = None,
-    best_action_rate: float = 0.7,
-    top_action_rate: float = 0.2,
-    top_action_count: int = 4,
-) -> tuple[PuzzlePlayer, PuzzlePlayer]:
-    if not weights_path.is_file():
-        raise FileNotFoundError(f"Genbu weights not found: {weights_path}")
-    rng = rng or random.Random()
-    return (
-        GenbuPuzzlePlayer(
-            weights_path, time_limit=time_limit, num_simulations=num_simulations,
-            rng=rng, best_action_rate=best_action_rate,
-            top_action_rate=top_action_rate, top_action_count=top_action_count,
-        ),
-        GenbuPuzzlePlayer(
-            weights_path, time_limit=time_limit, num_simulations=num_simulations,
-            rng=rng, best_action_rate=best_action_rate,
-            top_action_rate=top_action_rate, top_action_count=top_action_count,
-        ),
-    )
-
-
-def generate_candidate_positions(
-    rng: random.Random,
-    *,
-    players: Sequence[PuzzlePlayer],
-    game_seed: int,
-    min_playout_plies: int,
-    max_playout_plies: int,
-    progress: Optional[ProgressReporter] = None,
-    attempt: Optional[int] = None,
-    candidate_filter: Optional[Callable[[cs.Game], bool]] = None,
-) -> Iterator[cs.Game]:
-    if len(players) != 2:
-        raise ValueError("exactly two puzzle players are required")
-    game = cs.Game(seed=game_seed)
-    game.simple_payment_mode = True
-    start_ply = rng.randint(min_playout_plies, max_playout_plies)
-    ply = 0
-    while not game.is_game_over() and game.legal_actions:
-        if progress is not None:
-            progress.emit("genbu_playout", attempt=attempt, ply=ply, start_ply=start_ply)
-        before_player = int(game.board.current_player)
-        player = players[int(game.board.current_player)]
-        if not game.apply(player.select_action(game), False):
-            raise RuntimeError("engine rejected a generated legal action")
-        ply += 1
-        if ply < start_ply or int(game.board.current_player) == before_player:
-            continue
-        game.simple_payment_mode = False
-        candidate = game.clone_light()
-        if candidate_filter is None or candidate_filter(candidate):
-            yield candidate
-        game.simple_payment_mode = True
-
-
-def generate_candidate_position(
-    rng: random.Random,
-    *,
-    players: Sequence[PuzzlePlayer],
-    game_seed: int,
-    min_playout_plies: int,
-    max_playout_plies: int,
-    progress: Optional[ProgressReporter] = None,
-    attempt: Optional[int] = None,
-    candidate_filter: Optional[Callable[[cs.Game], bool]] = None,
-) -> Optional[cs.Game]:
-    return next(
-        generate_candidate_positions(
-            rng,
-            players=players,
-            game_seed=game_seed,
-            min_playout_plies=min_playout_plies,
-            max_playout_plies=max_playout_plies,
-            progress=progress,
-            attempt=attempt,
-            candidate_filter=candidate_filter,
-        ),
-        None,
     )
 
 
@@ -648,55 +502,18 @@ def find_verified_winning_actions(
     node_limit: int,
     time_limit: float,
 ) -> dict[str, object]:
-    winning_actions: list[str] = []
-    unknown_actions: list[str] = []
-    checks = 0
-    truncated = False
-    for action in game.legal_actions:
-        checks += 1
-        usi = action_to_usi(action, game=game)
-        raw = cs.solve_reveal_verified_mate_cpp(
-            game,
-            attacker=attacker,
-            depth=depth,
-            max_nodes=max(0, node_limit),
-            time_limit_seconds=max(0.0, time_limit),
-            preferred_attacker_actions=[],
-            include_proof_dag=False,
-            required_root_action=int(action.pack()),
-        )
-        if bool(raw["proven"]):
-            winning_actions.append(usi)
-            if len(winning_actions) > max_winning_actions:
-                truncated = True
-                break
-        elif raw["unknown_reason"] is not None:
-            unknown_actions.append(usi)
-    return {
-        "checks": checks,
-        "winning_actions": winning_actions,
-        "unknown_actions": unknown_actions,
-        "complete": not unknown_actions and not truncated,
-        "truncated": truncated,
-    }
+    return _puzzle_validation.find_verified_winning_actions(
+        game,
+        attacker=attacker,
+        depth=depth,
+        max_winning_actions=max_winning_actions,
+        node_limit=node_limit,
+        time_limit=time_limit,
+    )
 
 
 def _completed_turn_children(game: cs.Game, action: cs.Action) -> list[cs.Game]:
-    child = game.clone_light()
-    if not child.apply(action, False):
-        raise RuntimeError("engine rejected a generated legal action")
-    if child.is_game_over() or int(child.board.current_player) != int(game.board.current_player):
-        return [child]
-    if not bool(child.board.waiting_noble):
-        return []
-
-    children = []
-    for noble_action in child.legal_actions:
-        noble_child = child.clone_light()
-        if not noble_child.apply(noble_action, False):
-            raise RuntimeError("engine rejected a generated noble choice")
-        children.append(noble_child)
-    return children
+    return _puzzle_validation.completed_turn_children(game, action)
 
 
 def find_visible_winning_actions(
@@ -705,26 +522,15 @@ def find_visible_winning_actions(
     *,
     max_winning_actions: int,
 ) -> list[str]:
-    expected = PLAYER0_WIN if int(game.board.current_player) == 0 else PLAYER1_WIN
-    winning_actions: list[str] = []
-    action_limit = int(_arg(args, "visible_uniqueness_action_limit", 16))
-    actions = list(game.legal_actions)
-    if action_limit:
-        actions = actions[:action_limit]
-    for action in actions:
-        for child in _completed_turn_children(game, action):
-            if child.is_game_over():
-                winner = int(child.board.winner)
-                status = PLAYER0_WIN if winner == 0 else PLAYER1_WIN if winner == 1 else None
-            else:
-                status = visible_only_prefilter(child, args).status
-            if status != expected:
-                continue
-            winning_actions.append(action_to_usi(action, game=game))
-            break
-        if len(winning_actions) > max_winning_actions:
-            break
-    return winning_actions
+    return _puzzle_validation.find_visible_winning_actions(
+        game,
+        args,
+        max_winning_actions=max_winning_actions,
+        arg_value=_arg,
+        visible_only_prefilter=visible_only_prefilter,
+        player0_win=PLAYER0_WIN,
+        player1_win=PLAYER1_WIN,
+    )
 
 
 def find_countermate_blunders(
@@ -738,63 +544,17 @@ def find_countermate_blunders(
     progress: Optional[ProgressReporter] = None,
     attempt: Optional[int] = None,
 ) -> tuple[list[dict[str, object]], int]:
-    proof = result.proof_tree or {}
-    verification = proof.get("verification")
-    line = verification.get("line") if isinstance(verification, dict) else None
-    if not isinstance(line, list) or not line:
-        line = proof.get("line")
-    if not isinstance(line, list) or not line:
-        return [], 0
-    action_info = line[0].get("action")
-    if not isinstance(action_info, dict) or "pack" not in action_info:
-        return [], 0
-
-    correct_pack = int(action_info["pack"])
-    attacker = int(game.board.current_player)
-    defender = 1 - attacker
-    alternatives = [
-        action for action in game.legal_actions
-        if int(action.pack()) != correct_pack
-    ]
-    if action_limit:
-        alternatives = alternatives[:action_limit]
-
-    blunders = []
-    checks = 0
-    for alternative_index, action in enumerate(alternatives, start=1):
-        for child in _completed_turn_children(game, action):
-            if child.is_game_over() or int(child.board.current_player) != defender:
-                continue
-            checks += 1
-            if progress is not None:
-                progress.emit(
-                    "countermate_search",
-                    force=True,
-                    attempt=attempt,
-                    alternative=f"{alternative_index}/{len(alternatives)}",
-                    check=checks,
-                )
-            countermate = solve_reveal_verified_mate(
-                child,
-                attacker=defender,
-                options=SolverOptions(
-                    max_nodes=node_limit,
-                    time_limit=time_limit,
-                    include_proof=True,
-                    allow_deck_reserve=True,
-                ),
-            )
-            if countermate.status != MATE:
-                continue
-            blunders.append({
-                "action": action_to_usi(action, game=game),
-                "opponent": defender,
-                "forced_win_depth": int(countermate.depth),
-            })
-            break
-        if len(blunders) >= min_losing_alternatives:
-            break
-    return blunders, checks
+    return _puzzle_validation.find_countermate_blunders(
+        game,
+        result,
+        min_losing_alternatives=min_losing_alternatives,
+        action_limit=action_limit,
+        node_limit=node_limit,
+        time_limit=time_limit,
+        solve_reveal_verified_mate=solve_reveal_verified_mate,
+        progress=progress,
+        attempt=attempt,
+    )
 
 
 def save_puzzle(
@@ -807,105 +567,15 @@ def save_puzzle(
     quality: Optional[dict[str, object]] = None,
     strategy_dag_format: str = "compact",
 ) -> Optional[Path]:
-    if strategy_dag_format not in {"compact", "v1", "both"}:
-        raise ValueError("strategy_dag_format must be compact, v1, or both")
-    proof = result.proof_tree or {}
-    verification = proof.get("verification")
-    dag = verification.get("proof_dag") if isinstance(verification, dict) else None
-    line = proof.get("line")
-    if not isinstance(dag, dict) or not bool(dag.get("complete")):
-        raise ValueError("complete strategy DAG is required")
-    if not isinstance(line, list):
-        raise ValueError("principal line is required")
-
-    depth = int(proof.get("forced_win_depth", result.depth))
-    position = _generator_spn(game, reveal_hidden_reserved_ids=True)
-    puzzle_id = _position_id(position)
-    depth_dir = output_dir / f"depth_{depth:02d}"
-    puzzle_dir = depth_dir / puzzle_id
-    if puzzle_dir.exists():
-        return None
-
-    generated_at = now_iso()
-    attacker = int(game.board.current_player)
-    problem = {
-        "format": "csplendor_mate_problem_v1",
-        "id": puzzle_id,
-        "generated_at": generated_at,
-        "generation": {
-            "attempt": int(attempt),
-            "game_seed": int(game_seed),
-        },
-        "position": position,
-        "attacker": attacker,
-        "forced_win_depth": depth,
-        "initial_scores": [int(score) for score in game.scores],
-        "answer_files": {
-            "principal_line": "answer.kifu",
-            "strategy_dag": "strategy.json",
-        },
-        "search_stats": asdict(result.stats),
-    }
-    if quality is not None:
-        problem["quality"] = quality
-    if strategy_dag_format == "compact":
-        output_dag = proof_dag_to_compact(dag)
-        extra_strategy_fields: dict[str, object] = {}
-    elif strategy_dag_format == "both":
-        output_dag = compact_proof_dag_to_v1(dag)
-        extra_strategy_fields = {
-            "strategy_dag_compact": proof_dag_to_compact(dag),
-        }
-    else:
-        output_dag = compact_proof_dag_to_v1(dag)
-        extra_strategy_fields = {}
-    strategy = {
-        "format": "csplendor_mate_strategy_v1",
-        "problem_id": puzzle_id,
-        "position": position,
-        "attacker": attacker,
-        "forced_win_depth": depth,
-        "assumptions": proof.get("assumptions"),
-        "principal_line": line,
-        "verification": {
-            "all_reveals_verified": verification.get("all_reveals_verified"),
-            "reason": verification.get("reason"),
-            "stats": verification.get("stats"),
-        },
-        "strategy_dag": output_dag,
-    }
-    strategy.update(extra_strategy_fields)
-    kifu = principal_line_to_kifu_text(
+    return _persist_puzzle(
+        output_dir,
         game,
-        line,
-        attacker=attacker,
-        reveal_hidden_reserved_ids=True,
+        result,
+        game_seed=game_seed,
+        attempt=attempt,
+        quality=quality,
+        strategy_dag_format=strategy_dag_format,
     )
-
-    depth_dir.mkdir(parents=True, exist_ok=True)
-    tmp_dir = Path(tempfile.mkdtemp(prefix=f".{puzzle_id}.", dir=depth_dir))
-    try:
-        (tmp_dir / "problem.json").write_text(_json_text(problem), encoding="utf-8")
-        (tmp_dir / "strategy.json").write_text(_json_text(strategy), encoding="utf-8")
-        (tmp_dir / "answer.kifu").write_text(kifu, encoding="utf-8")
-        tmp_dir.replace(puzzle_dir)
-    except Exception:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise
-
-    manifest = {
-        "id": puzzle_id,
-        "path": puzzle_dir.relative_to(output_dir).as_posix(),
-        "attacker": attacker,
-        "forced_win_depth": depth,
-        "initial_scores": problem["initial_scores"],
-        "generated_at": generated_at,
-    }
-    if quality is not None:
-        manifest["quality"] = quality
-    with (output_dir / "manifest.jsonl").open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(manifest, ensure_ascii=False, sort_keys=True) + "\n")
-    return puzzle_dir
 
 
 def try_save_candidate(

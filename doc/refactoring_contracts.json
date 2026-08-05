@@ -59,6 +59,7 @@
       "noble_data.h",
       "player.h",
       "state_encoder.h",
+      "solver_types.h",
       "types.h",
       "visible_only_solver.h"
     ],
@@ -90,6 +91,7 @@
       "mcts_types.h",
       "portable_rng.h",
       "resource_bundle.h",
+      "reveal_solver_components.h",
       "rule_query.h",
       "rule_transition.h",
       "state_field_roles.h",
