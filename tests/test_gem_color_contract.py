@@ -6,7 +6,6 @@ import csplendor
 from csplendor.api.schemas import GemType as ApiGemType
 from csplendor.api.usi_kifu import GEM_LETTERS, action_to_usi, parse_usi_move
 
-
 CANONICAL_GEMS = (
     ("DIAMOND", 0, "Diamond", "D", "W"),
     ("SAPPHIRE", 1, "Sapphire", "S", "U"),
