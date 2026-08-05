@@ -209,8 +209,8 @@ private:
       delta_previous = csplendor::detail::UndoRecord::capture(board);
 #endif
 
-    // Invalidate hash since state will change
-    board.invalidate_hash();
+    // Enter the trusted hot-path mutation boundary once for the whole action.
+    board.begin_unchecked_mutation();
 
     bool applied = false;
     switch (action.type) {
@@ -247,7 +247,7 @@ private:
       // an exception cannot leave the live Board half-advanced.
       {
         Board next = board;
-        next.invalidate_hash();
+        next.begin_unchecked_mutation();
         csplendor::detail::end_turn(next);
         // If neither player can act, no future state change is possible.
         // Resolve the stalemate as a draw instead of allowing an infinite

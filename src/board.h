@@ -2,6 +2,7 @@
 #define CSPLENDOR_BOARD_H
 
 #include "card_data.h"
+#include "fixed_stack.h"
 #include "noble_data.h"
 #include "player.h"
 #include "portable_rng.h"
@@ -13,53 +14,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-
-// Fixed-size stack for deck/noble storage - avoids heap allocations
-template <typename T, size_t MaxSize> struct FixedStack {
-  std::array<T, MaxSize> data;
-  uint8_t count = 0;
-
-  void clear() { count = 0; }
-  bool empty() const { return count == 0; }
-  size_t size() const { return count; }
-
-  void push_back(T val) {
-    if (count < MaxSize)
-      data[count++] = val;
-  }
-
-  void pop_back() {
-    if (count > 0)
-      --count;
-  }
-
-  T back() const { return data[count - 1]; }
-  T &back() { return data[count - 1]; }
-
-  T *begin() { return data.data(); }
-  T *end() { return data.data() + count; }
-  const T *begin() const { return data.data(); }
-  const T *end() const { return data.data() + count; }
-
-  T &operator[](size_t i) { return data[i]; }
-  const T &operator[](size_t i) const { return data[i]; }
-
-  // For erase/remove compatibility
-  void erase(T *it) {
-    if (it >= begin() && it < end()) {
-      std::move(it + 1, end(), it);
-      --count;
-    }
-  }
-
-  // Remove element by value
-  void remove(T val) {
-    auto it = std::find(begin(), end(), val);
-    if (it != end()) {
-      erase(it);
-    }
-  }
-};
 
 class Board {
 public:
@@ -100,7 +54,7 @@ public:
 
     // Decks
     for (int i = 0; i < CARD_COUNT; ++i) {
-      decks[CARDS[i].level - 1].push_back(CARDS[i].id);
+      decks[CARDS[i].level - 1].push_back_unchecked(CARDS[i].id);
     }
     for (int i = 0; i < 3; ++i) {
       portable_mt19937_shuffle(decks[i].begin(), decks[i].end(), rng);
@@ -124,7 +78,7 @@ public:
       all_nobles[i] = static_cast<uint8_t>(i);
     portable_mt19937_shuffle(all_nobles.begin(), all_nobles.end(), rng);
     for (int i = 0; i < NUM_NOBLES; ++i) {
-      nobles.push_back(all_nobles[i]);
+      nobles.push_back_unchecked(all_nobles[i]);
     }
   }
 
@@ -148,7 +102,22 @@ public:
   }
 
   // Invalidate cached hash - must be called after any state modification
-  void invalidate_hash() { hash_valid = false; }
+  void invalidate_hash() noexcept { hash_valid = false; }
+
+  // Named mutation gateways make the caller's trust boundary explicit. They
+  // intentionally share the same zero-cost invalidation operation; editor
+  // callers validate a complete payload before entering, while trusted rule
+  // transitions validate at a higher boundary or deliberately allow partial
+  // mutation for rollback-based search.
+  Board &begin_editor_mutation() noexcept {
+    invalidate_hash();
+    return *this;
+  }
+
+  Board &begin_unchecked_mutation() noexcept {
+    invalidate_hash();
+    return *this;
+  }
 
   bool is_game_over() const { return winner != -1; }
 
@@ -459,6 +428,12 @@ private:
                                          Shuffle shuffle) {
     if (observer_player >= NUM_PLAYERS)
       return;
+    for (const auto &deck : decks) {
+      if (deck.count > deck.capacity())
+        return;
+    }
+
+    begin_unchecked_mutation();
 
     uint8_t opponent = 1 - observer_player;
     auto &p_opp = players[opponent];
@@ -467,7 +442,7 @@ private:
       // Copy deck to pool using fixed-size array
       FixedStack<uint8_t, MAX_DECK_SIZE + 3> pool; // +3 for possible reserved
       for (size_t i = 0; i < decks[l].size(); ++i) {
-        pool.push_back(decks[l][i]);
+        pool.push_back_unchecked(decks[l][i]);
       }
       std::array<int, 3> reserved_indices;
       int reserved_count = 0;
@@ -476,7 +451,7 @@ private:
       for (int i = 0; i < 3; ++i) {
         if (is_valid_card_id(p_opp.reserved[i]) && p_opp.reserved_is_hidden[i]) {
           if (get_card(p_opp.reserved[i]).level == l + 1) {
-            pool.push_back(p_opp.reserved[i]);
+            pool.push_back_unchecked(p_opp.reserved[i]);
             reserved_indices[reserved_count++] = i;
           }
         }
@@ -498,12 +473,9 @@ private:
       // Copy back to deck
       decks[l].clear();
       for (size_t i = 0; i < pool.size(); ++i) {
-        decks[l].push_back(pool[i]);
+        decks[l].push_back_unchecked(pool[i]);
       }
     }
-
-    // Invalidate hash since state changed
-    hash_valid = false;
   }
   // Canonical reachable values keep their existing Zobrist tables.  Python's
   // public editor accepts the wider uint8_t domain, so values outside those

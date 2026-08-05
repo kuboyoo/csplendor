@@ -19,6 +19,7 @@ Welcome to the technical documentation for the `csplendor` engine.
 - [R1-B1 Snapshot Compiled Core](refactoring_plan/r1b_snapshot.md) - Compiled snapshot serialization boundary and compatibility/performance validation.
 - [R1-B2 Trace Compiled Core](refactoring_plan/r1b_trace.md) - Compiled deterministic trace serialization and replay validation.
 - [R2-A State Invariants](refactoring_plan/r2a_invariants.md) - Profile-specific invariant diagnostics and stale-cache detection.
+- [R2-B Mutation Gateway](refactoring_plan/r2b_mutation.md) - Fixed-capacity policies, validated editor updates, and trusted mutation boundaries.
 
 ---
 

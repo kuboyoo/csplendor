@@ -57,6 +57,11 @@ tie-breakに使うcanonical fieldとして扱う。
 名称で返す。`reachable` / `search` では資源保存、一意性、provenanceまで検査し、
 `editor` / `serialized` では局所構造、ID、derived値、cache整合性を検査する。
 
+内部製品コードは、検証とpayload準備を完了したeditor更新では
+`Board::begin_editor_mutation()`、合法手やrollback前提searchのhot pathでは
+`Board::begin_unchecked_mutation()`を通してから状態を変更する。公開C++互換の
+`invalidate_hash()`とpublic fieldは維持するが、内部経路ではnamed gatewayを正とする。
+
 ## 合法手・更新の契約
 
 - 合法手の集合だけでなく生成順序も契約である。index適用、random値の剰余選択、
@@ -69,6 +74,9 @@ tie-breakに使うcanonical fieldとして扱う。
   呼び出し側がrollbackする契約がある。リファクタリング中にtransactionalへ変えない。
 - Python editor setterはpayload全体を検査してから書き込み、成功時にhashを
   invalidateする。失敗時に局面とcache状態を変更しない。
+- `FixedStack::try_push_back()`はdata-dependentな容量失敗を返す内部API、
+  `push_back_unchecked()`はcapacityを局所的に証明したhot path用APIである。従来の
+  `push_back()`は公開C++互換のためoverflowを無視する挙動を維持する。
 
 ## copy、参照、メモリ所有権
 

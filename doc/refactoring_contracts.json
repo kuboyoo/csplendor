@@ -69,9 +69,11 @@
     ],
     "internal": [
       "action_encoder_common.h",
+      "board_editor.h",
       "bindings.h",
       "bindings_array.h",
       "cli_utils.h",
+      "fixed_stack.h",
       "mcts_bounded_queue.h",
       "mcts_concurrent_tree.h",
       "mcts_game_adapter.h",
