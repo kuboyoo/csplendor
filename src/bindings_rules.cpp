@@ -1,5 +1,6 @@
 #include "bindings.h"
 #include "board.h"
+#include "board_editor.h"
 #include "card_data.h"
 #include "cli_utils.h"
 #include "game.h"
@@ -20,27 +21,14 @@ void bind_rules(py::module_ &m) {
       .def(py::init<>())
       .def_property(
           "turn", [](const Board &b) { return (int)b.turn; },
-          [](Board &b, int turn) {
-            if (turn < 0 || turn > 65535)
-              throw py::value_error("turn out of range");
-            b.turn = static_cast<uint16_t>(turn);
-            b.invalidate_hash();
-          })
+          &state::editor::set_turn)
       .def_property(
           "current_player",
           [](const Board &b) { return (int)b.current_player; },
-          [](Board &b, int player) {
-            if (player < 0 || player >= Board::NUM_PLAYERS)
-              throw py::index_error("current_player out of range");
-            b.current_player = static_cast<uint8_t>(player);
-            b.invalidate_hash();
-          })
+          &state::editor::set_current_player)
       .def_property(
           "bank", [](const Board &b) { return b.bank; },
-          [](Board &b, std::array<uint8_t, 6> bank) {
-            b.bank = bank;
-            b.invalidate_hash();
-          })
+          &state::editor::set_bank)
       .def_property(
           "visible",
           [](const Board &b) {
@@ -53,29 +41,7 @@ void bind_rules(py::module_ &m) {
             }
             return visible;
           },
-          [](Board &b, const std::vector<std::vector<int>> &visible) {
-            if (visible.size() != 3)
-              throw py::value_error("visible must have 3 levels");
-            // Validate the complete payload before mutating Board.  Otherwise
-            // an invalid value in a later slot leaves an earlier slot changed
-            // while the cached hash is still marked valid.
-            for (int i = 0; i < 3; ++i) {
-              if (visible[i].size() != Board::CARDS_PER_LEVEL)
-                throw py::value_error("each visible level must have 4 slots");
-              for (int j = 0; j < Board::CARDS_PER_LEVEL; ++j) {
-                int card_id = visible[i][j];
-                if (card_id != -1 && !is_valid_card_id(card_id))
-                  throw py::value_error("visible contains invalid card id");
-              }
-            }
-            for (int i = 0; i < 3; ++i) {
-              for (int j = 0; j < Board::CARDS_PER_LEVEL; ++j) {
-                int card_id = visible[i][j];
-                b.visible[i][j] = static_cast<int8_t>(card_id);
-              }
-            }
-            b.invalidate_hash();
-          })
+          &state::editor::set_visible)
       .def_property(
           "nobles",
           [](const Board &b) {
@@ -84,19 +50,7 @@ void bind_rules(py::module_ &m) {
               nobles[i] = static_cast<int>(b.nobles[i]);
             return nobles;
           },
-          [](Board &b, const std::vector<int> &nobles) {
-            if (nobles.size() > Board::MAX_NOBLES_ON_BOARD)
-              throw py::value_error("too many nobles");
-            for (int noble_id : nobles) {
-              if (!is_valid_noble_id(noble_id))
-                throw py::value_error("nobles contains invalid noble id");
-            }
-            b.nobles.clear();
-            for (int noble_id : nobles) {
-              b.nobles.push_back(static_cast<uint8_t>(noble_id));
-            }
-            b.invalidate_hash();
-          })
+          &state::editor::set_nobles)
       .def_property(
           "decks",
           [](const Board &b) {
@@ -109,46 +63,16 @@ void bind_rules(py::module_ &m) {
             }
             return decks;
           },
-          [](Board &b, const std::vector<std::vector<int>> &decks) {
-            if (decks.size() != 3)
-              throw py::value_error("decks must have 3 levels");
-            for (int i = 0; i < 3; ++i) {
-              if (decks[i].size() > Board::MAX_DECK_SIZE)
-                throw py::value_error("deck level exceeds max size");
-              for (int card_id : decks[i]) {
-                if (!is_valid_card_id(card_id) ||
-                    get_card(card_id).level != i + 1)
-                  throw py::value_error("decks contains invalid card id");
-              }
-            }
-            for (int i = 0; i < 3; ++i) {
-              b.decks[i].clear();
-              for (int card_id : decks[i]) {
-                b.decks[i].push_back(static_cast<uint8_t>(card_id));
-              }
-            }
-            b.invalidate_hash();
-          })
+          &state::editor::set_decks)
       .def_property(
           "final_round", [](const Board &b) { return b.final_round; },
-          [](Board &b, bool final_round) {
-            b.final_round = final_round;
-            b.invalidate_hash();
-          })
+          &state::editor::set_final_round)
       .def_property(
           "waiting_noble", [](const Board &b) { return b.waiting_noble; },
-          [](Board &b, bool waiting) {
-            b.waiting_noble = waiting;
-            b.invalidate_hash();
-          })
+          &state::editor::set_waiting_noble)
       .def_property(
           "winner", [](const Board &b) { return (int)b.winner; },
-          [](Board &b, int winner) {
-            if (winner < -2 || winner > 1)
-              throw py::value_error("winner out of range");
-            b.winner = static_cast<int8_t>(winner);
-            b.invalidate_hash();
-          })
+          &state::editor::set_winner)
       .def_property_readonly("players", [](const Board &b) {
         py::list players(Board::NUM_PLAYERS);
         for (int i = 0; i < Board::NUM_PLAYERS; ++i)
@@ -161,14 +85,7 @@ void bind_rules(py::module_ &m) {
                throw py::index_error();
              return b.players[i];
            })
-      .def("set_player",
-           [](Board &b, int i, const PlayerState &p) {
-             if (i < 0 || i >= 2)
-               throw py::index_error();
-             b.players[i] = p;
-             b.players[i].sync_packed(); // Crucial for consistency
-             b.invalidate_hash();
-           })
+      .def("set_player", &state::editor::set_player)
       .def("hash", &Board::hash)
       .def("observable_hash", &Board::observable_hash, py::arg("observer"),
            "Hash based only on information visible to observer player")

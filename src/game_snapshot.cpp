@@ -307,7 +307,8 @@ Game deserialize(std::string_view snapshot) {
     const uint8_t noble_id = reader.u8();
     if (!valid_noble_id(noble_id))
       throw std::invalid_argument("invalid noble in game snapshot");
-    board.nobles.push_back(noble_id);
+    if (!board.nobles.try_push_back(noble_id))
+      throw std::invalid_argument("invalid noble count in game snapshot");
   }
 
   for (PlayerState &player : board.players) {
@@ -362,7 +363,7 @@ Game deserialize(std::string_view snapshot) {
 
   if (reader.remaining() != 0)
     throw std::invalid_argument("trailing data in csplendor game snapshot");
-  board.invalidate_hash();
+  board.begin_editor_mutation();
 
   Game game(0);
   game.board = std::move(board);

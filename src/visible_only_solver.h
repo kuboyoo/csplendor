@@ -51,9 +51,9 @@ public:
 
     Game game = input.clone_light();
     game.blank_refill_mode = true;
+    game.board.begin_unchecked_mutation();
     for (int level = 0; level < 3; ++level)
       game.board.decks[level].clear();
-    game.board.invalidate_hash();
     root_ = game.clone_light();
 
     VisibleOnlySearchResult result;

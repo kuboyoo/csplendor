@@ -29,3 +29,5 @@ csplendor_add_native_test(game_snapshot_unit game_snapshot_unit.cpp
                           "unit;snapshot;serialization;standalone-header" 30)
 csplendor_add_native_test(state_invariants_unit state_invariants_unit.cpp
                           "unit;state;invariants;hash" 30)
+csplendor_add_native_test(domain_state_unit domain_state_unit.cpp
+                          "unit;state;editor;mutation;fixed-capacity" 30)

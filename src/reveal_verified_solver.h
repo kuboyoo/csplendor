@@ -685,7 +685,9 @@ private:
         slot < 0 || slot >= Board::CARDS_PER_LEVEL ||
         !remove_card_from_deck(game.board, level, card_id))
       return false;
-    game.board.decks[level].push_back(static_cast<uint8_t>(card_id));
+    if (!game.board.decks[level].try_push_back(
+            static_cast<uint8_t>(card_id)))
+      return false;
     const bool previous_blank_refill = game.blank_refill_mode;
     game.blank_refill_mode = false;
     const bool applied = game.apply_trusted(action, false);
@@ -711,7 +713,7 @@ private:
         get_card(card_id).level - 1 != action.deck_level)
       return false;
 
-    board.invalidate_hash();
+    board.begin_unchecked_mutation();
     if (!remove_card_from_deck(board, action.deck_level, card_id))
       return false;
     csplendor::detail::reserve_card_unchecked(board, card_id, true);
@@ -1093,7 +1095,7 @@ private:
     if (board.is_game_over() || board.waiting_noble ||
         board.current_player >= Board::NUM_PLAYERS)
       return false;
-    board.invalidate_hash();
+    board.begin_unchecked_mutation();
     PlayerState &player = board.players[board.current_player];
     if (ordered.oracle_card >= 0) {
       const Card &card = get_card(ordered.oracle_card);
