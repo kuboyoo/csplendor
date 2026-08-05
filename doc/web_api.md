@@ -53,6 +53,8 @@ format if replays must cross a trust boundary.
 
 ## 3. JSON Schema Overview (Simplified)
 
+Gem arrays always use `Diamond/White, Sapphire/Blue, Emerald/Green, Ruby/Red, Onyx/Black, Gold` order. Five-element arrays omit Gold.
+
 ### `GameStateSchema`
 ```json
 {
@@ -104,9 +106,9 @@ ordinary move, applying it ends the game as a draw.
 The engine generates **all valid payment combinations** for each purchasable card.
 
 ### `gold_as` Field
-Each PURCHASE action includes a `gold_as` array (5 elements, one per color: Green, Blue, Red, White, Black).
+Each PURCHASE action includes a `gold_as` array (5 elements, one per color: White, Blue, Green, Red, Black).
 - `gold_as[i]` indicates how many Gold tokens are used as color `i`.
-- Example: `gold_as: [0, 2, 1, 0, 0]` means 2 Gold used as Blue, 1 Gold used as Red.
+- Example: `gold_as: [0, 2, 1, 0, 0]` means 2 Gold used as Blue, 1 Gold used as Green.
 
 ### Multiple Actions per Card
 The same `card_id` may appear in multiple PURCHASE actions with different `gold_as` values.

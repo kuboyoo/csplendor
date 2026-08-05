@@ -3,14 +3,16 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
+from .._csplendor import GemType as CoreGemType
+
 
 class GemType(IntEnum):
-    EMERALD = 0
-    SAPPHIRE = 1
-    RUBY = 2
-    DIAMOND = 3
-    ONYX = 4
-    GOLD = 5
+    DIAMOND = int(CoreGemType.DIAMOND)
+    SAPPHIRE = int(CoreGemType.SAPPHIRE)
+    EMERALD = int(CoreGemType.EMERALD)
+    RUBY = int(CoreGemType.RUBY)
+    ONYX = int(CoreGemType.ONYX)
+    GOLD = int(CoreGemType.GOLD)
 
 
 class ActionType(IntEnum):
@@ -28,31 +30,31 @@ class CardSchema(BaseModel):
     level: int
     points: int
     bonus: GemType
-    cost: List[int]  # Size 5
+    cost: List[int]  # Diamond, Sapphire, Emerald, Ruby, Onyx
 
 
 class NobleSchema(BaseModel):
     id: int
     points: int
-    requirement: List[int]  # Size 5
+    requirement: List[int]  # Diamond, Sapphire, Emerald, Ruby, Onyx
 
 
 class ActionSchema(BaseModel):
     type: ActionType
-    take: Optional[List[int]] = None  # Size 5/6
+    take: Optional[List[int]] = None  # Diamond, Sapphire, Emerald, Ruby, Onyx
     card_id: Optional[int] = None
     deck_level: Optional[int] = None
     from_reserved: Optional[bool] = None
-    gold_as: Optional[List[int]] = None  # Size 5
-    return_gems: Optional[List[int]] = None  # Size 6
+    gold_as: Optional[List[int]] = None  # Five colors in canonical order
+    return_gems: Optional[List[int]] = None  # Five colors above, then Gold
     noble_choice: Optional[int] = None
     usi: Optional[str] = None  # USI move notation
 
 
 class PlayerSchema(BaseModel):
     index: int
-    gems: List[int]  # Size 6
-    bonuses: List[int]  # Size 5
+    gems: List[int]  # Diamond, Sapphire, Emerald, Ruby, Onyx, Gold
+    bonuses: List[int]  # Five non-Gold colors in canonical order
     points: int
     reserved_cards: List[int]
     purchased_cards: List[int]
@@ -60,7 +62,7 @@ class PlayerSchema(BaseModel):
 
 
 class BoardSchema(BaseModel):
-    bank: List[int]  # Size 6
+    bank: List[int]  # Diamond, Sapphire, Emerald, Ruby, Onyx, Gold
     visible_cards: List[List[int]]  # [level][slot]
     deck_counts: List[int]
     nobles: List[int]

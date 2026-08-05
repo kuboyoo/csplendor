@@ -8,8 +8,8 @@ class StateFeaturizer:
     Converts Splendor game state into NumPy features for ML.
     """
 
-    CARD_FEATURE_SIZE = 8 # points, emerald, sapphire, ruby, diamond, onyx, bonus_type (1-hot), level (normalized)
-    NOBLE_FEATURE_SIZE = 6 # points, emerald, sapphire, ruby, diamond, onyx requirements
+    CARD_FEATURE_SIZE = 8  # points, diamond, sapphire, emerald, ruby, onyx, bonus_type, level
+    NOBLE_FEATURE_SIZE = 6  # points, diamond, sapphire, emerald, ruby, onyx requirements
 
     def __init__(self):
         pass

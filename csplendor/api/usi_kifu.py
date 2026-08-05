@@ -7,10 +7,11 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from .. import ActionType as CoreActionType
 from .. import Game, get_card
+from ..gem_colors import GEM_USI_SYMBOLS
 
 # USI gem letters in canonical order:
 # W=Diamond(White), U=Sapphire(Blue), G=Emerald(Green), R=Ruby(Red), K=Onyx(Black), D=Gold
-GEM_LETTERS: Tuple[str, ...] = ("W", "U", "G", "R", "K", "D")
+GEM_LETTERS: Tuple[str, ...] = tuple(GEM_USI_SYMBOLS)
 LETTER_TO_GEM: Dict[str, int] = {c: i for i, c in enumerate(GEM_LETTERS)}
 
 _MOVE_LINE_RE = re.compile(

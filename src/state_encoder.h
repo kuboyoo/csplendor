@@ -23,6 +23,13 @@ static constexpr size_t PUBLIC_CARD_FEATURE_SIZE =
  */
 class StateEncoder {
 public:
+  static constexpr uint32_t schema_version() noexcept { return 1; }
+
+  static constexpr const char *schema_fingerprint() noexcept {
+    return "csplendor.state.v1;base=196;public=117;gems="
+           "diamond,sapphire,emerald,ruby,onyx,gold";
+  }
+
   /**
    * Encode a game state into a feature vector.
    *

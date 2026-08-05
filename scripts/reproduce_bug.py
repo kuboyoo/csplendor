@@ -4,7 +4,7 @@ import numpy as np
 def test_gem_return_bug():
     game = Game(seed=42)
     # Setup player 0 with 9 gems (getting close to limit)
-    # Let's say: 2 Emerald, 2 Sapphire, 2 Ruby, 2 Diamond, 1 Onyx = 9 gems
+    # Let's say: 2 Diamond, 2 Sapphire, 2 Emerald, 2 Ruby, 1 Onyx = 9 gems
     p0 = game.board.players[0]
     p0.gems = [2, 2, 2, 2, 1, 0]
     game.board.set_player(0, p0)

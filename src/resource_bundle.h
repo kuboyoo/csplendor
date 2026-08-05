@@ -8,7 +8,7 @@ namespace cli {
 
 /**
  * Packs 5 gem colors into a 64-bit integer using 12 bits per color.
- * Colors are ordered: Emerald, Sapphire, Ruby, Diamond, Onyx.
+ * Colors are ordered: Diamond, Sapphire, Emerald, Ruby, Onyx.
  * 12 bits allows values up to 4095, which is more than enough for Splendor (max
  * 7-15). Using 12 bits instead of 8 bits prevents carries from affecting
  * adjacent fields during subtraction of up to 2048.

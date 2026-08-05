@@ -6,10 +6,10 @@ This document describes the internal logic and data structures of the `csplendor
 
 ### GemType (Color)
 Gems are represented as integers (0-5):
-- 0: EMERALD (Green)
+- 0: DIAMOND (White)
 - 1: SAPPHIRE (Blue)
-- 2: RUBY (Red)
-- 3: DIAMOND (White)
+- 2: EMERALD (Green)
+- 3: RUBY (Red)
 - 4: ONYX (Black)
 - 5: GOLD (Yellow / Wildcard)
 
@@ -18,7 +18,7 @@ Gems are represented as integers (0-5):
 - `level`: Tier 1, 2, or 3.
 - `points`: Prestige points (0-5).
 - `bonus`: The `GemType` this card provides upon purchase.
-- `cost`: Array of 5 integers representing the costs in Green, Blue, Red, White, and Black.
+- `cost`: Array of 5 integers representing the costs in White, Blue, Green, Red, and Black.
 
 ### Noble
 - `id`: Unique identifier (0-9).
