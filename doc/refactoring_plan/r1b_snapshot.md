@@ -63,5 +63,5 @@ seed=42から18 ply進めた184-byte snapshotを使用した。旧新を別proce
 | serialize | 1,879,542 calls/s | 1,884,982 calls/s | 1.003 |
 | deserialize | 572,343 calls/s | 573,692 calls/s | 1.002 |
 
-snapshot runtimeの回帰は検出しなかった。次のR1-B2では、同じcompiled core境界を使い、
-deterministic traceのserialization / verificationを独立して移す。
+snapshot runtimeの回帰は検出しなかった。後続のR1-B2は
+[`r1b_trace.md`](r1b_trace.md)に記録する。

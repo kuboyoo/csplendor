@@ -120,6 +120,15 @@ std::string serialize_trace(const DeterministicTrace &trace) {
   return stream.str();
 }
 
+uint64_t trace_bytes_digest(const std::string &bytes) {
+  uint64_t digest = 1469598103934665603ULL;
+  for (unsigned char byte : bytes) {
+    digest ^= byte;
+    digest *= 1099511628211ULL;
+  }
+  return digest;
+}
+
 DeterministicTrace deserialize_trace(const std::string &bytes) {
   std::istringstream stream(bytes, std::ios::in | std::ios::binary);
   return DeterministicTrace::read(stream);
@@ -343,6 +352,20 @@ void test_derive_seed_10000_tuple_manifest_is_stable_and_collision_free() {
 
 void test_trace_binary_roundtrip_and_rejection() {
   const ReplayRun original = run_replay(4);
+#if defined(_WIN32)
+  constexpr size_t expected_trace_size = 202540;
+  constexpr uint64_t expected_trace_digest = 10287971718966836909ULL;
+#else
+  constexpr size_t expected_trace_size = 196981;
+  constexpr uint64_t expected_trace_digest = 13940474573569027194ULL;
+#endif
+  if (original.bytes.size() != expected_trace_size ||
+      trace_bytes_digest(original.bytes) != expected_trace_digest) {
+    throw std::runtime_error(
+        "canonical trace golden changed: size=" +
+        std::to_string(original.bytes.size()) +
+        ", digest=" + std::to_string(trace_bytes_digest(original.bytes)));
+  }
   const DeterministicTrace decoded = deserialize_trace(original.bytes);
   require(serialize_trace(decoded) == original.bytes,
           "trace binary roundtrip is not canonical");

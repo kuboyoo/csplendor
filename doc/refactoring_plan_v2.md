@@ -438,7 +438,7 @@ C++ または binding を変更した場合は native test、strict build、該�
 2. R0-B: benchmark/build/include 基準値と共通 test support（完了）
 3. R1-A: binding 登録関数の分割（挙動変更なし、完了）
 4. R1-B1: snapshotの非テンプレート実装を`.cpp`化（完了）
-5. R1-B2: deterministic traceのserialization/verificationを`.cpp`化
+5. R1-B2: deterministic traceのserialization/verificationを`.cpp`化（完了）
 6. R2-A: invariant checker と cache invalidation の可視化
 7. R3-A: rule primitive の一つを旧新 differential test 付きで抽出
 
@@ -496,5 +496,9 @@ R1-B1ではsnapshot serializationを`game_snapshot.cpp`へ移し、実体のあ�
 `csplendor_core`、公開header単独include/link test、Python extension向けの並列/LTO
 compile境界を追加した。snapshot byte列とruntime、clean/incremental buildは基準内である。
 
-次の構造変更はR1-B2のdeterministic trace serialization/verificationの`.cpp`化とする。
-trace bytes、digest、thread/backend別replayを固定したまま、同じcompiled core境界へ移す。
+R1-B2ではdeterministic traceのserialization/verificationを
+`mcts_parallel_trace.cpp`へ移した。trace bytes、digest、thread/backend別replayを
+固定したまま、headerを854行から395行へ縮小し、MCTS binding差分buildも短縮した。
+詳細は[`refactoring_plan/r1b_trace.md`](refactoring_plan/r1b_trace.md)に記録する。
+
+次の構造変更はR2-Aのinvariant checkerとcache invalidation可視化とする。
