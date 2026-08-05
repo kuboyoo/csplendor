@@ -38,7 +38,15 @@ from ._csplendor import (
 )
 from .action_space import ActionEncoder
 from .features import StateFeaturizer
-from .gem_colors import GEM_NAMES, GEM_SYMBOLS, GEM_USI_SYMBOLS
+from .gem_colors import (
+    GEM_NAMES as GEM_NAMES,
+)
+from .gem_colors import (
+    GEM_SYMBOLS as GEM_SYMBOLS,
+)
+from .gem_colors import (
+    GEM_USI_SYMBOLS as GEM_USI_SYMBOLS,
+)
 
 try:
     __version__ = _distribution_version("csplendor")
@@ -48,8 +56,7 @@ except PackageNotFoundError:
     # from pyproject.toml through their installed metadata.
     __version__ = "0+unknown"
 __all__ = [
-    "GemType", "GEM_NAMES", "GEM_SYMBOLS", "GEM_USI_SYMBOLS",
-    "ActionType", "Card", "Noble", "Action",
+    "GemType", "ActionType", "Card", "Noble", "Action",
     "PlayerState", "Board", "Game",
     "get_card", "get_noble", "get_all_cards", "get_all_nobles",
     "StateFeaturizer", "ActionEncoder", "ActionEncoderCpp", "ActionEncoderV2", "ActionEncoderV3", "StateEncoder",
