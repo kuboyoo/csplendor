@@ -56,6 +56,8 @@ def test_build_comparison_reports_environment_and_five_percent_regression():
                     "max_child_rss_kib_so_far": 1_000,
                 },
                 "noop_incremental": {"seconds": incremental},
+                "source_incremental": {"seconds": incremental * 2},
+                "incremental_source": "src/bindings.cpp",
                 "extension_size_bytes": size,
             },
         }
@@ -65,3 +67,7 @@ def test_build_comparison_reports_environment_and_five_percent_regression():
     assert comparison["environment_mismatches"] == {}
     assert comparison["metrics"]["clean_build_seconds"]["over_five_percent"]
     assert not comparison["metrics"]["extension_size_bytes"]["over_five_percent"]
+    assert comparison["incremental_sources"] == {
+        "baseline": "src/bindings.cpp",
+        "candidate": "src/bindings.cpp",
+    }

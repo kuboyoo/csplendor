@@ -6,6 +6,7 @@ do not become source-controlled golden data:
 
     python scripts/refactor_build_baseline.py \
       --label before --build-dir /tmp/csplendor-build-before \
+      --incremental-source src/bindings.cpp \
       --output /tmp/csplendor-build-before.json
     python scripts/refactor_build_baseline.py \
       --compare /tmp/csplendor-build-before.json /tmp/candidate.json
@@ -68,7 +69,7 @@ def _child_peak_rss_kib():
     return int(value)
 
 
-def _run_timed(command):
+def _run_timed(command, *, expected_source=None):
     started = time.perf_counter()
     completed = subprocess.run(
         command,
@@ -85,12 +86,15 @@ def _run_timed(command):
                 completed.returncode, " ".join(map(str, command)), tail
             )
         )
-    return {
+    result = {
         "seconds": elapsed,
         # This is an upper bound after all children completed so far. It is
         # portable enough for paired runs, but not a cross-host absolute RSS.
         "max_child_rss_kib_so_far": _child_peak_rss_kib(),
     }
+    if expected_source is not None:
+        result["rebuilt_requested_source"] = expected_source.name in completed.stdout
+    return result
 
 
 def collect_include_graph(source_dir):
@@ -160,13 +164,21 @@ def _find_extension(build_dir):
     return files[0]
 
 
-def collect_build(label, build_dir, parallel):
+def collect_build(label, build_dir, parallel, incremental_source):
     build_dir = Path(build_dir).resolve()
     if build_dir == ROOT or ROOT in build_dir.parents:
         raise ValueError("build directory must be outside the repository")
     if build_dir.exists() and any(build_dir.iterdir()):
         raise ValueError("build directory must not exist or must be empty")
     build_dir.mkdir(parents=True, exist_ok=True)
+
+    incremental_source = (ROOT / incremental_source).resolve()
+    if (
+        incremental_source.suffix != ".cpp"
+        or not incremental_source.is_file()
+        or ROOT not in incremental_source.parents
+    ):
+        raise ValueError("incremental source must be an existing repository .cpp file")
 
     try:
         import pybind11
@@ -192,7 +204,22 @@ def collect_build(label, build_dir, parallel):
     build = [cmake, "--build", str(build_dir), "--parallel", str(parallel)]
     configure_result = _run_timed(configure)
     clean_build_result = _run_timed(build)
-    incremental_result = _run_timed(build)
+    noop_incremental_result = _run_timed(build)
+    source_stat = incremental_source.stat()
+    try:
+        incremental_source.touch()
+        source_incremental_result = _run_timed(
+            build, expected_source=incremental_source
+        )
+        if not source_incremental_result["rebuilt_requested_source"]:
+            raise RuntimeError(
+                f"incremental build did not rebuild {incremental_source.name}"
+            )
+    finally:
+        os.utime(
+            incremental_source,
+            ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
+        )
     extension = _find_extension(build_dir)
 
     return {
@@ -212,7 +239,9 @@ def collect_build(label, build_dir, parallel):
         "build": {
             "configure": configure_result,
             "clean": clean_build_result,
-            "noop_incremental": incremental_result,
+            "noop_incremental": noop_incremental_result,
+            "source_incremental": source_incremental_result,
+            "incremental_source": incremental_source.relative_to(ROOT).as_posix(),
             "extension_size_bytes": extension.stat().st_size,
             "extension_name": extension.name,
         },
@@ -236,6 +265,7 @@ def compare_payloads(baseline, candidate):
     metric_paths = {
         "clean_build_seconds": ("clean", "seconds"),
         "clean_peak_rss_kib": ("clean", "max_child_rss_kib_so_far"),
+        "source_incremental_seconds": ("source_incremental", "seconds"),
         "noop_incremental_seconds": ("noop_incremental", "seconds"),
         "extension_size_bytes": ("extension_size_bytes",),
     }
@@ -267,6 +297,10 @@ def compare_payloads(baseline, candidate):
                 "include_graph"
             ]["max_translation_unit_transitive_dependency_count"],
         },
+        "incremental_sources": {
+            "baseline": baseline["build"]["incremental_source"],
+            "candidate": candidate["build"]["incremental_source"],
+        },
     }
 
 
@@ -275,6 +309,9 @@ def main():
     parser.add_argument("--label", default="local")
     parser.add_argument("--build-dir", type=Path)
     parser.add_argument("--parallel", type=int, default=2)
+    parser.add_argument(
+        "--incremental-source", type=Path, default=Path("src/bindings.cpp")
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--compare", nargs=2, metavar=("BASELINE", "CANDIDATE"))
     parser.add_argument("--graph-only", action="store_true")
@@ -292,7 +329,9 @@ def main():
             "include_graph": collect_include_graph(ROOT / "src"),
         }
     elif args.build_dir:
-        payload = collect_build(args.label, args.build_dir, args.parallel)
+        payload = collect_build(
+            args.label, args.build_dir, args.parallel, args.incremental_source
+        )
     else:
         parser.error("use --build-dir, --graph-only, or --compare")
 

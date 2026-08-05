@@ -10,6 +10,7 @@ commitせず、CI artifactまたは`/tmp`等の外部領域に保存する。
 python scripts/refactor_build_baseline.py \
   --label before-r1a \
   --build-dir /tmp/csplendor-refactor-before-r1a \
+  --incremental-source src/bindings.cpp \
   --parallel 2 \
   --output /tmp/csplendor-refactor-before-r1a.json
 python scripts/phase0_native_probe.py \
@@ -39,15 +40,18 @@ portable CPU target、parallel=2で取得した。
 |---|---:|
 | local include node / direct edge | 38 / 106 |
 | 最大transitive include（`bindings.cpp`） | 36 |
-| configure | 0.581 s |
-| clean extension build | 11.006 s |
+| configure | 0.588 s |
+| clean extension build | 10.957 s |
+| `bindings.cpp` incremental rebuild | 11.070 s |
 | no-op incremental build | 0.038 s |
 | extension size | 1,409,824 bytes |
-| clean build child peak RSS上限 | 1,101,492 KiB |
+| clean build child peak RSS上限 | 1,100,608 KiB |
 
 RSSはPythonの`RUSAGE_CHILDREN`で観測した、その時点までのchild process最大値である。
 単独processの厳密なpeakではないため、同じhost・同じ実行順のpaired比較にのみ使う。
-build timeも1回の診断値なので、5%境界付近では複数回測定して判断する。
+source incrementalは対象ファイルのatime/mtimeを保存し、`touch`後のbuildが対象を
+再コンパイルしたことをbuild出力で確認してからtimestampを復元する。build timeは
+いずれも1回の診断値なので、5%境界付近では複数回測定して判断する。
 
 同じ環境での15 sample runtime中央値は次の通りだった。
 
