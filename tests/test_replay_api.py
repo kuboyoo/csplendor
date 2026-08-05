@@ -89,6 +89,9 @@ def test_replay_list_does_not_unpickle_or_expose_server_paths(
     response = _request("GET", "/replay/files")
 
     assert response.status_code == 200
+    assert "administrator-controlled" in response.headers[
+        "x-replay-format-warning"
+    ]
     assert response.json() == {
         "files": [
             {

@@ -38,6 +38,14 @@ model stack is loaded. The `ml` package extra supplies torch only;
 `dlsplendor` and its models must be provided separately by the integrating
 project.
 
+The endpoint is called through the `AIProvider` protocol. Embedding
+applications can install a provider with `set_ai_provider()`; tests can use a
+provider with no ML dependencies. Merely importing the engine or web
+application does not inspect sibling repositories or model directories.
+During the compatibility period, explicit external source roots can be set by
+`CSPLENDOR_DLSPLENDOR_PATH`, `CSPLENDOR_ALPHAZERO_PATH`,
+`CSPLENDOR_DEEPSETS_PATH`, and `CSPLENDOR_NNUE_PATH`.
+
 ### Legacy replay endpoints
 
 `GET /replay/files`, `POST /replay/load?path=<filename>`, and
@@ -50,6 +58,9 @@ that directory are rejected. The listing endpoint returns directory-local names
 and does not unpickle files merely to inspect them. This endpoint is not an
 upload or untrusted-data ingestion API; use a non-executable serialization
 format if replays must cross a trust boundary.
+Both listing and loading responses include `X-Replay-Format-Warning` to make
+this unsafe-format boundary visible without changing the established JSON
+response schema.
 
 ## 3. JSON Schema Overview (Simplified)
 
