@@ -27,3 +27,5 @@ target_compile_definitions(
   PRIVATE CSPLENDOR_MCTS_TESTING=1 CSPLENDOR_ACTION_ENCODER_REFERENCE=1)
 csplendor_add_native_test(game_snapshot_unit game_snapshot_unit.cpp
                           "unit;snapshot;serialization;standalone-header" 30)
+csplendor_add_native_test(state_invariants_unit state_invariants_unit.cpp
+                          "unit;state;invariants;hash" 30)

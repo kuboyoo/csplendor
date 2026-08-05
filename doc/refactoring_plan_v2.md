@@ -439,8 +439,9 @@ C++ または binding を変更した場合は native test、strict build、該�
 3. R1-A: binding 登録関数の分割（挙動変更なし、完了）
 4. R1-B1: snapshotの非テンプレート実装を`.cpp`化（完了）
 5. R1-B2: deterministic traceのserialization/verificationを`.cpp`化（完了）
-6. R2-A: invariant checker と cache invalidation の可視化
-7. R3-A: rule primitive の一つを旧新 differential test 付きで抽出
+6. R2-A: invariant checker と cache invalidation の可視化（完了）
+7. R2-B: 固定容量primitiveとmutation/cache gatewayの整理
+8. R3-A: rule primitive の一つを旧新 differential test 付きで抽出
 
 MCTS、solver、Web/AI の大規模分割を同時に開始しない。基盤となる build/domain 境界を先に安定させ、それぞれ独立した benchmark と rollback 可能な PR にする。
 
@@ -501,4 +502,9 @@ R1-B2ではdeterministic traceのserialization/verificationを
 固定したまま、headerを854行から395行へ縮小し、MCTS binding差分buildも短縮した。
 詳細は[`refactoring_plan/r1b_trace.md`](refactoring_plan/r1b_trace.md)に記録する。
 
-次の構造変更はR2-Aのinvariant checkerとcache invalidation可視化とする。
+R2-Aではstate profile別のinvariant checkerをcompiled coreへ追加した。合法手後の
+reachable state、editor/serializedの緩和範囲、determinization後のsearch state、
+packed derived値、固定容量、stale hash cacheを局面非破壊で診断できる。
+詳細は[`refactoring_plan/r2a_invariants.md`](refactoring_plan/r2a_invariants.md)に記録する。
+
+次の構造変更はR2-Bの固定容量primitiveとmutation/cache gateway整理とする。

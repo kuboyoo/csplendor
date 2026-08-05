@@ -45,12 +45,17 @@ snapshot version は分類によらず数値契約である。変更する場合
 | 区分 | 主なフィールド | 更新責任 |
 |---|---|---|
 | canonical | `Board.bank/visible/decks/nobles/players/turn/current_player/final_round/waiting_noble/winner`、playerのpoints・slot・count | `Game` transition、editor setter、snapshot restore |
-| derived | `PlayerState.packed_gems`、`packed_bonuses` | gems/bonuses更新と同時に同期 |
+| derived | `PlayerState.packed_gems`、`packed_bonuses`、`noble_eligibility_mask` | gems/bonuses更新と同時に同期 |
 | provenance | `reserved_is_hidden`、Gameのaction/board history | reserve処理または履歴記録処理 |
 | cache | `Board` のposition hash cache | canonical/provenance state変更時にinvalidate |
 
 `purchased_count` は公開card配列から単純再計算する補助値ではなく、終局時の
 tie-breakに使うcanonical fieldとして扱う。
+
+内部APIの `csplendor::state::validate_invariants()` はこの表を実行可能な診断へ
+落としたものである。局面やlazy hash cacheを変更せず、違反を安定したbit maskと
+名称で返す。`reachable` / `search` では資源保存、一意性、provenanceまで検査し、
+`editor` / `serialized` では局所構造、ID、derived値、cache整合性を検査する。
 
 ## 合法手・更新の契約
 

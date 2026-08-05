@@ -24,9 +24,12 @@ target_include_directories(
     INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
 target_compile_features(csplendor_core_config INTERFACE cxx_std_17)
 
-set(CSPLENDOR_CORE_SOURCES
+set(CSPLENDOR_PYTHON_CORE_SOURCES
     src/game_snapshot.cpp
     src/mcts_parallel_trace.cpp)
+set(CSPLENDOR_CORE_SOURCES
+    ${CSPLENDOR_PYTHON_CORE_SOURCES}
+    src/state_invariants.cpp)
 add_library(csplendor_core STATIC EXCLUDE_FROM_ALL ${CSPLENDOR_CORE_SOURCES})
 set_target_properties(csplendor_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -110,7 +113,7 @@ if(CSPLENDOR_BUILD_PYTHON_MODULE)
 
   pybind11_add_module(
       _csplendor
-      ${CSPLENDOR_CORE_SOURCES}
+      ${CSPLENDOR_PYTHON_CORE_SOURCES}
       src/bindings.cpp
       src/bindings_domain.cpp
       src/bindings_rules.cpp
