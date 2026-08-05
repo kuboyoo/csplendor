@@ -104,14 +104,9 @@ public:
     }
 
     case RESERVE_VISIBLE: {
-      for (int level = 0; level < 3; ++level) {
-        for (int slot = 0; slot < 4; ++slot) {
-          if (board.visible[level][slot] == action.card_id) {
-            return 15 + level * 4 + slot;
-          }
-        }
-      }
-      return -1;
+      const int slot =
+          action_encoder_detail::find_visible_slot(action.card_id, board);
+      return slot >= 0 ? 15 + slot : -1;
     }
 
     case RESERVE_DECK: {
@@ -122,24 +117,14 @@ public:
 
     case PURCHASE: {
       if (action.from_reserved) {
-        // Find index in player's reserved cards
         const PlayerState &player = board.players[board.current_player];
-        for (int i = 0; i < 3; ++i) {
-          if (player.reserved[i] == action.card_id) {
-            return 42 + i;
-          }
-        }
-        return -1;
+        const int slot =
+            action_encoder_detail::find_reserved_slot(action.card_id, player);
+        return slot >= 0 ? 42 + slot : -1;
       } else {
-        // Visible on board
-        for (int level = 0; level < 3; ++level) {
-          for (int slot = 0; slot < 4; ++slot) {
-            if (board.visible[level][slot] == action.card_id) {
-              return 30 + level * 4 + slot;
-            }
-          }
-        }
-        return -1;
+        const int slot =
+            action_encoder_detail::find_visible_slot(action.card_id, board);
+        return slot >= 0 ? 30 + slot : -1;
       }
     }
 
@@ -682,11 +667,8 @@ private:
         action.type == ACTION_TYPE_COUNT)
       return;
     const std::array<uint8_t, 6> available =
-        MoveGenerator::gems_after_action(board, action);
-    int total = 0;
-    for (uint8_t amount : available)
-      total += amount;
-    int remaining = std::max(0, total - Board::MAX_TOKENS);
+        csplendor::rules::gems_after_token_action(board, action);
+    int remaining = csplendor::rules::required_token_return(available);
     for (int color = 0; color < 6 && remaining > 0; ++color) {
       int suffix_capacity = 0;
       for (int suffix = color + 1; suffix < 6; ++suffix)

@@ -4,6 +4,7 @@
 #include "action.h"
 #include "board.h"
 #include "move_generator.h"
+#include "rule_query.h"
 #include "rule_transition.h"
 #ifdef CSPLENDOR_VERIFY_DELTA_UNDO
 #include "undo_record.h"
@@ -283,29 +284,6 @@ private:
     return board.current_player < Board::NUM_PLAYERS;
   }
 
-  bool has_no_return(const Action &a) const {
-    for (int i = 0; i < 6; ++i) {
-      if (a.return_gems[i] != 0)
-        return false;
-    }
-    return true;
-  }
-
-  bool validate_returns(const std::array<uint8_t, 6> &next_gems,
-                        const Action &a) const {
-    int total = 0;
-    int returned = 0;
-    for (int i = 0; i < 6; ++i) {
-      if (a.return_gems[i] > next_gems[i])
-        return false;
-      total += next_gems[i];
-      returned += a.return_gems[i];
-    }
-
-    int excess = std::max(0, total - Board::MAX_TOKENS);
-    return returned == excess;
-  }
-
   bool can_apply_take(const Action &a) const {
     if (!valid_current_player())
       return false;
@@ -344,7 +322,7 @@ private:
       return false;
     }
 
-    return validate_returns(next_gems, a);
+    return csplendor::rules::validate_token_return(next_gems, a.return_gems);
   }
 
   bool can_apply_reserve_visible(const Action &a) const {
@@ -355,17 +333,13 @@ private:
     if (!p.can_reserve())
       return false;
 
-    bool found = false;
-    for (int l = 0; l < 3 && !found; ++l)
-      for (int s = 0; s < 4; ++s)
-        found = found || board.visible[l][s] == a.card_id;
-    if (!found)
+    if (!csplendor::rules::find_visible_card_source(board, a.card_id))
       return false;
 
     std::array<uint8_t, 6> next_gems = p.gems;
     if (board.bank[GOLD] > 0)
       next_gems[GOLD]++;
-    return validate_returns(next_gems, a);
+    return csplendor::rules::validate_token_return(next_gems, a.return_gems);
   }
 
   bool can_apply_reserve_deck(const Action &a) const {
@@ -379,41 +353,26 @@ private:
     std::array<uint8_t, 6> next_gems = p.gems;
     if (board.bank[GOLD] > 0)
       next_gems[GOLD]++;
-    return validate_returns(next_gems, a);
+    return csplendor::rules::validate_token_return(next_gems, a.return_gems);
   }
 
   bool can_apply_purchase(const Action &a) const {
     if (!valid_current_player() || !is_valid_card_id(a.card_id) ||
-        !has_no_return(a))
+        !csplendor::rules::has_no_token_return(a))
       return false;
 
     const auto &p = board.players[board.current_player];
 
-    bool source_found = false;
-    if (a.from_reserved) {
-      for (int i = 0; i < 3; ++i)
-        source_found = source_found || p.reserved[i] == a.card_id;
-    } else {
-      for (int l = 0; l < 3 && !source_found; ++l)
-        for (int s = 0; s < 4; ++s)
-          source_found = source_found || board.visible[l][s] == a.card_id;
-    }
+    const bool source_found =
+        a.from_reserved
+            ? csplendor::rules::find_reserved_card_source(p, a.card_id) >= 0
+            : static_cast<bool>(
+                  csplendor::rules::find_visible_card_source(board, a.card_id));
     if (!source_found)
       return false;
 
-    const auto &card = get_card(a.card_id);
-    int gold_used = 0;
-    for (int i = 0; i < 5; ++i) {
-      int cost = std::max(0, (int)card.cost[i] - (int)p.bonuses[i]);
-      int from_gold = a.gold_as[i];
-      if (from_gold > cost)
-        return false;
-      int from_gems = cost - from_gold;
-      if (from_gems > p.gems[i])
-        return false;
-      gold_used += from_gold;
-    }
-    return gold_used <= p.gems[GOLD];
+    return csplendor::rules::validate_purchase_payment(
+        p, get_card(a.card_id), a.gold_as);
   }
 
   bool can_apply_noble_visit(const Action &a) const {
@@ -422,7 +381,7 @@ private:
       return false;
 
     auto eligible =
-        MoveGenerator::get_eligible_nobles_fixed(board, board.current_player);
+        csplendor::rules::eligible_nobles(board, board.current_player);
     for (uint8_t noble_id : eligible) {
       if (noble_id == a.noble_choice)
         return true;
@@ -469,19 +428,12 @@ private:
 
   bool apply_reserve_visible(const Action &a) {
     // Find and remove from board
-    int found_level = -1;
-    int found_slot = -1;
-    for (int l = 0; l < 3 && found_level == -1; ++l) {
-      for (int s = 0; s < 4; ++s) {
-        if (board.visible[l][s] == a.card_id) {
-          found_level = l;
-          found_slot = s;
-          break;
-        }
-      }
-    }
-    if (found_level == -1)
+    const auto source =
+        csplendor::rules::find_visible_card_source(board, a.card_id);
+    if (!source)
       return false;
+    const int found_level = source.level;
+    const int found_slot = source.slot;
 
     csplendor::detail::reserve_card_unchecked(board, a.card_id, false);
     if (!board.decks[found_level].empty()) {
@@ -520,28 +472,16 @@ private:
     const auto &card = get_card(a.card_id);
 
     int reserved_slot = -1;
-    int visible_level = -1;
-    int visible_slot = -1;
+    csplendor::rules::VisibleCardSource visible_source;
     if (a.from_reserved) {
-      for (int i = 0; i < 3; ++i) {
-        if (p.reserved[i] == a.card_id) {
-          reserved_slot = i;
-          break;
-        }
-      }
+      reserved_slot =
+          csplendor::rules::find_reserved_card_source(p, a.card_id);
       if (reserved_slot == -1)
         return false;
     } else {
-      for (int l = 0; l < 3 && visible_level == -1; ++l) {
-        for (int s = 0; s < 4; ++s) {
-          if (board.visible[l][s] == a.card_id) {
-            visible_level = l;
-            visible_slot = s;
-            break;
-          }
-        }
-      }
-      if (visible_level == -1)
+      visible_source =
+          csplendor::rules::find_visible_card_source(board, a.card_id);
+      if (!visible_source)
         return false;
     }
 
@@ -559,6 +499,8 @@ private:
       p.reserved_is_hidden[2] = false;
       p.reserved_count--;
     } else {
+      const int visible_level = visible_source.level;
+      const int visible_slot = visible_source.slot;
       if (!board.decks[visible_level].empty()) {
         // Blank refill mode: consume the card but keep the slot unknown.
         if (blank_refill_mode) {
@@ -582,7 +524,7 @@ private:
 
   bool apply_noble_visit(const Action &a) {
     auto eligible =
-        MoveGenerator::get_eligible_nobles_fixed(board, board.current_player);
+        csplendor::rules::eligible_nobles(board, board.current_player);
     if (eligible.empty())
       return a.type != VISIT_NOBLE;
 

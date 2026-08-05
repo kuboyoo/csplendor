@@ -442,7 +442,7 @@ C++ または binding を変更した場合は native test、strict build、該�
 6. R2-A: invariant checker と cache invalidation の可視化（完了）
 7. R2-B: 固定容量primitiveとmutation/cache gatewayの整理（完了）
 8. R2-C: copy/snapshot/delta ownershipとpublic field移行方針の確定（完了）
-9. R3-A: rule primitiveを旧新differential test付きで抽出
+9. R3-A: rule primitiveを旧新differential test付きで抽出（完了）
 
 MCTS、solver、Web/AI の大規模分割を同時に開始しない。基盤となる build/domain 境界を先に安定させ、それぞれ独立した benchmark と rollback 可能な PR にする。
 
@@ -519,4 +519,10 @@ copy、versioned snapshot、production undo、delta検証の所有範囲を分�
 delta採用を見送った。public fieldは現行majorのC++互換契約として維持する。
 詳細は[`refactoring_plan/r2c_copy_ownership.md`](refactoring_plan/r2c_copy_ownership.md)に記録する。
 
-R2は完了した。次の構造変更はR3-Aのrule query/validation/transition primitive整理とする。
+R3ではcard source、実効費用、token返却、支払、貴族候補、final roundと勝者判定を
+allocation-freeな純粋照会へ集約した。generator、validator、transition、encoderが同じ
+正本を利用し、2,770局面・97,354合法手の固定digestと抽出前referenceとの差分テストで
+順序・適用結果を固定した。
+詳細は[`refactoring_plan/r3_rules.md`](refactoring_plan/r3_rules.md)に記録する。
+
+R3は完了した。次の構造変更はR4のversioned encoderとfeature schema一元化とする。
