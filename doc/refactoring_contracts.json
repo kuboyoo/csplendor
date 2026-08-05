@@ -86,6 +86,7 @@
       "portable_rng.h",
       "resource_bundle.h",
       "rule_transition.h",
+      "state_invariants.h",
       "undo_record.h",
       "zobrist.h"
     ]
