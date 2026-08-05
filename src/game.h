@@ -27,38 +27,22 @@ public:
 
   explicit Game(uint64_t seed = 0) { board.init(seed); }
 
-  Game clone() const {
-    Game g = *this;
-    return g;
-  }
+  // Full user-visible copy, including the action and undo journals.
+  Game clone() const { return *this; }
 
-  // Lightweight clone for MCTS - does not copy history to save memory
-  Game clone_light() const {
-    Game g(NoInit{});
-    g.board = board;
-    g.simple_payment_mode = simple_payment_mode;
-    g.blank_refill_mode = blank_refill_mode;
-    // Intentionally not copying history and board_history
-    // This is safe for MCTS where we only need the current state
-    return g;
-  }
+  // Current-state copy for search. Action and undo journals are excluded.
+  Game clone_light() const { return copy_current_state(); }
 
   // Shuffled clone for MCTS determinization - randomizes hidden information
   // from the perspective of observer_player to combat "clairvoyance"
   Game shuffled_clone(uint8_t observer_player, uint64_t seed) const {
-    Game g(NoInit{});
-    g.board = board;
-    g.simple_payment_mode = simple_payment_mode;
-    g.blank_refill_mode = blank_refill_mode;
+    Game g = copy_current_state();
     g.board.randomize_hidden_information(observer_player, seed);
     return g;
   }
 
   Game shuffled_clone_portable(uint8_t observer_player, uint64_t seed) const {
-    Game g(NoInit{});
-    g.board = board;
-    g.simple_payment_mode = simple_payment_mode;
-    g.blank_refill_mode = blank_refill_mode;
+    Game g = copy_current_state();
     g.board.randomize_hidden_information_portable(observer_player, seed);
     return g;
   }
@@ -198,6 +182,14 @@ public:
 
 private:
   explicit Game(NoInit) {}
+
+  Game copy_current_state() const {
+    Game copy(NoInit{});
+    copy.board = board;
+    copy.simple_payment_mode = simple_payment_mode;
+    copy.blank_refill_mode = blank_refill_mode;
+    return copy;
+  }
 
   bool apply_unchecked(const Action &action, bool record_history) {
     Board previous;

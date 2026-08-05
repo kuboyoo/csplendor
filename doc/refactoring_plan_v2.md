@@ -441,8 +441,8 @@ C++ または binding を変更した場合は native test、strict build、該�
 5. R1-B2: deterministic traceのserialization/verificationを`.cpp`化（完了）
 6. R2-A: invariant checker と cache invalidation の可視化（完了）
 7. R2-B: 固定容量primitiveとmutation/cache gatewayの整理（完了）
-8. R2-C: copy/snapshot/delta ownershipとpublic field移行方針の確定
-9. R3-A: rule primitive の一つを旧新 differential test 付きで抽出
+8. R2-C: copy/snapshot/delta ownershipとpublic field移行方針の確定（完了）
+9. R3-A: rule primitiveを旧新differential test付きで抽出
 
 MCTS、solver、Web/AI の大規模分割を同時に開始しない。基盤となる build/domain 境界を先に安定させ、それぞれ独立した benchmark と rollback 可能な PR にする。
 
@@ -513,4 +513,10 @@ R2-Bでは`FixedStack`の明示的なoverflow API、検証済みeditor更新、t
 runtimeとbuildは基準内である。
 詳細は[`refactoring_plan/r2b_mutation.md`](refactoring_plan/r2b_mutation.md)に記録する。
 
-次の構造変更はR2-Cのcopy/snapshot/delta ownershipとpublic field移行方針の確定とする。
+R2-Cでは全state fieldをcanonical、derived、provenance、cacheへ分類し、full/search
+copy、versioned snapshot、production undo、delta検証の所有範囲を分離した。search copy
+構築を1経路へ統一し、公開editor後のundo互換と主要workload profileからproduction
+delta採用を見送った。public fieldは現行majorのC++互換契約として維持する。
+詳細は[`refactoring_plan/r2c_copy_ownership.md`](refactoring_plan/r2c_copy_ownership.md)に記録する。
+
+R2は完了した。次の構造変更はR3-Aのrule query/validation/transition primitive整理とする。
