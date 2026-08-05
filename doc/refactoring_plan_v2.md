@@ -434,7 +434,7 @@ C++ または binding を変更した場合は native test、strict build、該�
 
 推奨する最初の実装順は次の通りである。
 
-1. R0-A: 公開 API/不変条件表
+1. R0-A: 公開 API/不変条件表（完了）
 2. R0-B: benchmark/build/include 基準値と共通 test support
 3. R1-A: binding 登録関数の分割（挙動変更なし）
 4. R1-B: snapshot/trace 等の非テンプレート実装を `.cpp` 化
@@ -484,6 +484,9 @@ MCTS、solver、Web/AI の大規模分割を同時に開始しない。基盤と
 
 ## 12. 次の着手点
 
-gem 色 ID の cross-layer golden test と schema fingerprint は先行して完了した。次の実装 PR は R0-A の残りである公開契約の一覧と不変条件表を対象とする。
+gem 色 ID の cross-layer golden test、schema fingerprint、R0-A の公開契約台帳と
+状態不変条件表は完了した。次の実装 PR は R0-B のbuild/include基準値と共通test
+supportを対象とする。
 
-その後、最初の構造変更として R1-A の binding 分割を行う。これはルールや探索 hot path に触れずにコンパイル境界を改善でき、以降の変更を小さな PR に分ける土台になる。
+その後、最初の構造変更として R1-A の binding 分割を行う。これはルールや探索 hot
+pathに触れずにコンパイル境界を改善でき、以降の変更を小さなPRに分ける土台になる。

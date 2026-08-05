@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "python_api": {
+    "public": [
+      "Action",
+      "ActionEncoder",
+      "ActionEncoderCpp",
+      "ActionEncoderV2",
+      "ActionEncoderV3",
+      "ActionType",
+      "Board",
+      "Card",
+      "Game",
+      "GemType",
+      "InferenceResult",
+      "LeafRequest",
+      "MCTS",
+      "MCTSConfig",
+      "MCTSNode",
+      "Noble",
+      "PlayerState",
+      "StateEncoder",
+      "StateFeaturizer",
+      "get_all_cards",
+      "get_all_nobles",
+      "get_card",
+      "get_noble",
+      "solve_reveal_verified_mate_cpp",
+      "solve_visible_only_winner_cpp"
+    ],
+    "experimental": [
+      "ParallelCancellationToken",
+      "ParallelSearchLedger",
+      "ParallelSearchMode",
+      "ParallelSearchOptions",
+      "ParallelSearchResult",
+      "ParallelSearchStopReason",
+      "ParallelTreeBackend",
+      "RootParallelSearchResult",
+      "mcts_search_parallel_native",
+      "mcts_search_root_parallel_native"
+    ],
+    "internal_native": [
+      "mcts_search"
+    ]
+  },
+  "cpp_headers": {
+    "public": [
+      "action.h",
+      "action_encoder.h",
+      "action_encoder_v2.h",
+      "action_encoder_v3.h",
+      "board.h",
+      "card_data.h",
+      "game.h",
+      "game_snapshot.h",
+      "mcts.h",
+      "move_generator.h",
+      "noble_data.h",
+      "player.h",
+      "state_encoder.h",
+      "types.h",
+      "visible_only_solver.h"
+    ],
+    "experimental": [
+      "mcts_parallel_searcher.h",
+      "mcts_root_parallel.h",
+      "reveal_verified_solver.h"
+    ],
+    "internal": [
+      "action_encoder_common.h",
+      "cli_utils.h",
+      "mcts_bounded_queue.h",
+      "mcts_concurrent_tree.h",
+      "mcts_game_adapter.h",
+      "mcts_orchestration.h",
+      "mcts_parallel_trace.h",
+      "mcts_parallel_types.h",
+      "mcts_rng.h",
+      "mcts_searcher.h",
+      "mcts_tree.h",
+      "mcts_tree_key.h",
+      "mcts_types.h",
+      "portable_rng.h",
+      "resource_bundle.h",
+      "rule_transition.h",
+      "undo_record.h",
+      "zobrist.h"
+    ]
+  },
+  "state_profiles": [
+    "reachable",
+    "editor",
+    "search",
+    "serialized"
+  ]
+}
