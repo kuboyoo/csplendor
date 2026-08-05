@@ -16,6 +16,7 @@ Welcome to the technical documentation for the `csplendor` engine.
 - [Refactoring Compatibility Contracts](refactoring_contracts.md) - Versioned API classification, state invariants, mutation, and ownership contracts.
 - [R0 Refactoring Baseline](refactoring_plan/r0_baseline.md) - Reproducible build/include/runtime measurements and shared test support.
 - [R1-A Binding Split](refactoring_plan/r1a_bindings.md) - Responsibility-specific pybind11 translation units and before/after validation.
+- [R1-B1 Snapshot Compiled Core](refactoring_plan/r1b_snapshot.md) - Compiled snapshot serialization boundary and compatibility/performance validation.
 
 ---
 

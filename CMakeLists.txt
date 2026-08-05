@@ -18,10 +18,15 @@ set_property(CACHE CSPLENDOR_SANITIZER PROPERTY STRINGS
 
 find_package(Threads REQUIRED)
 
-add_library(csplendor_core INTERFACE)
+add_library(csplendor_core_config INTERFACE)
 target_include_directories(
-    csplendor_core INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
-target_compile_features(csplendor_core INTERFACE cxx_std_17)
+    csplendor_core_config
+    INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+target_compile_features(csplendor_core_config INTERFACE cxx_std_17)
+
+set(CSPLENDOR_CORE_SOURCES src/game_snapshot.cpp)
+add_library(csplendor_core STATIC EXCLUDE_FROM_ALL ${CSPLENDOR_CORE_SOURCES})
+set_target_properties(csplendor_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_library(csplendor_warnings INTERFACE)
 if(MSVC)
@@ -57,7 +62,7 @@ elseif(CSPLENDOR_CPU_TARGET STREQUAL "native")
             "The selected C++ compiler does not support -mcpu=native")
   endif()
 
-  target_compile_options(csplendor_core INTERFACE -mcpu=native)
+  target_compile_options(csplendor_core_config INTERFACE -mcpu=native)
   message(STATUS "csplendor CPU target: native (-mcpu=native)")
   message(WARNING
           "The native CPU target creates a host-specific local binary. "
@@ -87,6 +92,10 @@ else()
           "Unsupported CSPLENDOR_SANITIZER=${CSPLENDOR_SANITIZER}")
 endif()
 
+target_link_libraries(csplendor_core_config INTERFACE csplendor_sanitizer)
+target_link_libraries(
+    csplendor_core PUBLIC csplendor_core_config PRIVATE csplendor_warnings)
+
 if(NOT CSPLENDOR_SANITIZER STREQUAL "none" AND
    CSPLENDOR_BUILD_PYTHON_MODULE)
   message(FATAL_ERROR
@@ -99,6 +108,7 @@ if(CSPLENDOR_BUILD_PYTHON_MODULE)
 
   pybind11_add_module(
       _csplendor
+      ${CSPLENDOR_CORE_SOURCES}
       src/bindings.cpp
       src/bindings_domain.cpp
       src/bindings_rules.cpp
@@ -106,7 +116,7 @@ if(CSPLENDOR_BUILD_PYTHON_MODULE)
       src/bindings_mcts.cpp
       src/bindings_solvers.cpp)
   target_link_libraries(
-      _csplendor PRIVATE csplendor_core csplendor_sanitizer Threads::Threads)
+      _csplendor PRIVATE csplendor_core_config Threads::Threads)
 endif()
 
 if(CSPLENDOR_BUILD_NATIVE_TESTS)
