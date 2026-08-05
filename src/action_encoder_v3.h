@@ -4,6 +4,7 @@
 #include "action.h"
 #include "action_encoder_common.h"
 #include "card_data.h"
+#include "encoding_schema.h"
 #include "game.h"
 #include "types.h"
 #include <algorithm>
@@ -35,6 +36,7 @@
  */
 class ActionEncoderV3 {
 public:
+  using Schema = csplendor::encoding::ActionSpaceV3;
   // ─── Multiset coefficient table H(n,k) = C(n+k-1, k) ───
   // Used for return encoding (same as V2)
   static constexpr const int (&H)[7][6] = action_encoder_detail::ReturnCodec::H;
@@ -44,41 +46,32 @@ public:
       action_encoder_detail::ReturnCodec::OFFSET;
 
   // ─── Pattern counts per action type ───
-  static constexpr int TAKE_DIFF_RETURN_PATTERNS = 84;  // ret 0-3, 6 colors
-  static constexpr int TAKE_SAME_RETURN_PATTERNS = 28;  // ret 0-2, 6 colors
-  static constexpr int RESERVE_RETURN_PATTERNS = 7;     // ret 0-1, 6 colors
+  static constexpr int TAKE_DIFF_RETURN_PATTERNS =
+      Schema::TAKE_DIFF_RETURN_PATTERNS;
+  static constexpr int TAKE_SAME_RETURN_PATTERNS =
+      Schema::TAKE_SAME_RETURN_PATTERNS;
+  static constexpr int RESERVE_RETURN_PATTERNS =
+      Schema::RESERVE_RETURN_PATTERNS;
 
   // Base action counts
-  static constexpr int NUM_TAKE_DIFFERENT = 10;
-  static constexpr int NUM_TAKE_SAME = 5;
-  static constexpr int NUM_RESERVE_VISIBLE = 12;
-  static constexpr int NUM_RESERVE_DECK = 3;
-  static constexpr int NUM_CARDS = 90;
-  static constexpr int NUM_NOBLES = 12; // Total noble types in the game
-  static constexpr int MAX_GOLD = 5; // 2-player game
+  static constexpr int NUM_TAKE_DIFFERENT = Schema::NUM_TAKE_DIFFERENT;
+  static constexpr int NUM_TAKE_SAME = Schema::NUM_TAKE_SAME;
+  static constexpr int NUM_RESERVE_VISIBLE = Schema::NUM_RESERVE_VISIBLE;
+  static constexpr int NUM_RESERVE_DECK = Schema::NUM_RESERVE_DECK;
+  static constexpr int NUM_CARDS = Schema::NUM_CARDS;
+  static constexpr int NUM_NOBLES = Schema::NUM_NOBLES;
+  static constexpr int MAX_GOLD = Schema::MAX_GOLD;
 
   // Offsets
-  static constexpr int OFFSET_TAKE_DIFFERENT = 0;
-  static constexpr int OFFSET_TAKE_SAME =
-      OFFSET_TAKE_DIFFERENT +
-      NUM_TAKE_DIFFERENT * TAKE_DIFF_RETURN_PATTERNS; // 840
-  static constexpr int OFFSET_RESERVE_VISIBLE =
-      OFFSET_TAKE_SAME +
-      NUM_TAKE_SAME * TAKE_SAME_RETURN_PATTERNS; // 980
-  static constexpr int OFFSET_RESERVE_DECK =
-      OFFSET_RESERVE_VISIBLE +
-      NUM_RESERVE_VISIBLE * RESERVE_RETURN_PATTERNS; // 1064
-  static constexpr int OFFSET_PURCHASE =
-      OFFSET_RESERVE_DECK +
-      NUM_RESERVE_DECK * RESERVE_RETURN_PATTERNS; // 1085
-
-  static constexpr int TOTAL_PURCHASE = 2035;
-
-  static constexpr int OFFSET_VISIT_NOBLE =
-      OFFSET_PURCHASE + TOTAL_PURCHASE; // 3120
-  static constexpr int OFFSET_PASS =
-      OFFSET_VISIT_NOBLE + NUM_NOBLES; // 3132
-  static constexpr int ACTION_SIZE = OFFSET_PASS + 1; // 3133
+  static constexpr int OFFSET_TAKE_DIFFERENT = Schema::OFFSET_TAKE_DIFFERENT;
+  static constexpr int OFFSET_TAKE_SAME = Schema::OFFSET_TAKE_SAME;
+  static constexpr int OFFSET_RESERVE_VISIBLE = Schema::OFFSET_RESERVE_VISIBLE;
+  static constexpr int OFFSET_RESERVE_DECK = Schema::OFFSET_RESERVE_DECK;
+  static constexpr int OFFSET_PURCHASE = Schema::OFFSET_PURCHASE;
+  static constexpr int TOTAL_PURCHASE = Schema::TOTAL_PURCHASE;
+  static constexpr int OFFSET_VISIT_NOBLE = Schema::OFFSET_VISIT_NOBLE;
+  static constexpr int OFFSET_PASS = Schema::OFFSET_PASS;
+  static constexpr int ACTION_SIZE = Schema::SIZE;
 
   // ─── Card payment offset and pattern count tables ───
   // CARD_PAYMENT_OFFSET[card_id] = cumulative offset into PURCHASE range

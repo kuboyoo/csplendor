@@ -3,19 +3,25 @@
 
 #include "board.h"
 #include "card_data.h"
+#include "encoding_schema.h"
 #include "game.h"
 #include "noble_data.h"
 #include <array>
 #include <cstdint>
 
 // Feature dimensions
-static constexpr size_t CARD_FEATURE_SIZE = 8;   // points, cost[5], bonus, level
-static constexpr size_t NOBLE_FEATURE_SIZE = 6;  // points, requirement[5]
-static constexpr size_t PLAYER_FEATURE_SIZE = 36; // gems(6) + bonuses(5) + points(1) + reserved(3*8)
-static constexpr size_t TOTAL_FEATURES = 196;    // 6 + 36 + 36 + 96 + 3 + 18 + 1
-static constexpr size_t PUBLIC_CARD_LEVEL_FEATURE_SIZE = 39;
+static constexpr size_t CARD_FEATURE_SIZE =
+    csplendor::encoding::StateFeatureV1::CARD_FEATURE_SIZE;
+static constexpr size_t NOBLE_FEATURE_SIZE =
+    csplendor::encoding::StateFeatureV1::NOBLE_FEATURE_SIZE;
+static constexpr size_t PLAYER_FEATURE_SIZE =
+    csplendor::encoding::StateFeatureV1::PLAYER_FEATURE_SIZE;
+static constexpr size_t TOTAL_FEATURES =
+    csplendor::encoding::StateFeatureV1::SIZE;
+static constexpr size_t PUBLIC_CARD_LEVEL_FEATURE_SIZE =
+    csplendor::encoding::StateFeatureV1::PUBLIC_CARD_LEVEL_FEATURE_SIZE;
 static constexpr size_t PUBLIC_CARD_FEATURE_SIZE =
-    3 * PUBLIC_CARD_LEVEL_FEATURE_SIZE;
+    csplendor::encoding::StateFeatureV1::PUBLIC_CARD_FEATURE_SIZE;
 
 /**
  * C++ implementation of StateFeaturizer for encoding game state.
@@ -23,11 +29,14 @@ static constexpr size_t PUBLIC_CARD_FEATURE_SIZE =
  */
 class StateEncoder {
 public:
-  static constexpr uint32_t schema_version() noexcept { return 1; }
+  using Schema = csplendor::encoding::StateFeatureV1;
+
+  static constexpr uint32_t schema_version() noexcept {
+    return Schema::VERSION;
+  }
 
   static constexpr const char *schema_fingerprint() noexcept {
-    return "csplendor.state.v1;base=196;public=117;gems="
-           "diamond,sapphire,emerald,ruby,onyx,gold";
+    return Schema::fingerprint();
   }
 
   /**
@@ -38,7 +47,7 @@ public:
    * @return 196-element feature array
    */
   static std::array<float, TOTAL_FEATURES> encode(const Game &game,
-                                                   int8_t observer = -1) {
+                                                  int8_t observer = -1) {
     return encode_board(game.board, observer);
   }
 
@@ -50,9 +59,9 @@ public:
    * @return 196-element feature array
    */
   static std::array<float, TOTAL_FEATURES> encode_board(const Board &board,
-                                                         int8_t observer = -1) {
+                                                        int8_t observer = -1) {
     std::array<float, TOTAL_FEATURES> features = {0};
-    size_t idx = 0;
+    size_t idx = Schema::OFFSET_BANK;
 
     // 1. Bank gems (6 features)
     for (int i = 0; i < 6; ++i) {
@@ -142,12 +151,14 @@ public:
     auto features = encode(game, observer);
 
     if (player == 1) {
-      // Swap player 0 (indices 6:42) and player 1 (indices 42:78) features
+      // Swap the two player sections using the schema-owned offsets.
       for (size_t i = 0; i < PLAYER_FEATURE_SIZE; ++i) {
-        std::swap(features[6 + i], features[42 + i]);
+        std::swap(features[Schema::OFFSET_PLAYER_0 + i],
+                  features[Schema::OFFSET_PLAYER_1 + i]);
       }
       // Flip current player indicator
-      features[195] = 1.0f - features[195];
+      features[Schema::OFFSET_CURRENT_PLAYER] =
+          1.0f - features[Schema::OFFSET_CURRENT_PLAYER];
     }
 
     return features;

@@ -1,5 +1,9 @@
 # ActionEncoderV2 Action Space Specification
 
+> Schema metadata: `ActionEncoderV2.schema_version()`,
+> `schema_fingerprint()`, `schema_sections()`。sizeとsection offsetのC++正本は
+> `encoding_schema.h`の`ActionSpaceV2`である。
+
 > **Version**: V2.1 (4869 actions)
 > **Header**: `src/action_encoder_v2.h`
 > **Python**: `csplendor.ActionEncoderV2`

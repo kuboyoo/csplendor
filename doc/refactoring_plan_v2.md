@@ -311,7 +311,7 @@ external AI provider protocol <--> dlsplendor / model repositories
 - apply 後の board、player、phase、hash が完全一致する。
 - editor 状態の上限時にも既存の順序と prefix が一致する。
 
-### R4: versioned encoder と feature schema の一元化
+### R4: versioned encoder と feature schema の一元化（完了）
 
 実施項目:
 
@@ -443,6 +443,7 @@ C++ または binding を変更した場合は native test、strict build、該�
 7. R2-B: 固定容量primitiveとmutation/cache gatewayの整理（完了）
 8. R2-C: copy/snapshot/delta ownershipとpublic field移行方針の確定（完了）
 9. R3-A: rule primitiveを旧新differential test付きで抽出（完了）
+10. R4-A: action / feature schemaをdescriptorへ一元化（完了）
 
 MCTS、solver、Web/AI の大規模分割を同時に開始しない。基盤となる build/domain 境界を先に安定させ、それぞれ独立した benchmark と rollback 可能な PR にする。
 
@@ -525,4 +526,10 @@ allocation-freeな純粋照会へ集約した。generator、validator、transiti
 順序・適用結果を固定した。
 詳細は[`refactoring_plan/r3_rules.md`](refactoring_plan/r3_rules.md)に記録する。
 
-R3は完了した。次の構造変更はR4のversioned encoderとfeature schema一元化とする。
+R4ではV1/V2/V3 action spaceとstate feature v1のversion、size、section offset、色順序を
+`encoding_schema.h`へ集約した。Python feature/action wrapperはnative正本へ委譲し、旧Python
+固有のinvalid fallbackだけを明示的に維持した。全8,050 action IDと768局面×3 observerの
+byte goldenを固定し、Python wrapperは8.7〜11.2倍へ高速化した。
+詳細は[`refactoring_plan/r4_encoding_schema.md`](refactoring_plan/r4_encoding_schema.md)に記録する。
+
+R4は完了した。次の構造変更はR5のMCTS ownershipとorchestration境界整理とする。
