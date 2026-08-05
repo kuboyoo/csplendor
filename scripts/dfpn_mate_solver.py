@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse
-from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 import gc
-import json
 import multiprocessing as mp
 import os
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -18,13 +16,17 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import csplendor as cs
-from csplendor.api.usi_kifu import (
-    build_kifu_text,
-    find_legal_action_index_by_usi,
-    game_to_spn,
-    now_iso,
+from csplendor.api.usi_kifu import now_iso
+from scripts import dfpn_output as _dfpn_output
+from scripts.dfpn_cli import main as _dfpn_cli_main
+from scripts.dfpn_proof import extract_tree as _extract_proof_tree
+from scripts.dfpn_table import DFPNTranspositionTable
+from scripts.dfpn_types import (
+    DFPNStats,
+    RevealVerifiedStats,
+    SearchLimitExceeded,
+    _DFPNNode,
 )
-
 from scripts.mate_solver import (
     INVALID_INPUT,
     MATE,
@@ -45,9 +47,22 @@ from scripts.mate_solver import (
     load_game_from_usi_text,
 )
 
-
-from scripts import dfpn_output as _dfpn_output
-from scripts.dfpn_cli import main as _dfpn_cli_main
+_CLI_COMPAT_EXPORTS = (
+    INVALID_INPUT,
+    MATE,
+    NO_MATE,
+    UNKNOWN,
+    SearchResult,
+    SearchStats,
+    SolverOptions,
+    SolverState,
+    _Outcome,
+    _parse_moves,
+    apply_usi_moves,
+    load_game_from_json,
+    load_game_from_usi_file,
+    load_game_from_usi_text,
+)
 
 INF = 10**12
 PLAYER0_WIN = "Player0Win"
@@ -141,43 +156,6 @@ def strategy_dag_max_children(
     return _dfpn_output.strategy_dag_max_children(dag, player=player)
 
 
-@dataclass
-class DFPNStats(SearchStats):
-    expansions: int = 0
-    tt_hits: int = 0
-    root_proof_number: int = 1
-    root_disproof_number: int = 1
-    dangerous_reveals: int = 0
-    safe_reveal_collapses: int = 0
-    threat_pruned_reveals: int = 0
-    dangerous_reveal_collapses: int = 0
-    lazy_reveal_branches: int = 0
-    lazy_reveal_refinements: int = 0
-    lazy_reveal_pruned: int = 0
-    lazy_action_pruned: int = 0
-    lazy_action_refinements: int = 0
-    action_pruned: int = 0
-    return_pattern_pruned: int = 0
-    upper_bound_prunes: int = 0
-    immediate_terminal_prunes: int = 0
-    final_round_prunes: int = 0
-
-
-@dataclass
-class RevealVerifiedStats(SearchStats):
-    candidate_nodes: int = 0
-    candidate_elapsed_ms: float = 0.0
-    verification_nodes: int = 0
-    verification_elapsed_ms: float = 0.0
-    final_round_reveal_collapses: int = 0
-    final_round_score_prunes: int = 0
-    final_round_direct_resolutions: int = 0
-    oracle_purchase_actions: int = 0
-    oracle_reserve_actions: int = 0
-    deck_reserve_candidates: int = 0
-    deck_reserve_branches: int = 0
-
-
 class ProgressReporter:
     def __init__(self, enabled: bool, interval: float, stream=None):
         self.enabled = bool(enabled)
@@ -232,32 +210,6 @@ class ProgressReporter:
         print(file=self.stream, flush=True)
         self._active_line = False
         self._last_len = 0
-
-
-@dataclass
-class _DFPNNode:
-    kind: str
-    node_type: str
-    depth: int
-    state: Optional[SolverState] = None
-    action: Optional[cs.Action] = None
-    outcome: Optional[_Outcome] = None
-    proof: int = 1
-    disproof: int = 1
-    expanded: bool = False
-    terminal: bool = False
-    terminal_winner: Optional[int] = None
-    reason: Optional[str] = None
-    reveal_level: Optional[int] = None
-    reveal_candidates: Tuple[int, ...] = ()
-    lazy_reveal_materialized: bool = False
-    omitted_actions: Tuple[cs.Action, ...] = ()
-    lazy_actions_materialized: bool = True
-    children: List["_DFPNNode"] = field(default_factory=list)
-
-
-class SearchLimitExceeded(Exception):
-    pass
 
 
 def _kifu_card_level(card_id: int) -> int:
@@ -389,7 +341,9 @@ class DFPNMateSolver:
         self.options = options or SolverOptions()
         self.stats = DFPNStats()
         self._start_time = 0.0
-        self._state_table: Dict[Tuple[Any, int], _DFPNNode] = {}
+        self._state_table: DFPNTranspositionTable[_DFPNNode] = (
+            DFPNTranspositionTable()
+        )
         self._helper = MateSolver(attacker=attacker, max_depth=max_depth, options=self.options)
         self._prune_inactive_subtrees = False
         self.use_lazy_reveal_pruning = bool(_DFPN_DEFAULT_PRUNING["lazy_reveal"])
@@ -412,7 +366,7 @@ class DFPNMateSolver:
 
     def solve(self, state: SolverState) -> SearchResult:
         self.stats = DFPNStats()
-        self._state_table = {}
+        self._state_table.clear()
         self._start_time = time.monotonic()
         self._helper.stats = self.stats
         self._helper._start_time = self._start_time
@@ -2375,28 +2329,11 @@ class DFPNMateSolver:
         return ordered[0], second
 
     def _extract_tree(self, node: _DFPNNode, want_proof: bool) -> Dict[str, Any]:
-        data = self._node_summary(node)
-        if not node.children:
-            return data
-
-        selected: List[_DFPNNode]
-        if node.node_type == "OR":
-            if want_proof:
-                selected = [self._first_matching(node.children, proof_zero=True)]
-            else:
-                selected = [child for child in node.children if child.disproof == 0]
-        else:
-            if want_proof:
-                selected = [child for child in node.children if child.proof == 0]
-            else:
-                selected = [self._first_matching(node.children, proof_zero=False)]
-
-        data["children"] = [
-            self._extract_tree(child, want_proof)
-            for child in selected
-            if child is not None
-        ]
-        return data
+        return _extract_proof_tree(
+            node,
+            want_proof=want_proof,
+            summarize=self._node_summary,
+        )
 
     def _node_summary(self, node: _DFPNNode) -> Dict[str, Any]:
         data: Dict[str, Any] = {
@@ -2540,7 +2477,7 @@ def _parallel_root_worker(task: Dict[str, Any]) -> Dict[str, Any]:
     options = SolverOptions(**option_payload)
     solver = DFPNMateSolver(_WORKER_ATTACKER, _WORKER_MAX_DEPTH, options)
     solver.stats = DFPNStats()
-    solver._state_table = {}
+    solver._state_table.clear()
     solver._start_time = time.monotonic()
     solver._helper.stats = solver.stats
     solver._helper._start_time = solver._start_time
