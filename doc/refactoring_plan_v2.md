@@ -329,7 +329,7 @@ external AI provider protocol <--> dlsplendor / model repositories
 - Python と C++ で size/offset の独立した手書き定義が残らない。
 - 既存モデル向け schema を無指定時の default として維持する。
 
-### R5: MCTS の所有権と orchestration の整理
+### R5: MCTS の所有権と orchestration の整理（完了）
 
 このフェーズの大規模変更は、parallel search plan の stable 化ゲート通過後に開始する。それまでは翻訳単位の分割など、trace と探索列が完全一致する機械的変更に限定する。
 
@@ -532,4 +532,11 @@ R4ではV1/V2/V3 action spaceとstate feature v1のversion、size、section offs
 byte goldenを固定し、Python wrapperは8.7〜11.2倍へ高速化した。
 詳細は[`refactoring_plan/r4_encoding_schema.md`](refactoring_plan/r4_encoding_schema.md)に記録する。
 
-R4は完了した。次の構造変更はR5のMCTS ownershipとorchestration境界整理とする。
+R5では公開facadeと逐次tree ownerを維持しつつ、parallel throughput searchが所有する
+worker、bounded queue、pending registry、ticket、ledgerをRAII session controllerへ集約した。
+parallel config validationも独立componentへ移し、既存の例外と探索semanticsを固定した。
+stable化gate未通過のためscheduler間の共通化や複数threadの既定化は行わず、experimental
+opt-inを維持する。
+詳細は[`refactoring_plan/r5_mcts_ownership.md`](refactoring_plan/r5_mcts_ownership.md)に記録する。
+
+R5の責務境界整理は完了した。次の独立変更はR6のsolverとpuzzle tooling分割とする。

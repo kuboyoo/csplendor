@@ -1,11 +1,23 @@
 # Parallel search implementation status
 
-更新日: 2026-07-14
+更新日: 2026-08-05
 
 状態: **PS-0〜PS-11のcore実装済み。PS-7〜PS-10は強化検証済み、PS-12〜PS-13の
 nightly・実NN・品質canary・広範な計測matrixのstable化gateは継続中**
 
 この文書は、計画に対する実装結果、予想外の環境差、未完了gateを追跡する。
+
+## R5 ownership refactor: completed without stable promotion
+
+- throughput search固有のworker、work/event queue、pending registry、active ticket、failure slot、
+  ledgerを`ParallelSessionController`の単一所有へ移した。destructor fallbackは両queueをcloseし、
+  全workerをjoinする。
+- parallel execution固有のconfig検証を`MCTSConfigValidator`へ分離し、`MCTSConfig`は従来どおり
+  passiveな公開value typeとして維持した。
+- deterministic/throughput/root-parallelのscheduler semantics、trace version/bytes、tree表現、
+  legacy batch API、Python surfaceは変更していない。
+- owner/session/config境界の整理は完了したが、下記PS-13の外部品質gateは未完了である。
+  この変更をstable昇格の根拠にはせず、複数threadは引き続きexperimental opt-inとする。
 
 ## PS-0: completed
 
