@@ -1,4 +1,4 @@
-"""Cross-phase review tests for legal-action and encoder contracts."""
+"""Cross-subsystem legal-action and encoder contracts."""
 
 import random
 

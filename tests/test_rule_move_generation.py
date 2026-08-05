@@ -1,4 +1,4 @@
-"""Phase 2 contracts for the MoveGenerator emitter and capped consumers."""
+"""Rule contracts for the MoveGenerator emitter and capped consumers."""
 
 import hashlib
 

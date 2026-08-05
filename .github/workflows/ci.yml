@@ -101,6 +101,47 @@ jobs:
       - name: Run native tests
         run: ctest --test-dir build/native --output-on-failure
 
+  cpp-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install coverage reporter
+        run: python -m pip install "gcovr==8.6"
+      - name: Configure instrumented native tests
+        run: >-
+          cmake -S . -B build/coverage
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="--coverage -O0 -g"
+          -DCMAKE_EXE_LINKER_FLAGS="--coverage"
+          -DCSPLENDOR_BUILD_PYTHON_MODULE=OFF
+          -DCSPLENDOR_BUILD_NATIVE_TESTS=ON
+          -DCSPLENDOR_SANITIZER=none
+      - name: Build instrumented native tests
+        run: cmake --build build/coverage --parallel 2
+      - name: Run instrumented native tests
+        run: ctest --test-dir build/coverage --output-on-failure
+      - name: Create report-only C++ coverage
+        run: |
+          mkdir -p artifacts
+          python -m gcovr --root . build/coverage --filter '^src/' \
+            --gcov-ignore-parse-errors=negative_hits.warn_once_per_file \
+            --print-summary --txt --output artifacts/cpp-coverage.txt
+          python -m gcovr --root . build/coverage --filter '^src/' \
+            --gcov-ignore-parse-errors=negative_hits.warn_once_per_file \
+            --xml-pretty --output artifacts/cpp-coverage.xml
+          cat artifacts/cpp-coverage.txt
+      - name: Upload C++ coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cpp-coverage-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
   cross-platform:
     if: github.event_name != 'schedule'
     name: ${{ matrix.name }}
@@ -305,7 +346,7 @@ jobs:
           mkdir -p artifacts
           {
             echo "revision=${GITHUB_SHA}"
-            echo "plan=4 native tests x 25 repetitions (approximately 100 test executions)"
+            echo "plan=native stress/replay labeled tests x 25 repetitions"
             uname -a
             c++ --version
             cmake --version
@@ -321,7 +362,8 @@ jobs:
         run: cmake --build build/nightly --parallel 2
       - name: Run repeated native stress/replay suite
         run: |
-          ctest --test-dir build/nightly --output-on-failure -j1 \
+          ctest --test-dir build/nightly -L "stress|replay" \
+            --output-on-failure -j1 \
             --repeat until-fail:25 2>&1 | tee artifacts/nightly-ctest.log
       - name: Upload nightly diagnostics
         if: always()

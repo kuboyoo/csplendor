@@ -61,7 +61,7 @@ source互換を壊す。R2-Bのvalidated/unchecked gatewayとR2-Aのstale-cache�
 
 - native `state_copy_unit`: full/light/determinization ownership、copy隔離、snapshot journal除外、
   editor後undo、delta parity、field inventory
-- 既存`phase7_undo_probe`: 全ActionTypeとmulti-stepのdelta/full snapshot同値、allocation比較
+- 既存`undo_record_probe`: 全ActionTypeとmulti-stepのdelta/full snapshot同値、allocation比較
 - Python全test、`py_compile`
 - GCC/Clang native test、ASan/UBSan、TSan
 - phase0 copy/allocation probeとruntime benchmark

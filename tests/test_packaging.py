@@ -31,7 +31,10 @@ def test_sdist_manifest_contains_native_build_inputs():
     assert "include CMakeLists.txt" in manifest
     assert "include _build_support.py" in manifest
     assert "recursive-include src *.cpp *.h" in manifest
+    assert "recursive-include tests *.cpp *.h *.py CMakeLists.txt" in manifest
     assert (PROJECT_ROOT / "src" / "bindings.cpp").is_file()
+    assert (PROJECT_ROOT / "tests" / "mcts_parallel_scheduler_suites.h").is_file()
+    assert (PROJECT_ROOT / "tests" / "support" / "native_test.h").is_file()
 
 
 def test_cpu_target_defaults_to_portable_and_normalizes_explicit_values():

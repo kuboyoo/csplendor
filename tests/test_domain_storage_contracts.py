@@ -1,4 +1,4 @@
-"""Public provenance-list contracts considered by Phase 7 storage probes."""
+"""Public domain provenance-list and storage contracts."""
 
 import pytest
 

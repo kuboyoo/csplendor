@@ -1,8 +1,8 @@
 # リリース検証記録
 
-最終更新: 2026-08-04
+最終更新: 2026-08-05
 
-この文書は、Phase 0--7のリファクタリングと並列探索実装を含む作業ツリーに対して
+この文書は、Phase 0--7、第2次R0--R8のリファクタリング、並列探索実装を含む作業ツリーに対して
 実施したローカル検証の記録です。ローカルで通過した項目と、PyPI公開前に別環境で
 通過させる必要がある項目を分けています。特定時点の検証記録であり、以後の変更を
 無条件に保証するものではありません。
@@ -23,14 +23,15 @@
 
 | 区分 | 結果 | 確認内容 |
 |---|---:|---|
-| Python通常test | 439 passed, 4 deselected | performance markerを除くpytest全体、warningをerror化 |
+| Python通常test | 481 passed, 4 deselected | performance markerを除くpytest全体、warningをerror化 |
 | Python性能test | 4 passed | performance markerを明示実行 |
-| Python coverage | 56.15% | 50% gate通過。action space 86%、features 96%、replay 90% |
+| Python coverage | 54.04% | 50% gate通過 |
 | Python lint/security | 成功 | Ruff default/import/whitespace/security rulesをPython 3.8 targetで実行 |
-| native CTest | 5/5 passed | native unit/stress/replayとMCTS高速化同値testを含む構成 |
+| native CTest | 31/31 passed | 16 public header単独testとsubsystem別unit/stress/replayを含む |
 | native反復 | 100/100成功 | 4 testを各25回反復 |
-| ThreadSanitizer | 5/5 passed | Clang TSAN build |
-| Address/UndefinedBehaviorSanitizer | 5/5 passed | GCC ASan+UBSan build |
+| C++ coverage | line 71.6%、function 82.6%、branch 48.3% | gcovr text/XMLをreport-onlyで生成 |
+| ThreadSanitizer | 31/31 passed | Clang TSAN build |
+| Address/UndefinedBehaviorSanitizer | 31/31 passed | Clang ASan+UBSan、LeakSanitizer有効 |
 | strict warning build | 成功 | GCC/Clang `-Wall -Wextra -Wpedantic -Werror` |
 | Clang static analysis | 成功 | binding translation unitへ`clang-tidy`を実行 |
 | source distribution | 成功 | sdistからCPython 3.12 wheelを再build |
@@ -45,9 +46,8 @@ python -m pytest -o addopts= -m performance
 python -m compileall -q csplendor
 ```
 
-LeakSanitizerの`detect_leaks=1`は、このsandboxで必要なptrace動作が許可されないため
-実行できませんでした。これはtest failureではなく環境制約ですが、公開前に制約のない
-CIまたはhostで通過させる必要があります。
+このrevisionではローカルでもLeakSanitizerの`detect_leaks=1`を有効にして31 testを通過した。
+CIでも同じ設定を維持し、制約のあるhostでsanitizer runtime自体が起動できない場合は成功扱いにしない。
 
 ## 継続的なクロスプラットフォーム検証
 

@@ -284,7 +284,7 @@ src/mcts_game_adapter.h
 src/bindings.cpp
 tests/mcts_parallel_lifecycle.cpp
 tests/test_parallel_mcts_bindings.py
-tests/test_phase6_mcts_contracts.py
+tests/test_mcts_contracts.py
 ```
 
 ### 作業

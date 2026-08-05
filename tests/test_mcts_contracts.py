@@ -1,4 +1,4 @@
-"""Phase 6 contracts for the MCTS facade, tree split, and Game adapter."""
+"""MCTS facade, tree split, and Game adapter contracts."""
 
 from __future__ import annotations
 
@@ -186,10 +186,10 @@ def _compiler():
 
 def test_internal_tree_header_is_game_independent_and_facade_keeps_layout_and_api():
     compiler = _compiler()
-    with tempfile.TemporaryDirectory(prefix="csplendor-phase6-") as directory:
+    with tempfile.TemporaryDirectory(prefix="csplendor-mcts-") as directory:
         temporary = Path(directory)
-        source = temporary / "phase6_contract.cpp"
-        binary = temporary / "phase6_contract"
+        source = temporary / "mcts_contract.cpp"
+        binary = temporary / "mcts_contract"
         source.write_text(NATIVE_CONTRACT_PROBE)
         subprocess.run(
             [

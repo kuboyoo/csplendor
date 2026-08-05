@@ -1,4 +1,4 @@
-"""Phase 6.3 transition and reveal-search structural regression tests."""
+"""Rule transition and reveal-search structural regression contracts."""
 
 import hashlib
 import json

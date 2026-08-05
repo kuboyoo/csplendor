@@ -4,6 +4,20 @@
 
 この文書は、2026-07-12 時点の `csplendor` を読み取り調査した結果と、性能・ゲーム挙動・公開 Python API を維持したまま進めるための実装計画である。この段階では C++/Python の実装コードを変更しない。
 
+> 完了記録（2026-07-13）: Phase 0--7と最終横断レビュー・性能再計測は完了した。
+> 本文は当時の判断と測定を残す履歴であり、未完了計画ではない。現在の構成と後続作業は
+> [`../refactoring_plan_v2.md`](../refactoring_plan_v2.md)および
+> [`../tasks.md`](../tasks.md)を参照する。
+
+実施結果は[Phase 0](phase0.md)、[Phase 1](#phase-1-derived-stateと低リスクcopyの整理)、
+[Phase 2](#phase-2-movegenerator-の単一emitter化)、
+[Phase 3](#phase-3-search内部のgame-copy最適化)、
+[Phase 4](#phase-4-encoder内部の重複整理)、
+[Phase 5](#phase-5-pybind11境界の局所最適化)、
+[Phase 6](#phase-6-探索層とrule-transitionの依存分離)、
+[Phase 7](#phase-7-player-storage--delta-undoprofileで必要な場合のみ)、
+[最終横断レビュー](#phase-0--7-最終横断レビュー)の各節に保持する。
+
 調査基準は commit `83404dcb51c73959be915be0e43bbc20fe02db10` と、その時点の作業ツリーである。調査時には本計画と無関係な未コミット変更が存在したため、実装担当者は各 Phase の開始時に現行コードとの整合性を再確認すること。行番号や呼び出し関係を盲目的に前提にしてはならない。
 
 ### 絶対条件

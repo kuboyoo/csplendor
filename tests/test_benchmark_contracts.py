@@ -1,10 +1,12 @@
+"""Performance benchmark runner and statistical comparison contracts."""
+
 import importlib.util
 from pathlib import Path
 
 
 def _load_runner():
     path = Path(__file__).parents[1] / "scripts" / "benchmark_phase0.py"
-    spec = importlib.util.spec_from_file_location("phase0_benchmark", path)
+    spec = importlib.util.spec_from_file_location("baseline_benchmark", path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)

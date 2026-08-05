@@ -75,7 +75,7 @@ synthetic_search/on:
 
 PS-0時点で以下を固定した。
 
-- `tests/test_phase6_mcts_contracts.py`のdeterminization-off batch digestと、既知hash集合をsortした
+- `tests/test_mcts_contracts.py`のdeterminization-off batch digestと、既知hash集合をsortした
   test-only tree snapshot digest。
 - determinization offのroot/path/mask/feature goldenと、determinization on/world=1のinvariant契約。
   現行RNGは`random_device`初期化のため、determinization-onのbitwise goldenはPS-3で追加する。
@@ -89,7 +89,7 @@ PS-0時点で以下を固定した。
 
 ```bash
 python -m pytest -o addopts= -q \
-  tests/test_phase6_mcts_contracts.py \
+  tests/test_mcts_contracts.py \
   tests/test_mcts_correctness_review.py \
   tests/test_determinization.py \
   tests/test_hash_mutation_review.py \

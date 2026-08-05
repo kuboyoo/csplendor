@@ -101,3 +101,21 @@ def random_reachable_state_corpus(*, master_seed=0, games=8, max_plies=32):
                 break
             assert game.apply_action_code_trusted(codes[rng.randrange(len(codes))], False)
             yield game.clone_light()
+
+
+def assert_differential_corpus(cases, reference, candidate, *, label="case"):
+    """Assert two pure projections agree for every value in a corpus.
+
+    The helper deliberately reports the corpus index so a randomized property
+    failure remains reproducible from its fixed master seed.
+    """
+
+    checked = 0
+    for index, case in enumerate(cases):
+        expected = reference(case)
+        actual = candidate(case)
+        assert actual == expected, (
+            f"{label} {index} differs: expected={expected!r}, actual={actual!r}"
+        )
+        checked += 1
+    assert checked > 0, f"{label} corpus is empty"
