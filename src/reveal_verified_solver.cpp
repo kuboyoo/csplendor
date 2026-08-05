@@ -973,7 +973,7 @@ private:
     const int max_gold = std::min(
         effective_cost[color], static_cast<int>(player.gems[GOLD]) - gold_used);
     for (int amount = min_gold; amount <= max_gold; ++amount) {
-      gold_as[color] = amount;
+      gold_as[color] = static_cast<uint8_t>(amount);
       add_oracle_purchase_actions(player, card, effective_cost, color + 1,
                                   gold_used + amount, gold_as, actions);
     }
