@@ -3,6 +3,7 @@
 
 #include "action.h"
 #include "game.h"
+#include "rule_query.h"
 #include <array>
 #include <cstdint>
 
@@ -111,21 +112,12 @@ struct TakeDifferentCodec {
 };
 
 inline int find_visible_slot(int8_t card_id, const Board &board) {
-  for (int level = 0; level < 3; ++level) {
-    for (int slot = 0; slot < 4; ++slot) {
-      if (board.visible[level][slot] == card_id)
-        return level * 4 + slot;
-    }
-  }
-  return -1;
+  const auto source = csplendor::rules::find_visible_card_source(board, card_id);
+  return source ? source.level * 4 + source.slot : -1;
 }
 
 inline int find_reserved_slot(int8_t card_id, const PlayerState &player) {
-  for (int slot = 0; slot < 3; ++slot) {
-    if (player.reserved[slot] == card_id)
-      return slot;
-  }
-  return -1;
+  return csplendor::rules::find_reserved_card_source(player, card_id);
 }
 
 template <typename Encoder, typename ScanLegalActions>

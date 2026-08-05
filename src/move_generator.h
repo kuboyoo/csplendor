@@ -3,6 +3,7 @@
 
 #include "action.h"
 #include "board.h"
+#include "rule_query.h"
 #include <array>
 #include <vector>
 
@@ -13,21 +14,7 @@ class ActionEncoderV3;
 
 class MoveGenerator {
 public:
-  struct EligibleNobles {
-    std::array<uint8_t, Board::MAX_NOBLES_ON_BOARD> data = {0};
-    uint8_t count = 0;
-
-    void push_back(uint8_t noble_id) {
-      if (count < data.size())
-        data[count++] = noble_id;
-    }
-
-    bool empty() const { return count == 0; }
-    size_t size() const { return count; }
-    uint8_t operator[](size_t i) const { return data[i]; }
-    const uint8_t *begin() const { return data.data(); }
-    const uint8_t *end() const { return data.data() + count; }
-  };
+  using EligibleNobles = csplendor::rules::EligibleNobles;
 
   // Fixed-size version - no heap allocations
   static MoveList generate_all_fixed(const Board &board,
@@ -123,23 +110,7 @@ public:
 
   static EligibleNobles get_eligible_nobles_fixed(const Board &board,
                                                   int player_idx) {
-    EligibleNobles eligible;
-    if (player_idx < 0 || player_idx >= Board::NUM_PLAYERS)
-      return eligible;
-
-    const auto &p = board.players[player_idx];
-
-    // Use cached eligibility mask for fast lookup.
-    uint16_t mask = p.noble_eligibility_mask;
-
-    // Check only nobles on board that player is eligible for.
-    for (size_t i = 0; i < board.nobles.size(); ++i) {
-      uint8_t noble_id = board.nobles[i];
-      if (is_valid_noble_id(noble_id) && (mask & (uint16_t(1) << noble_id))) {
-        eligible.push_back(noble_id);
-      }
-    }
-    return eligible;
+    return csplendor::rules::eligible_nobles(board, player_idx);
   }
 
 private:
@@ -328,12 +299,8 @@ private:
                                     bool from_reserved,
                                     bool simple_payment_mode, Sink &sink) {
     const auto &card = get_card(card_id);
-    std::array<int, 5> effective_cost;
-    for (int color = 0; color < 5; ++color) {
-      effective_cost[color] =
-          std::max(0, static_cast<int>(card.cost[color]) -
-                          static_cast<int>(player.bonuses[color]));
-    }
+    const auto effective_cost =
+        csplendor::rules::effective_card_cost(player, card);
 
     int min_gold = cli::ResourceBundle::needed_gold(
         card.packed_cost, player.packed_bonuses, player.packed_gems);
@@ -387,32 +354,6 @@ private:
     return true;
   }
 
-  static std::array<uint8_t, 6> gems_after_action(const Board &board,
-                                                  const Action &action) {
-    const auto &player = board.players[board.current_player];
-    std::array<uint8_t, 6> next_gems = player.gems;
-
-    if (action.type == TAKE_DIFFERENT || action.type == TAKE_SAME) {
-      for (int color = 0; color < 5; ++color)
-        next_gems[color] += action.take[color];
-    } else if (action.type == RESERVE_VISIBLE || action.type == RESERVE_DECK) {
-      if (board.bank[GOLD] > 0)
-        ++next_gems[GOLD];
-    } else if (action.type == PURCHASE) {
-      const auto &card = get_card(action.card_id);
-      int gold_used = 0;
-      for (int color = 0; color < 5; ++color) {
-        int cost = std::max(0, static_cast<int>(card.cost[color]) -
-                                   static_cast<int>(player.bonuses[color]));
-        int from_gems = std::min(static_cast<int>(next_gems[color]), cost);
-        next_gems[color] -= static_cast<uint8_t>(from_gems);
-        gold_used += cost - from_gems;
-      }
-      next_gems[GOLD] -= static_cast<uint8_t>(gold_used);
-    }
-    return next_gems;
-  }
-
   template <typename Sink>
   static bool emit_with_returns(const Board &board, const Action &action,
                                 Sink &sink) {
@@ -422,12 +363,9 @@ private:
     if (action.type == PURCHASE)
       return sink(action);
 
-    std::array<uint8_t, 6> next_gems = gems_after_action(board, action);
-    int total = 0;
-    for (uint8_t gems : next_gems)
-      total += gems;
-
-    int excess = std::max(0, total - Board::MAX_TOKENS);
+    const auto next_gems =
+        csplendor::rules::gems_after_token_action(board, action);
+    const int excess = csplendor::rules::required_token_return(next_gems);
     if (excess <= 0)
       return sink(action);
 
@@ -441,12 +379,9 @@ private:
     if (action.type == PURCHASE)
       return std::min<uint16_t>(1, limit);
 
-    std::array<uint8_t, 6> next_gems = gems_after_action(board, action);
-    int total = 0;
-    for (uint8_t gems : next_gems)
-      total += gems;
-
-    int excess = std::max(0, total - Board::MAX_TOKENS);
+    const auto next_gems =
+        csplendor::rules::gems_after_token_action(board, action);
+    const int excess = csplendor::rules::required_token_return(next_gems);
     if (excess <= 0)
       return std::min<uint16_t>(1, limit);
     return count_return_combinations(next_gems, excess, 0, limit);

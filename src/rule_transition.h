@@ -1,7 +1,7 @@
 #ifndef CSPLENDOR_RULE_TRANSITION_H
 #define CSPLENDOR_RULE_TRANSITION_H
 
-#include "move_generator.h"
+#include "rule_query.h"
 #include <algorithm>
 #include <array>
 
@@ -58,11 +58,10 @@ inline bool purchase_card(Board &board, const Card &card,
   // ordering per color; a later failure may therefore leave earlier colors
   // changed for the caller to roll back.
   PlayerState &player = board.players[board.current_player];
+  const auto costs = rules::effective_card_cost(player, card);
   int gold_used = 0;
   for (int color = 0; color < 5; ++color) {
-    const int cost =
-        std::max(0, static_cast<int>(card.cost[color]) -
-                        static_cast<int>(player.bonuses[color]));
+    const int cost = costs[color];
     const int from_gold = gold_as[color];
     const int from_gems = cost - from_gold;
     if constexpr (ValidatePayment) {
@@ -100,21 +99,11 @@ inline void acquire_noble_unchecked(Board &board, int noble_id) {
 }
 
 inline void check_game_end(Board &board) {
-  const int points0 = board.players[0].points;
-  const int points1 = board.players[1].points;
-  if (points0 != points1) {
-    board.winner = points0 > points1 ? 0 : 1;
-    return;
-  }
-
-  const int purchased0 = board.players[0].purchased_count;
-  const int purchased1 = board.players[1].purchased_count;
-  board.winner =
-      purchased0 == purchased1 ? -2 : purchased0 < purchased1 ? 0 : 1;
+  board.winner = rules::winner_after_completed_round(board);
 }
 
 inline void end_turn(Board &board) {
-  if (!board.final_round && board.players[board.current_player].points >= 15)
+  if (rules::should_start_final_round(board))
     board.final_round = true;
 
   board.current_player = 1 - board.current_player;
@@ -127,8 +116,7 @@ inline void end_turn(Board &board) {
 }
 
 inline void finish_standard_action(Board &board) {
-  const auto eligible =
-      MoveGenerator::get_eligible_nobles_fixed(board, board.current_player);
+  const auto eligible = rules::eligible_nobles(board, board.current_player);
   if (eligible.size() > 1) {
     board.waiting_noble = true;
     return;
