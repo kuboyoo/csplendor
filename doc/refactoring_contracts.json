@@ -100,6 +100,20 @@
       "zobrist.h"
     ]
   },
+  "python_application": {
+    "stores": [
+      "SessionStore",
+      "KifuStore"
+    ],
+    "services": [
+      "GameSessionService",
+      "KifuApplicationService",
+      "ReplayApplicationService"
+    ],
+    "optional_ai_boundary": "AIProvider",
+    "usi_canonical_repository": "usi",
+    "legacy_replay_trust": "administrator-controlled-local-files-only"
+  },
   "state_profiles": [
     "reachable",
     "editor",

@@ -9,17 +9,21 @@ This module decodes the ori board matrix back into a ``GameStateSchema``
 that the frontend ``GameBoard`` component can render.
 """
 
-import glob
 import math
 import os
-import pickle
-import stat
 import uuid
 from typing import Dict, List, Optional
 
 import numpy as np
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
+
+from .application_errors import ApplicationError, ResourceNotFound
+from .legacy_replay_reader import (
+    UNSAFE_FORMAT_WARNING,
+    LegacyPickleReplayReader,
+)
+from .stores import InMemoryStore
 
 replay_router = APIRouter(prefix="/replay", tags=["replay"])
 
@@ -39,40 +43,18 @@ def _resolve_replay_path(path: str) -> str:
     opens a caller-selected file outside its configured replay directory.
     """
 
-    if not isinstance(path, str) or not path.strip():
-        raise HTTPException(status_code=400, detail="Replay filename is required")
-    if "\0" in path:
-        raise HTTPException(status_code=400, detail="Invalid replay filename")
-
-    data_dir = os.path.realpath(_replay_data_dir())
     try:
-        candidate = path if os.path.isabs(path) else os.path.join(data_dir, path)
-        candidate = os.path.realpath(candidate)
-    except (OSError, ValueError) as error:
+        return _legacy_reader().resolve(path)
+    except ApplicationError as error:
         raise HTTPException(
-            status_code=400, detail="Invalid replay filename"
+            status_code=error.status_code, detail=error.detail
         ) from error
-    try:
-        contained = os.path.commonpath([data_dir, candidate]) == data_dir
-    except ValueError:
-        contained = False
-    if not contained:
-        raise HTTPException(
-            status_code=400,
-            detail="Replay path must stay inside the configured data directory",
-        )
-    if not candidate.endswith(".pkl"):
-        raise HTTPException(status_code=400, detail="Only .pkl files are supported")
-    try:
-        if not os.path.isfile(candidate):
-            raise HTTPException(status_code=404, detail="Replay file not found")
-        if os.path.getsize(candidate) > _MAX_REPLAY_BYTES:
-            raise HTTPException(status_code=413, detail="Replay file is too large")
-    except HTTPException:
-        raise
-    except OSError as error:
-        raise HTTPException(status_code=404, detail="Replay file not found") from error
-    return candidate
+
+
+def _legacy_reader() -> LegacyPickleReplayReader:
+    return LegacyPickleReplayReader(
+        _replay_data_dir(), max_bytes=_MAX_REPLAY_BYTES
+    )
 
 
 def _coerce_replay_int(value, *, field: str, minimum: int = 0) -> int:
@@ -333,7 +315,30 @@ class ReplaySession:
             self.games.append(current_game)
 
 
-_sessions: Dict[str, ReplaySession] = {}
+class ReplayApplicationService:
+    def __init__(self, sessions: InMemoryStore[ReplaySession]) -> None:
+        self.sessions = sessions
+
+    def create(self, filename: str, examples: list) -> "ReplaySessionInfo":
+        session_id = str(uuid.uuid4())
+        session = ReplaySession(filename, examples)
+        self.sessions[session_id] = session
+        return ReplaySessionInfo(
+            session_id=session_id,
+            filename=session.filename,
+            num_games=len(session.games),
+            total_steps=session.total_steps,
+            game_lengths=[len(game) for game in session.games],
+        )
+
+    def require(self, session_id: str) -> ReplaySession:
+        session = self.sessions.get(session_id)
+        if session is None:
+            raise ResourceNotFound("Session not found")
+        return session
+
+
+_sessions: InMemoryStore[ReplaySession] = InMemoryStore()
 
 
 # ── Board decoder ───────────────────────────────────────────────────────
@@ -541,88 +546,34 @@ class ReplayStepResponse(BaseModel):
     final_turn: int
 
 
+_replay_service = ReplayApplicationService(_sessions)
+
+
 # ── Endpoints ───────────────────────────────────────────────────────────
 
 
 @replay_router.get("/files")
-async def list_replay_files() -> Dict[str, List[ReplayFileInfo]]:
+async def list_replay_files(
+    response: Response,
+) -> Dict[str, List[ReplayFileInfo]]:
     """List available .pkl files under alphazero-deepsets/data/."""
-    data_dir = os.path.realpath(_replay_data_dir())
-
-    files = []
-    if os.path.isdir(data_dir):
-        for pkl_path in sorted(glob.glob(os.path.join(data_dir, "*.pkl"))):
-            try:
-                resolved_path = os.path.realpath(pkl_path)
-                if os.path.commonpath([data_dir, resolved_path]) != data_dir:
-                    continue
-                if not os.path.isfile(resolved_path):
-                    continue
-                size_bytes = os.path.getsize(resolved_path)
-            except (OSError, ValueError):
-                # A replay may disappear while the directory is being listed,
-                # and an untrusted symlink must never be followed outside it.
-                continue
-            files.append(
-                ReplayFileInfo(
-                    filename=os.path.basename(pkl_path),
-                    # Never expose an absolute server filesystem path. The load
-                    # endpoint accepts this directory-local filename.
-                    path=os.path.basename(pkl_path),
-                    # Listing must not unpickle files merely to count examples.
-                    num_examples=None,
-                    size_mb=round(size_bytes / 1024 / 1024, 2),
-                )
-            )
-
-    return {"files": files}
+    response.headers["X-Replay-Format-Warning"] = UNSAFE_FORMAT_WARNING
+    return {"files": _legacy_reader().list_files()}
 
 
 @replay_router.post("/load")
-async def load_replay(path: str) -> ReplaySessionInfo:
+async def load_replay(path: str, response: Response) -> ReplaySessionInfo:
     """Load a trusted, configured-directory .pkl replay."""
-    resolved_path = _resolve_replay_path(path)
-
-    fd = None
+    response.headers["X-Replay-Format-Warning"] = UNSAFE_FORMAT_WARNING
     try:
-        flags = os.O_RDONLY
-        flags |= getattr(os, "O_BINARY", 0)
-        flags |= getattr(os, "O_CLOEXEC", 0)
-        # Resolve first for compatibility with in-directory symlinks, then
-        # refuse a final-component symlink introduced by a concurrent swap.
-        flags |= getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(resolved_path, flags)
-        with os.fdopen(fd, "rb") as f:
-            fd = None
-            file_stat = os.fstat(f.fileno())
-            if not stat.S_ISREG(file_stat.st_mode):
-                raise HTTPException(status_code=400, detail="Invalid replay file")
-            if file_stat.st_size > _MAX_REPLAY_BYTES:
-                raise HTTPException(status_code=413, detail="Replay file is too large")
-            # The directory and file are administrator-controlled; see the
-            # module documentation and doc/web_api.md for this trust boundary.
-            data = pickle.load(f)  # noqa: S301
-    except HTTPException:
-        raise
-    except FileNotFoundError as error:
-        raise HTTPException(status_code=404, detail="Replay file not found") from error
-    except Exception as error:
-        raise HTTPException(status_code=400, detail="Failed to load replay") from error
-    finally:
-        if fd is not None:
-            os.close(fd)
+        resolved_path, data = _legacy_reader().load(path)
+    except ApplicationError as error:
+        raise HTTPException(
+            status_code=error.status_code, detail=error.detail
+        ) from error
     data = _validate_replay_examples(data)
-
-    session_id = str(uuid.uuid4())
-    session = ReplaySession(os.path.basename(resolved_path), data)
-    _sessions[session_id] = session
-
-    return ReplaySessionInfo(
-        session_id=session_id,
-        filename=session.filename,
-        num_games=len(session.games),
-        total_steps=session.total_steps,
-        game_lengths=[len(g) for g in session.games],
+    return _replay_service.create(
+        os.path.basename(resolved_path), data
     )
 
 
@@ -631,10 +582,12 @@ async def get_replay_step(
     session_id: str, game_idx: int, step: int
 ) -> ReplayStepResponse:
     """Get decoded board state for a specific step in a game."""
-    if session_id not in _sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    session = _sessions[session_id]
+    try:
+        session = _replay_service.require(session_id)
+    except ApplicationError as error:
+        raise HTTPException(
+            status_code=error.status_code, detail=error.detail
+        ) from error
     if game_idx < 0 or game_idx >= len(session.games):
         raise HTTPException(status_code=400, detail="Invalid game index")
 

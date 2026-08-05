@@ -872,3 +872,23 @@ def parse_kifu_text(text: str) -> Dict[str, object]:
         "final_scores": final_scores,
         "total_turns": total_turns,
     }
+
+
+# Historical import path. New code uses the focused modules below; rebinding
+# keeps every public callable and return DTO available from ``usi_kifu``.
+# isort: off
+from .kifu_codec import (  # noqa: E402,F811
+    build_kifu_text as build_kifu_text,
+    now_iso as now_iso,
+    parse_kifu_text as parse_kifu_text,
+)
+from .usi_parser import parse_usi_move as parse_usi_move  # noqa: E402,F811
+from .usi_resolver import (  # noqa: E402,F811
+    find_legal_action_index_by_usi as find_legal_action_index_by_usi,
+)
+from .usi_serializer import (  # noqa: E402,F811
+    action_to_usi as action_to_usi,
+    card_level_from_id as card_level_from_id,
+)
+from .usi_types import ParsedUSIMove as ParsedUSIMove  # noqa: E402,F811
+# isort: on

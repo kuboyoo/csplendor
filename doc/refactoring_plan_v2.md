@@ -369,7 +369,7 @@ external AI provider protocol <--> dlsplendor / model repositories
 - CLI の stdout/stderr、exit code、生成ファイル形式が一致する。
 - benchmark の nodes/s と peak RSS が悪化しない。
 
-### R7: Python application 層と外部 AI adapter の整理
+### R7: Python application 層と外部 AI adapter の整理（完了）
 
 実施項目:
 
@@ -546,5 +546,13 @@ adapter、検証、永続化へ分割し、既存script/import/CLIをforwarding 
 solution/action/proof digest、limit理由、生成物、性能とRSSは基準内である。
 詳細は[`refactoring_plan/r6_solver_tooling.md`](refactoring_plan/r6_solver_tooling.md)に記録する。
 
-R6の責務境界整理は完了した。次の独立変更はR7のPython application層と外部AI
-adapter整理とする。
+R7ではFastAPI endpointをgame/KIFU/replay application serviceへ委譲し、process内辞書を
+`SessionStore`/`KifuStore` interfaceの背後へ置いた。USI/KIFUはtoken/parser/DTO、
+legal-action resolver、serializer/codec surfaceへ分割し、隣接`usi`正本とのcompatibility
+testを追加した。legacy pickleはtrusted local file専用readerへ隔離し、response headerで
+unsafe formatを明示する。外部AIはlazyな`AIProvider`境界とfake providerで差し替え可能にし、
+sibling path操作をcompatibility bridgeへ集約した。通常importでは外部repository/modelを
+探索せず、既存503とresponse schemaを維持する。
+詳細は[`refactoring_plan/r7_api_services.md`](refactoring_plan/r7_api_services.md)に記録する。
+
+R7のapplication境界整理は完了した。次の独立変更はR8のテスト・文書・残存debt整理とする。

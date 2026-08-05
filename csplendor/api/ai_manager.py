@@ -1,10 +1,34 @@
 import glob
+import logging
 import os
-import sys
 import time
 from typing import Any, Dict, Literal, Optional
 
 import numpy as np
+
+from .external_ai_bridge import activate_dlsplendor_path, activate_external_path
+
+logger = logging.getLogger(__name__)
+
+
+def _structured_diagnostic(*values, sep=" ", **_kwargs):
+    """Route historical AI diagnostics through the structured logger."""
+
+    message = sep.join(str(value) for value in values)
+    stripped = message.lstrip()
+    level = logging.INFO
+    if stripped.startswith("ERROR:"):
+        level = logging.ERROR
+    elif stripped.startswith("WARNING:") or stripped.startswith("WARNING"):
+        level = logging.WARNING
+    elif stripped.startswith("DEBUG:") or stripped.startswith("DEBUG"):
+        level = logging.DEBUG
+    logger.log(
+        level,
+        message,
+        extra={"event": "legacy_ai_diagnostic", "component": "ai_manager"},
+    )
+
 
 AIType = Literal["mcts", "greedy", "genbu", "alphazero", "deepsets", "set_transformer", "nnue"]
 
@@ -24,8 +48,7 @@ def _load_base_ai_dependencies():
     dlsplendor_path = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "../../../dlsplendor")
     )
-    if dlsplendor_path not in sys.path:
-        sys.path.append(dlsplendor_path)
+    activate_dlsplendor_path(dlsplendor_path)
 
     try:
         import torch as torch_module
@@ -82,9 +105,9 @@ class AIManager:
                 if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
                     state_dict = checkpoint['model_state_dict']
                 self.network.load_state_dict(state_dict)
-                print(f"Loaded AI model from {model_path}")
+                _structured_diagnostic(f"Loaded AI model from {model_path}")
             except Exception as e:
-                print(f"ERROR: Failed to load model: {e}")
+                _structured_diagnostic(f"ERROR: Failed to load model: {e}")
 
         self.network.eval()
         self.mcts = MCTS(self.network, self.encoder, self.config.search)
@@ -141,9 +164,9 @@ class AIManager:
                     model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../", model_env))
 
                 if os.path.exists(model_path):
-                    print(f"DEBUG: Using model from environment variable: {model_path}")
+                    _structured_diagnostic(f"DEBUG: Using model from environment variable: {model_path}")
                 else:
-                    print(f"WARNING: SPLENDOR_AI_MODEL set to {model_path} but file not found.")
+                    _structured_diagnostic(f"WARNING: SPLENDOR_AI_MODEL set to {model_path} but file not found.")
                     model_path = None
             else:
                 model_path = None
@@ -154,7 +177,7 @@ class AIManager:
                 az_best = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../alphazero-general/models3/best.pt"))
                 if os.path.exists(az_best):
                     model_path = az_best
-                    print(f"DEBUG: Found AlphaZero best model: {model_path}")
+                    _structured_diagnostic(f"DEBUG: Found AlphaZero best model: {model_path}")
 
             if not model_path:
                 models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../models"))
@@ -168,13 +191,13 @@ class AIManager:
                     path = os.path.join(models_dir, name)
                     if os.path.exists(path):
                         model_path = path
-                        print(f"DEBUG: Automatically found model: {model_path}")
+                        _structured_diagnostic(f"DEBUG: Automatically found model: {model_path}")
                         break
 
             # 3. Final fallback
             if not model_path:
                 model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../models/checkpoint_100.pt"))
-                print(f"DEBUG: Using default model path: {model_path}")
+                _structured_diagnostic(f"DEBUG: Using default model path: {model_path}")
 
             cls._instance = cls(model_path)
         return cls._instance
@@ -246,7 +269,7 @@ class AIManager:
 
     def _get_mcts_action(self, game, time_limit: float = 2.0, use_determinization: bool = True) -> int:
         """Get action using MCTS with neural network."""
-        print(f"AI (MCTS) is thinking ({time_limit}s, determinization={use_determinization})...")
+        _structured_diagnostic(f"AI (MCTS) is thinking ({time_limit}s, determinization={use_determinization})...")
 
         # Configure MCTS for determinization
         self.mcts.config.use_determinization = use_determinization
@@ -255,7 +278,7 @@ class AIManager:
 
         value = info.get('value', 0.0)
         sims = info.get('simulations', 0)
-        print(f"AI Move: {action_idx} (Val: {value:.3f}, Sims: {sims})")
+        _structured_diagnostic(f"AI Move: {action_idx} (Val: {value:.3f}, Sims: {sims})")
         self._last_action_debug = {
             "used_mode": "mcts_time",
             "requested_simulations": None,
@@ -265,14 +288,14 @@ class AIManager:
 
     def _get_greedy_action(self, game) -> int:
         """Get action using rule-based greedy AI."""
-        print("AI (Greedy) is thinking...")
+        _structured_diagnostic("AI (Greedy) is thinking...")
         action = self.greedy_ai.select_action(game)
 
         # Find action index
         legals = game.legal_actions
         for i, a in enumerate(legals):
             if self._actions_equal(a, action):
-                print(f"AI Move: {i} (Greedy)")
+                _structured_diagnostic(f"AI Move: {i} (Greedy)")
                 self._last_action_debug = {
                     "used_mode": "greedy",
                     "requested_simulations": None,
@@ -281,7 +304,7 @@ class AIManager:
                 return i
 
         # Fallback
-        print("AI Move: 0 (Greedy fallback)")
+        _structured_diagnostic("AI Move: 0 (Greedy fallback)")
         self._last_action_debug = {
             "used_mode": "greedy",
             "requested_simulations": None,
@@ -295,8 +318,11 @@ class AIManager:
             return
 
         az_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../alphazero-general"))
-        if az_path not in sys.path:
-            sys.path.insert(0, az_path)
+        activate_external_path(
+            az_path,
+            environment_variable="CSPLENDOR_ALPHAZERO_PATH",
+            integration="alphazero-general",
+        )
 
         try:
             import argparse
@@ -325,9 +351,9 @@ class AIManager:
                 folder = os.path.dirname(genbu_path)
                 filename = os.path.basename(genbu_path)
                 self._genbu_nnet.load_checkpoint(folder, filename)
-                print(f"Loaded Genbu model from {genbu_path}")
+                _structured_diagnostic(f"Loaded Genbu model from {genbu_path}")
             else:
-                print(f"WARNING: Genbu model not found at {genbu_path}")
+                _structured_diagnostic(f"WARNING: Genbu model not found at {genbu_path}")
 
             # MCTS with inference-optimal defaults
             self._genbu_mcts_args = argparse.Namespace(
@@ -351,24 +377,24 @@ class AIManager:
             )
 
             self._genbu_initialized = True
-            print("Genbu AI initialized successfully.")
+            _structured_diagnostic("Genbu AI initialized successfully.")
 
         except Exception as e:
-            print(f"ERROR: Failed to initialize Genbu: {e}")
+            _structured_diagnostic(f"ERROR: Failed to initialize Genbu: {e}")
             import traceback
             traceback.print_exc()
 
     def _get_genbu_action(self, game, time_limit: float = 2.0, num_simulations: Optional[int] = None) -> int:
         """Get action using Genbu (ori AlphaZero) model with MCTS search."""
         if num_simulations:
-            print(f"AI (Genbu) is thinking ({num_simulations} sims)...")
+            _structured_diagnostic(f"AI (Genbu) is thinking ({num_simulations} sims)...")
         else:
-            print(f"AI (Genbu) is thinking ({time_limit}s)...")
+            _structured_diagnostic(f"AI (Genbu) is thinking ({time_limit}s)...")
 
         self._init_genbu()
 
         if not self._genbu_initialized:
-            print("Genbu not initialized, falling back to greedy.")
+            _structured_diagnostic("Genbu not initialized, falling back to greedy.")
             return self._get_greedy_action(game)
 
         import csplendor as _csplendor
@@ -408,17 +434,17 @@ class AIManager:
                     break
                 sims_per_iter = min(200, max(25, int(remaining * 100)))
 
-        print(f"  Genbu Search done: {total_sims} sims. Best action: {best_canonical_idx}")
+        _structured_diagnostic(f"  Genbu Search done: {total_sims} sims. Best action: {best_canonical_idx}")
 
         # Decode canonical action -> csplendor.Action
         action = _csplendor.ActionEncoderCpp.decode(best_canonical_idx, game)
-        print(f"  Decoded Action: type={action.type}, card_id={action.card_id}")
+        _structured_diagnostic(f"  Decoded Action: type={action.type}, card_id={action.card_id}")
 
         # Match against legal_actions
         legals = game.legal_actions
         for i, legal_action in enumerate(legals):
             if self._actions_equal(legal_action, action):
-                print(f"AI Move: {i} (Genbu)")
+                _structured_diagnostic(f"AI Move: {i} (Genbu)")
                 self._last_action_debug = {
                     "used_mode": "genbu_mcts" if num_simulations else "genbu_time",
                     "requested_simulations": num_simulations,
@@ -426,7 +452,7 @@ class AIManager:
                 }
                 return i
 
-        print(f"ERROR: Genbu selected action {action} is not in legal actions!")
+        _structured_diagnostic(f"ERROR: Genbu selected action {action} is not in legal actions!")
         return self._get_greedy_action(game)
 
     def _init_alphazero(self, model_path: Optional[str] = None):
@@ -442,18 +468,21 @@ class AIManager:
         # Check if we need to reinitialize due to model change
         if self._az_initialized:
             if model_path and model_path != self._az_model_path:
-                print(f"Model path changed: {self._az_model_path} -> {model_path}")
-                print("Reinitializing AlphaZero with new model...")
+                _structured_diagnostic(f"Model path changed: {self._az_model_path} -> {model_path}")
+                _structured_diagnostic("Reinitializing AlphaZero with new model...")
                 self._az_initialized = False
             else:
                 return
 
-        print(f"Initializing AlphaZero components with model: {target_model}")
+        _structured_diagnostic(f"Initializing AlphaZero components with model: {target_model}")
 
         # Add alphazero-general to path
         az_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../alphazero-general"))
-        if az_path not in sys.path:
-            sys.path.insert(0, az_path)
+        activate_external_path(
+            az_path,
+            environment_variable="CSPLENDOR_ALPHAZERO_PATH",
+            integration="alphazero-general",
+        )
 
         try:
             import argparse
@@ -486,16 +515,16 @@ class AIManager:
                 filename = os.path.basename(target_model)
                 self._az_nnet.load_checkpoint(folder, filename)
                 self._az_model_path = target_model  # Track loaded model
-                print(f"Loaded AlphaZero weights from {target_model}")
+                _structured_diagnostic(f"Loaded AlphaZero weights from {target_model}")
                 # DEBUG: Test prediction
                 test_game = self._az_game.getInitBoard()
                 test_valids = self._az_game.getValidMoves(test_game, 0)
                 test_policy, test_value = self._az_nnet.predict(test_game, test_valids)
-                print("  DEBUG Test prediction:")
-                print(f"    Value: {test_value}")
-                print(f"    Top 5 policy: {sorted(enumerate(test_policy), key=lambda x: -x[1])[:5]}")
+                _structured_diagnostic("  DEBUG Test prediction:")
+                _structured_diagnostic(f"    Value: {test_value}")
+                _structured_diagnostic(f"    Top 5 policy: {sorted(enumerate(test_policy), key=lambda x: -x[1])[:5]}")
             else:
-                print(f"WARNING: AlphaZero model not found at {target_model}")
+                _structured_diagnostic(f"WARNING: AlphaZero model not found at {target_model}")
 
             # Initialize MCTS args - inference defaults (optimized for strongest play)
             self._az_mcts_args = argparse.Namespace(
@@ -522,7 +551,7 @@ class AIManager:
             self._az_initialized = True
 
         except ImportError as e:
-            print(f"ERROR: Failed to import AlphaZero components: {e}")
+            _structured_diagnostic(f"ERROR: Failed to import AlphaZero components: {e}")
             import traceback
             traceback.print_exc()
 
@@ -570,7 +599,7 @@ class AIManager:
             cpp_config.dirichlet_alpha = az_options['dirichletAlpha']
         self._az_mcts.cpp_mcts.set_config(cpp_config)
 
-        print(f"  Applied AZ options: cpuct={cpp_config.cpuct}, fpu={cpp_config.fpu}, "
+        _structured_diagnostic(f"  Applied AZ options: cpuct={cpp_config.cpuct}, fpu={cpp_config.fpu}, "
               f"forced_playouts={cpp_config.forced_playouts}")
 
     def _get_alphazero_action(self, game, time_limit: float = 2.0, num_simulations: Optional[int] = None, az_options: Optional[dict] = None) -> int:
@@ -583,30 +612,30 @@ class AIManager:
             az_options: AlphaZero advanced options dict
         """
         if num_simulations:
-            print(f"AI (AlphaZero Direct) is thinking ({num_simulations} sims)...")
+            _structured_diagnostic(f"AI (AlphaZero Direct) is thinking ({num_simulations} sims)...")
         else:
-            print(f"AI (AlphaZero Direct) is thinking (Search {time_limit}s)...")
+            _structured_diagnostic(f"AI (AlphaZero Direct) is thinking (Search {time_limit}s)...")
 
         # DEBUG: Print game state info
-        print("  DEBUG Game State:")
-        print(f"    simple_payment_mode: {game.simple_payment_mode}")
-        print(f"    current_player: {game.current_player}")
-        print(f"    turn: {game.turn}")
-        print(f"    legal_actions count: {len(game.legal_actions)}")
+        _structured_diagnostic("  DEBUG Game State:")
+        _structured_diagnostic(f"    simple_payment_mode: {game.simple_payment_mode}")
+        _structured_diagnostic(f"    current_player: {game.current_player}")
+        _structured_diagnostic(f"    turn: {game.turn}")
+        _structured_diagnostic(f"    legal_actions count: {len(game.legal_actions)}")
         legals = game.legal_actions
         if legals:
             action_types = {}
             for a in legals:
                 t = int(a.type)
                 action_types[t] = action_types.get(t, 0) + 1
-            print(f"    action types: {action_types}")
+            _structured_diagnostic(f"    action types: {action_types}")
 
         # Extract model_path from az_options if provided
         model_path = az_options.get('model_path') if az_options else None
         self._init_alphazero(model_path=model_path)
 
         if not self._az_initialized:
-            print("AlphaZero not initialized, falling back to greedy.")
+            _structured_diagnostic("AlphaZero not initialized, falling back to greedy.")
             return self._get_greedy_action(game)
 
         # Apply advanced options if provided
@@ -652,7 +681,7 @@ class AIManager:
                 # Adaptive batch size
                 sims_per_iter = min(200, max(25, int(remaining * 100)))
 
-        print(f"  AZ Search done: {total_sims} sims. Canonical Best: {best_canonical_idx}")
+        _structured_diagnostic(f"  AZ Search done: {total_sims} sims. Canonical Best: {best_canonical_idx}")
 
         # DEBUG: Print root node statistics
         root_hash = game.board_hash()
@@ -662,26 +691,26 @@ class AIManager:
             prior_probs = list(root_node.prior)
             q_values = list(root_node.Q)
             valid = list(root_node.valid_actions)
-            print("  DEBUG Root Node:")
-            print(f"    Total visits: {root_node.total_visits}")
+            _structured_diagnostic("  DEBUG Root Node:")
+            _structured_diagnostic(f"    Total visits: {root_node.total_visits}")
             top_actions = sorted([(i, visit_counts[i], prior_probs[i], q_values[i])
                                  for i in range(len(visit_counts)) if valid[i] and visit_counts[i] > 0],
                                 key=lambda x: -x[1])[:5]
             for idx, n, p, q in top_actions:
-                print(f"    Action {idx}: N={n}, P={p:.4f}, Q={q:.4f}")
+                _structured_diagnostic(f"    Action {idx}: N={n}, P={p:.4f}, Q={q:.4f}")
         else:
-            print("  WARNING: Root node not found in tree!")
+            _structured_diagnostic("  WARNING: Root node not found in tree!")
 
         # 4. Decode Canonical Action -> csplendor.Action
         # The ActionEncoderCpp.decode needs the game context to decode properly
         action = self._csplendor.ActionEncoderCpp.decode(best_canonical_idx, game)
-        print(f"  Decoded Action: type={action.type}, card_id={action.card_id}")
+        _structured_diagnostic(f"  Decoded Action: type={action.type}, card_id={action.card_id}")
 
         # 5. Match against legal_actions to find correct index
         legals = game.legal_actions
         for i, legal_action in enumerate(legals):
             if self._actions_equal(legal_action, action):
-                print(f"AI Move: {i} (AlphaZero Direct matched)")
+                _structured_diagnostic(f"AI Move: {i} (AlphaZero Direct matched)")
                 self._last_action_debug = {
                     "used_mode": "alphazero_mcts" if num_simulations else "alphazero_time",
                     "requested_simulations": num_simulations,
@@ -689,8 +718,8 @@ class AIManager:
                 }
                 return i
 
-        print(f"ERROR: AlphaZero selected action {action} is not in legal actions!")
-        print(f"Legal actions: {[str(a) for a in legals]}")
+        _structured_diagnostic(f"ERROR: AlphaZero selected action {action} is not in legal actions!")
+        _structured_diagnostic(f"Legal actions: {[str(a) for a in legals]}")
 
         # Fallback to greedy if AZ picks illegal (should rare/impossible if MCTS works)
         return self._get_greedy_action(game)
@@ -713,7 +742,7 @@ class AIManager:
                 env_candidate = env_model if os.path.isabs(env_model) else os.path.abspath(os.path.join(project_root, env_model))
                 if os.path.exists(env_candidate):
                     return env_candidate
-                print(f"WARNING: SPLENDOR_SET_TRANSFORMER_MODEL not found: {env_candidate}")
+                _structured_diagnostic(f"WARNING: SPLENDOR_SET_TRANSFORMER_MODEL not found: {env_candidate}")
 
             # Prefer self-play accepted best checkpoint for SetTransformer.
             known_best = os.path.join(
@@ -762,7 +791,7 @@ class AIManager:
                 env_candidate = env_model if os.path.isabs(env_model) else os.path.abspath(os.path.join(project_root, env_model))
                 if os.path.exists(env_candidate):
                     return env_candidate
-                print(f"WARNING: SPLENDOR_DEEPSETS_MODEL not found: {env_candidate}")
+                _structured_diagnostic(f"WARNING: SPLENDOR_DEEPSETS_MODEL not found: {env_candidate}")
 
             default_model = os.path.join(checkpoints_root, "distilled_final.pt")
             if os.path.exists(default_model):
@@ -795,8 +824,11 @@ class AIManager:
 
         ds_path = os.path.abspath(os.path.join(
             os.path.dirname(__file__), "../../../alphazero-deepsets"))
-        if ds_path not in sys.path:
-            sys.path.insert(0, ds_path)
+        activate_external_path(
+            ds_path,
+            environment_variable="CSPLENDOR_DEEPSETS_PATH",
+            integration="alphazero-deepsets",
+        )
 
         try:
             from encoder.state_encoder import encode_state
@@ -812,7 +844,7 @@ class AIManager:
             )
             self._ds_net = self._ds_net.to(self._ds_device)
             self._ds_model_type = spec["model_type"]
-            print(f"Loaded distilled model ({self._ds_model_type}) from {target_model}")
+            _structured_diagnostic(f"Loaded distilled model ({self._ds_model_type}) from {target_model}")
 
             self._ds_net.eval()
             self._ds_encode_state = encode_state
@@ -823,10 +855,10 @@ class AIManager:
             )
             self._ds_model_path = target_model
             self._ds_initialized = True
-            print(f"{self._ds_model_type} AI initialized successfully.")
+            _structured_diagnostic(f"{self._ds_model_type} AI initialized successfully.")
 
         except Exception as e:
-            print(f"ERROR: Failed to initialize distilled model: {e}")
+            _structured_diagnostic(f"ERROR: Failed to initialize distilled model: {e}")
             import traceback
             traceback.print_exc()
 
@@ -875,7 +907,7 @@ class AIManager:
 
         if use_search:
             # MCTS mode
-            print(f"AI ({model_label} + MCTS) is thinking ({num_simulations} sims, cpuct={cpuct}, fpu={fpu})...")
+            _structured_diagnostic(f"AI ({model_label} + MCTS) is thinking ({num_simulations} sims, cpuct={cpuct}, fpu={fpu})...")
             search_start = time.perf_counter()
             best_v3_idx, info = self._ds_mcts.search(
                 game,
@@ -902,13 +934,13 @@ class AIManager:
                 "elapsed_ms": search_elapsed_ms,
             }
 
-            print(f"  MCTS done: {info['simulations']} sims, value={info['value']:.3f}")
+            _structured_diagnostic(f"  MCTS done: {info['simulations']} sims, value={info['value']:.3f}")
             if info.get('top_actions'):
                 for a, n, q, p in info['top_actions']:
-                    print(f"    V3[{a}]: N={n}, Q={q:.3f}, P={p:.4f}")
+                    _structured_diagnostic(f"    V3[{a}]: N={n}, Q={q:.3f}, P={p:.4f}")
         else:
             # Raw NN mode (fast, no MCTS)
-            print(f"AI ({model_label}) is thinking...")
+            _structured_diagnostic(f"AI ({model_label}) is thinking...")
             search_start = time.perf_counter()
             encoded_state = self._ds_encode_state(game)
             v3_mask = np.array(_cs.ActionEncoderV3.get_action_mask(game), dtype=np.uint8)
@@ -917,7 +949,7 @@ class AIManager:
             search_elapsed_ms = (time.perf_counter() - search_start) * 1000.0
 
             best_v3_idx = int(np.argmax(policy))
-            print(f"  {model_label} NN: value={value:.3f}, turns={turns}, best_v3_action={best_v3_idx}")
+            _structured_diagnostic(f"  {model_label} NN: value={value:.3f}, turns={turns}, best_v3_action={best_v3_idx}")
             self._last_action_debug = {
                 "used_mode": f"{mode_prefix}_raw",
                 "requested_simulations": num_simulations,
@@ -927,17 +959,17 @@ class AIManager:
 
         selected_idx = legal_v3_to_idx.get(int(best_v3_idx))
         if selected_idx is not None:
-            print(f"AI Move: {selected_idx} ({model_label}{'+ MCTS' if use_search else ''}, v3={best_v3_idx})")
+            _structured_diagnostic(f"AI Move: {selected_idx} ({model_label}{'+ MCTS' if use_search else ''}, v3={best_v3_idx})")
             return selected_idx
 
         # Decode V3 action → csplendor.Action
         action = _cs.ActionEncoderV3.decode_and_match(best_v3_idx, game)
-        print(f"  Decoded Action: type={action.type}, card_id={action.card_id}")
+        _structured_diagnostic(f"  Decoded Action: type={action.type}, card_id={action.card_id}")
 
         # Match against legal_actions
         for i, legal_action in enumerate(legals):
             if self._actions_equal(legal_action, action):
-                print(f"AI Move: {i} ({model_label}{'+ MCTS' if use_search else ''})")
+                _structured_diagnostic(f"AI Move: {i} ({model_label}{'+ MCTS' if use_search else ''})")
                 return i
 
         # Fallback: try top policy actions
@@ -949,12 +981,12 @@ class AIManager:
                     continue
                 mapped_idx = legal_v3_to_idx.get(int(v3_idx))
                 if mapped_idx is not None:
-                    print(f"AI Move: {mapped_idx} ({model_label} fallback, v3={v3_idx})")
+                    _structured_diagnostic(f"AI Move: {mapped_idx} ({model_label} fallback, v3={v3_idx})")
                     return mapped_idx
                 action = _cs.ActionEncoderV3.decode_and_match(int(v3_idx), game)
                 for i, legal_action in enumerate(legals):
                     if self._actions_equal(legal_action, action):
-                        print(f"AI Move: {i} ({model_label} fallback, v3={v3_idx})")
+                        _structured_diagnostic(f"AI Move: {i} ({model_label} fallback, v3={v3_idx})")
                         return i
         else:
             visit_policy = info.get('visit_policy') if isinstance(info, dict) else None
@@ -965,7 +997,7 @@ class AIManager:
                 )
                 fallback_idx = legal_v3_to_idx.get(int(best_legal_id))
                 if fallback_idx is not None:
-                    print(
+                    _structured_diagnostic(
                         f"WARNING: {model_label} v3 mapping mismatch. "
                         f"fallback to legal v3={best_legal_id} idx={fallback_idx}"
                     )
@@ -993,7 +1025,7 @@ class AIManager:
             env_candidate = env_model if os.path.isabs(env_model) else os.path.abspath(os.path.join(project_root, env_model))
             if os.path.exists(env_candidate):
                 return env_candidate
-            print(f"WARNING: SPLENDOR_NNUE_MODEL not found: {env_candidate}")
+            _structured_diagnostic(f"WARNING: SPLENDOR_NNUE_MODEL not found: {env_candidate}")
 
         candidates = [
             os.path.join(checkpoints_root, "nnue_best.pt"),
@@ -1022,8 +1054,11 @@ class AIManager:
             return
 
         nnue_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../nnue-splendor"))
-        if nnue_path not in sys.path:
-            sys.path.insert(0, nnue_path)
+        activate_external_path(
+            nnue_path,
+            environment_variable="CSPLENDOR_NNUE_PATH",
+            integration="nnue-splendor",
+        )
 
         try:
             from nnue_splendor.encoder.feature_encoder import encode_state
@@ -1046,9 +1081,9 @@ class AIManager:
             )
             self._nnue_model_path = target_model
             self._nnue_initialized = True
-            print(f"NNUE AI initialized from {target_model} (meta keys={list(meta.keys())[:5]})")
+            _structured_diagnostic(f"NNUE AI initialized from {target_model} (meta keys={list(meta.keys())[:5]})")
         except Exception as e:
-            print(f"ERROR: Failed to initialize NNUE: {e}")
+            _structured_diagnostic(f"ERROR: Failed to initialize NNUE: {e}")
             import traceback
             traceback.print_exc()
 
@@ -1083,7 +1118,7 @@ class AIManager:
         use_mcts = num_simulations is not None and num_simulations > 0
 
         if use_mcts:
-            print(f"AI (NNUE + AlphaBeta) is thinking (nodes={num_simulations}, cpuct={cpuct}, fpu={fpu})...")
+            _structured_diagnostic(f"AI (NNUE + AlphaBeta) is thinking (nodes={num_simulations}, cpuct={cpuct}, fpu={fpu})...")
             search_start = time.perf_counter()
             best_v3_idx, info = self._nnue_mcts.search(
                 game,
@@ -1106,7 +1141,7 @@ class AIManager:
                 "elapsed_ms": search_elapsed_ms,
             }
         else:
-            print("AI (NNUE) is thinking...")
+            _structured_diagnostic("AI (NNUE) is thinking...")
             search_start = time.perf_counter()
             encoded_state = self._nnue_encode_state(game)
             v3_mask = np.array(_cs.ActionEncoderV3.get_action_mask(game), dtype=np.uint8)
@@ -1114,7 +1149,7 @@ class AIManager:
             policy, value, turns = self._nnue_net.predict(encoded_state, v3_mask, device=device_str)
             search_elapsed_ms = (time.perf_counter() - search_start) * 1000.0
             best_v3_idx = int(np.argmax(policy))
-            print(f"  NNUE raw: value={value:.3f}, turns={turns}, v3={best_v3_idx}")
+            _structured_diagnostic(f"  NNUE raw: value={value:.3f}, turns={turns}, v3={best_v3_idx}")
             self._last_action_debug = {
                 "used_mode": "nnue_raw",
                 "requested_simulations": num_simulations,
@@ -1124,13 +1159,13 @@ class AIManager:
 
         selected_idx = legal_v3_to_idx.get(int(best_v3_idx))
         if selected_idx is not None:
-            print(f"AI Move: {selected_idx} (NNUE{'+ AB' if use_mcts else ''}, v3={best_v3_idx})")
+            _structured_diagnostic(f"AI Move: {selected_idx} (NNUE{'+ AB' if use_mcts else ''}, v3={best_v3_idx})")
             return selected_idx
 
         action = _cs.ActionEncoderV3.decode_and_match(best_v3_idx, game)
         for i, legal_action in enumerate(legals):
             if self._actions_equal(legal_action, action):
-                print(f"AI Move: {i} (NNUE{'+ AB' if use_mcts else ''})")
+                _structured_diagnostic(f"AI Move: {i} (NNUE{'+ AB' if use_mcts else ''})")
                 return i
 
         if use_mcts and isinstance(info, dict):
@@ -1142,7 +1177,7 @@ class AIManager:
                 )
                 mapped = legal_v3_to_idx.get(int(best_legal_id))
                 if mapped is not None:
-                    print(f"WARNING: NNUE mapping fallback to legal v3={best_legal_id} idx={mapped}")
+                    _structured_diagnostic(f"WARNING: NNUE mapping fallback to legal v3={best_legal_id} idx={mapped}")
                     return mapped
             root_scores = info.get('root_scores')
             if isinstance(root_scores, dict) and len(root_scores) > 0 and len(legal_v3_to_idx) > 0:
@@ -1152,7 +1187,7 @@ class AIManager:
                 )
                 mapped = legal_v3_to_idx.get(int(best_legal_id))
                 if mapped is not None:
-                    print(f"WARNING: NNUE score fallback to legal v3={best_legal_id} idx={mapped}")
+                    _structured_diagnostic(f"WARNING: NNUE score fallback to legal v3={best_legal_id} idx={mapped}")
                     return mapped
 
         raise RuntimeError(
