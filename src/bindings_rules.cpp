@@ -5,6 +5,7 @@
 #include "cli_utils.h"
 #include "game.h"
 #include "game_snapshot.h"
+#include "information_state.h"
 #include "noble_data.h"
 #include "player.h"
 #include <pybind11/stl.h>
@@ -126,6 +127,24 @@ void bind_rules(py::module_ &m) {
       .def_static(
           "snapshot_rules_version",
           []() { return csplendor::snapshot::GAME_SNAPSHOT_RULES_VERSION; })
+      .def(
+          "serialize_information_state",
+          [](const Game &game, uint8_t observer) {
+            return py::bytes(
+                csplendor::information_state::serialize(game, observer));
+          },
+          py::arg("observer"),
+          "Serialize a versioned observer-safe identity for analysis storage")
+      .def("information_state_hash",
+           &csplendor::information_state::stable_hash,
+           py::arg("observer"),
+           "Return a stable 64-bit index for the serialized information state")
+      .def_static(
+          "information_state_format_version",
+          []() { return csplendor::information_state::FORMAT_VERSION; })
+      .def_static(
+          "information_state_rules_version",
+          []() { return csplendor::information_state::RULES_VERSION; })
       .def("shuffled_clone", &Game::shuffled_clone, py::arg("observer_player"),
            py::arg("seed"),
            "Create a clone with hidden information randomized from observer's "
