@@ -60,6 +60,29 @@ action decodeが3,240.5 nsから15.4 ns（210.07倍）、dense mask走査が22.0
 実モデル込みの速度向上はNN推論時間の割合に依存します。測定方法、O(1)監査、compact
 edgeの詳細は[MCTSホットパス高速化](https://github.com/kuboyoo/csplendor/blob/main/doc/mcts_hotpath_optimizations.md)を参照してください。
 
+#### めくれ厳密詰み探索性能
+
+2026-08-30にRyzen 9 7900X、GCC 15.2、portable Release build、Python 3.12.1、
+CPU 1論理コア固定で測定しました。5手詰め収集局面の初手を固定し、深さ7、
+`exact_reveal_search=True`、1実行1,000万ノードで、warmup 2回後の15標本の
+中央値を比較しています。高速化項目だけを切り替え、探索順と訪問ノード数は同一です。
+
+| 指標 | 高速化前 | 高速化後 | 効果 |
+|---|---:|---:|---:|
+| 探索速度 | 4,928,183 nodes/sec | 5,440,074 nodes/sec | 1.104倍 |
+| 1,000万ノードの実時間 | 2.029秒 | 1.838秒 | 9.4%短縮 |
+
+探索速度の改善率は10.39%で、bootstrap 95% CIは+9.19%--+11.73%でした。
+両実装とも合法手8,524,863件、置換表hit 778,150件、保存局面643,158件で停止しており、
+この測定では探索量を変えずにノード処理を高速化しています。
+
+厳密めくれ探索では、山札を順列ではなく残存カード集合として扱います。探索専用hashから
+山札順と絶対turnを除き、残存カードbitsetを別keyとして保持することで、完全情報用の
+`Board.hash()`の意味を変えずに重複計算と同値局面の分断を避けます。さらに、node budgetから
+置換表容量を保守的に事前確保してrehashを抑えます。node limitは従来どおり毎nodeで厳密に
+検査し、wall-clockと外部cancelだけを64 nodeごとに検査します。node 0では必ず検査するため、
+事前cancelと即時timeoutの挙動は維持されます。
+
 ### 実験的な並列MCTS
 
 共有tree並列探索はStage Bのexperimental opt-inです。既定の`num_threads=1`はworker queueを
