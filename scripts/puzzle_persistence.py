@@ -37,17 +37,57 @@ def save_puzzle(
     attempt: int,
     quality: Optional[dict[str, object]] = None,
     strategy_dag_format: str = "compact",
+    strategy_dag_requested: Optional[bool] = None,
+    strategy_dag_omitted_reason: Optional[str] = None,
+    require_complete_dag: bool = False,
 ) -> Optional[Path]:
     if strategy_dag_format not in {"compact", "v1", "both"}:
         raise ValueError("strategy_dag_format must be compact, v1, or both")
     proof = result.proof_tree or {}
     verification = proof.get("verification")
+    if not isinstance(verification, dict):
+        verification = {}
     dag = verification.get("proof_dag") if isinstance(verification, dict) else None
-    line = proof.get("line")
-    if not isinstance(dag, dict) or not bool(dag.get("complete")):
+    verified_line = verification.get("line")
+    line = (
+        verified_line
+        if isinstance(verified_line, list) and verified_line
+        else proof.get("line")
+    )
+    dag_requested = (
+        bool(strategy_dag_requested)
+        if strategy_dag_requested is not None
+        else isinstance(dag, dict) and bool(dag.get("requested", True))
+    )
+    dag_complete = isinstance(dag, dict) and bool(dag.get("complete"))
+    dag_validated = isinstance(dag, dict) and bool(dag.get("validated"))
+    dag_omitted_reason = strategy_dag_omitted_reason
+    if dag_omitted_reason is None and isinstance(dag, dict):
+        raw_reason = dag.get("omitted_reason")
+        if raw_reason is not None:
+            dag_omitted_reason = str(raw_reason)
+    if dag_complete:
+        dag_omitted_reason = None
+    elif dag_omitted_reason is None:
+        dag_omitted_reason = "not_available" if dag_requested else "not_requested"
+    if require_complete_dag and not dag_complete:
         raise ValueError("complete strategy DAG is required")
     if not isinstance(line, list):
         raise ValueError("principal line is required")
+
+    source_dag: dict[str, object]
+    if isinstance(dag, dict):
+        source_dag = dict(dag)
+    else:
+        source_dag = {
+            "format": "strategy_dag_v1",
+            "root": None,
+            "nodes": [],
+        }
+    source_dag["requested"] = dag_requested
+    source_dag["complete"] = dag_complete
+    source_dag["validated"] = dag_validated
+    source_dag["omitted_reason"] = dag_omitted_reason
 
     depth = int(proof.get("forced_win_depth", result.depth))
     position = game_to_spn(
@@ -79,20 +119,26 @@ def save_puzzle(
             "principal_line": "answer.kifu",
             "strategy_dag": "strategy.json",
         },
+        "strategy_dag": {
+            "requested": dag_requested,
+            "complete": dag_complete,
+            "validated": dag_validated,
+            "omitted_reason": dag_omitted_reason,
+        },
         "search_stats": asdict(result.stats),
     }
     if quality is not None:
         problem["quality"] = quality
     if strategy_dag_format == "compact":
-        output_dag = proof_dag_to_compact(dag)
+        output_dag = proof_dag_to_compact(source_dag)
         extra_strategy_fields: dict[str, object] = {}
     elif strategy_dag_format == "both":
-        output_dag = compact_proof_dag_to_v1(dag)
+        output_dag = compact_proof_dag_to_v1(source_dag)
         extra_strategy_fields = {
-            "strategy_dag_compact": proof_dag_to_compact(dag),
+            "strategy_dag_compact": proof_dag_to_compact(source_dag),
         }
     else:
-        output_dag = compact_proof_dag_to_v1(dag)
+        output_dag = compact_proof_dag_to_v1(source_dag)
         extra_strategy_fields = {}
     strategy = {
         "format": "csplendor_mate_strategy_v1",
@@ -106,6 +152,10 @@ def save_puzzle(
             "all_reveals_verified": verification.get("all_reveals_verified"),
             "reason": verification.get("reason"),
             "stats": verification.get("stats"),
+            "strategy_dag_requested": dag_requested,
+            "strategy_dag_complete": dag_complete,
+            "strategy_dag_validated": dag_validated,
+            "strategy_dag_omitted_reason": dag_omitted_reason,
         },
         "strategy_dag": output_dag,
     }

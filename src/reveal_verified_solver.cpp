@@ -20,6 +20,7 @@ using csplendor::solver_internal::HiddenOutcomeCatalog;
 using csplendor::solver_internal::OracleActionMetadata;
 using csplendor::solver_internal::ProofDagBuildAborted;
 using csplendor::solver_internal::RevealProofDagBuilder;
+using csplendor::solver_internal::RevealSearchCancellationToken;
 using csplendor::solver_internal::SearchLimit;
 using csplendor::solver_internal::SearchLimitExceeded;
 using csplendor::solver_internal::StateKeyCore;
@@ -31,43 +32,163 @@ public:
        std::vector<uint64_t> preferred_attacker_actions, bool include_proof_dag,
        size_t proof_dag_node_limit, size_t proof_dag_edge_limit,
        uint64_t required_root_action, bool strict_preferred_attacker_actions,
-       size_t strict_preferred_attacker_prefix)
+       size_t strict_preferred_attacker_prefix,
+       bool exhaustive_attacker_actions, bool exact_reveal_search,
+       std::shared_ptr<RevealSearchCancellationToken> cancellation_token)
       : attacker_(attacker), depth_(depth),
-        limits_(max_nodes, time_limit_seconds),
+        max_nodes_(max_nodes),
+        limits_(max_nodes, time_limit_seconds, std::move(cancellation_token)),
         preferred_attacker_actions_(std::move(preferred_attacker_actions)),
         include_proof_dag_(include_proof_dag),
         proof_builder_(proof_dag_node_limit, proof_dag_edge_limit),
         required_root_action_(required_root_action),
         strict_preferred_attacker_actions_(strict_preferred_attacker_actions),
-        strict_preferred_attacker_prefix_(strict_preferred_attacker_prefix) {}
+        strict_preferred_attacker_prefix_(strict_preferred_attacker_prefix),
+        exhaustive_attacker_actions_(exhaustive_attacker_actions),
+        exact_reveal_search_(exact_reveal_search) {}
 
   RevealVerifiedSearchResult solve(const Game &input) {
-    memo_.clear();
-    stats_ = RevealVerifiedSearchStats();
-    limits_.reset();
-
-    Game game = input.clone_light();
-    // Keep refill timing and level as blank slots. The defender may use any
-    // initially hidden card of a blank level, which dominates every concrete
-    // reveal sequence without enumerating deck permutations.
-    game.blank_refill_mode = true;
-    root_ = game.clone_light();
-    hidden_catalog_.remember_initial_position(game);
+    max_cache_states_ = 0;
+    Game game = begin_search(input);
 
     RevealVerifiedSearchResult result;
     result.attacker = attacker_;
     result.depth = depth_;
     try {
       std::unordered_set<DepthStateKey, DepthStateKeyHash> path;
-      const ForceStatus status = forced_win(game, path, depth_, false);
+      const ForceStatus status =
+          forced_win(game, path, depth_, exact_reveal_search_);
       result.proven = status == ForceStatus::PROVEN;
       result.reason = result.proven ? "all_reveals_verified"
                                     : "candidate_mate_not_verified";
-      result.line = principal_line();
+      result.line = principal_line(exact_reveal_search_);
       if (result.proven && include_proof_dag_)
         result.proof_dag = build_proof_dag();
     } catch (const SearchLimitExceeded &exc) {
       result.reason = exc.what();
+      result.unknown_reason = exc.what();
+    }
+
+    stats_.elapsed_ms = limits_.elapsed_ms();
+    result.memoized_states =
+        exact_reveal_search_ ? exact_memo_.size() : memo_.size();
+    result.stats = stats_;
+    return result;
+  }
+
+  RevealVerifiedSearchResult solve_reusing_exact_cache(
+      const Game &input, int depth, uint64_t max_nodes,
+      double time_limit_seconds,
+      std::vector<uint64_t> preferred_attacker_actions,
+      std::shared_ptr<RevealSearchCancellationToken> cancellation_token,
+      size_t max_cache_states) {
+    depth_ = depth;
+    max_nodes_ = max_nodes;
+    limits_ = SearchLimit(max_nodes, time_limit_seconds,
+                          std::move(cancellation_token));
+    preferred_attacker_actions_ = std::move(preferred_attacker_actions);
+    required_root_action_ = UINT64_MAX;
+    strict_preferred_attacker_actions_ = false;
+    strict_preferred_attacker_prefix_ = 0;
+    exhaustive_attacker_actions_ = true;
+    exact_reveal_search_ = true;
+    include_proof_dag_ = false;
+    max_cache_states_ = max_cache_states;
+
+    trim_exact_cache(max_cache_states);
+    Game game = begin_search(input, false);
+    RevealVerifiedSearchResult result;
+    result.attacker = attacker_;
+    result.depth = depth_;
+    try {
+      std::unordered_set<DepthStateKey, DepthStateKeyHash> path;
+      const ForceStatus status = forced_win(game, path, depth_, true);
+      result.proven = status == ForceStatus::PROVEN;
+      result.reason = result.proven ? "all_reveals_verified"
+                                    : "candidate_mate_not_verified";
+      result.line = principal_line(true);
+    } catch (const SearchLimitExceeded &exc) {
+      result.reason = exc.what();
+      result.unknown_reason = exc.what();
+    }
+
+    stats_.elapsed_ms = limits_.elapsed_ms();
+    trim_exact_cache(max_cache_states);
+    result.memoized_states = exact_memo_.size();
+    result.stats = stats_;
+    return result;
+  }
+
+  void clear_exact_cache() { exact_memo_.clear(); }
+
+  void trim_exact_cache(size_t max_cache_states) {
+    if (!max_cache_states || exact_memo_.size() <= max_cache_states)
+      return;
+
+    std::vector<uint64_t> touches;
+    touches.reserve(exact_memo_.size());
+    for (const auto &item : exact_memo_)
+      touches.push_back(item.second.last_touched);
+    const size_t remove_count = exact_memo_.size() - max_cache_states;
+    std::nth_element(touches.begin(), touches.begin() + remove_count,
+                     touches.end());
+    const uint64_t keep_from = touches[remove_count];
+    for (auto it = exact_memo_.begin();
+         it != exact_memo_.end() && exact_memo_.size() > max_cache_states;) {
+      if (it->second.last_touched < keep_from)
+        it = exact_memo_.erase(it);
+      else
+        ++it;
+    }
+    // last_touched is normally unique.  This also handles generation-zero
+    // aggregate entries and counter wrap without exceeding the hard bound.
+    for (auto it = exact_memo_.begin();
+         it != exact_memo_.end() && exact_memo_.size() > max_cache_states;) {
+      if (it->second.last_touched == keep_from)
+        it = exact_memo_.erase(it);
+      else
+        ++it;
+    }
+  }
+
+  size_t exact_cache_size() const noexcept { return exact_memo_.size(); }
+
+  RevealVerifiedFrontierResult expand_frontier(const Game &input,
+                                               size_t edge_limit) {
+    Game game = begin_search(input);
+
+    RevealVerifiedFrontierResult result;
+    result.attacker = attacker_;
+    result.depth = depth_;
+    result.player = game.current_player();
+    result.winner = game.winner();
+    result.waiting_noble = game.board.waiting_noble;
+    result.kind = game.is_game_over()             ? "terminal"
+                  : can_resolve_final_round(game) ? "final_round_summary"
+                                                  : "state";
+    if (game.is_game_over()) {
+      result.resolution =
+          game.winner() == attacker_ ? "attacker_win" : "non_attacker_win";
+    }
+    try {
+      std::unordered_set<DepthStateKey, DepthStateKeyHash> path;
+      const ForceStatus status = forced_win(game, path, depth_, false);
+      result.proven = status == ForceStatus::PROVEN;
+      if (result.proven) {
+        if (!game.is_game_over())
+          expand_frontier_node(game, depth_, edge_limit, result.edges);
+        result.complete = true;
+        result.reason = "all_reveals_verified";
+      } else {
+        result.reason = "candidate_mate_not_verified";
+      }
+    } catch (const SearchLimitExceeded &exc) {
+      result.edges.clear();
+      result.reason = "frontier_not_materialized";
+      result.unknown_reason = exc.what();
+    } catch (const ProofDagBuildAborted &exc) {
+      result.edges.clear();
+      result.reason = "frontier_not_materialized";
       result.unknown_reason = exc.what();
     }
 
@@ -77,7 +198,122 @@ public:
     return result;
   }
 
+  RevealVerifiedFrontierResult split_root(const Game &input,
+                                          size_t edge_limit) {
+    Game game = begin_search(input);
+
+    RevealVerifiedFrontierResult result;
+    result.attacker = attacker_;
+    result.depth = depth_;
+    result.player = game.current_player();
+    result.winner = game.winner();
+    result.waiting_noble = game.board.waiting_noble;
+    result.kind = game.is_game_over()             ? "terminal"
+                  : can_resolve_final_round(game) ? "final_round_summary"
+                                                  : "state";
+    if (game.is_game_over()) {
+      result.complete = true;
+      result.resolution =
+          game.winner() == attacker_ ? "attacker_win" : "non_attacker_win";
+      result.reason = "terminal_root";
+    } else {
+      try {
+        std::vector<OrderedAction> actions = proof_ordered_actions(game);
+        if (game.current_player() == attacker_)
+          actions = forced_attacker_actions(game, actions, depth_, true);
+        stats_.legal_moves += actions.size();
+
+        const int current_player = game.current_player();
+        const bool waiting_noble_action = game.board.waiting_noble;
+        const bool preserve_child_depth = can_resolve_final_round(game);
+        for (const OrderedAction &ordered : actions) {
+          const bool completed =
+              for_each_proof_outcome(game, ordered, [&](int reveal_card) {
+                check_limits();
+                if (edge_limit && result.edges.size() >= edge_limit)
+                  throw ProofDagBuildAborted("root split edge limit exceeded");
+                const int next_depth =
+                    waiting_noble_action || preserve_child_depth
+                        ? depth_
+                        : depth_ - static_cast<int>(
+                                       current_player == attacker_ &&
+                                       game.current_player() != current_player);
+                result.edges.push_back(RevealVerifiedFrontierEdge{
+                    ordered.code, reveal_card, next_depth,
+                    game.clone_light()});
+                return true;
+              });
+          if (!completed)
+            throw ProofDagBuildAborted(
+                "root split could not materialize a legal action");
+        }
+        result.complete = true;
+        result.reason = result.edges.empty() ? "root_has_no_legal_edges"
+                                             : "root_split_materialized";
+      } catch (const SearchLimitExceeded &exc) {
+        result.edges.clear();
+        result.reason = "root_split_not_materialized";
+        result.unknown_reason = exc.what();
+      } catch (const ProofDagBuildAborted &exc) {
+        result.edges.clear();
+        result.reason = "root_split_not_materialized";
+        result.unknown_reason = exc.what();
+      }
+    }
+
+    stats_.elapsed_ms = limits_.elapsed_ms();
+    result.memoized_states = 0;
+    result.stats = stats_;
+    return result;
+  }
+
 private:
+  Game begin_search(const Game &input, bool clear_memo = true) {
+    if (clear_memo) {
+      memo_.clear();
+      exact_memo_.clear();
+    }
+    stats_ = RevealVerifiedSearchStats();
+    limits_.reset();
+    reserve_active_memo();
+    ++search_generation_;
+    if (search_generation_ == 0) {
+      // Generation zero is reserved for aggregate-initialized entries.
+      memo_.clear();
+      exact_memo_.clear();
+      search_generation_ = 1;
+    }
+
+    Game game = input.clone_light();
+    // Keep refill timing and level as blank slots. The defender may use any
+    // initially hidden card of a blank level, which dominates every concrete
+    // reveal sequence without enumerating deck permutations.
+    game.blank_refill_mode = true;
+    root_ = game.clone_light();
+    hidden_catalog_.remember_initial_position(game);
+    return game;
+  }
+
+  void reserve_active_memo() {
+    // Deep exact searches retain roughly one transposition for every several
+    // visited nodes.  Reserving a conservative fraction avoids repeated
+    // bucket-table growth without making the node limit a memory commitment.
+    if (max_nodes_ < 4096)
+      return;
+    constexpr uint64_t MAX_RESERVED_STATES = 2'000'000;
+    const uint64_t reserve_limit =
+        max_cache_states_
+            ? std::min<uint64_t>(MAX_RESERVED_STATES, max_cache_states_)
+            : MAX_RESERVED_STATES;
+    const size_t target = static_cast<size_t>(
+        std::min<uint64_t>(reserve_limit, max_nodes_ / 12));
+    auto &active_memo = exact_reveal_search_ ? exact_memo_ : memo_;
+    const double capacity = static_cast<double>(active_memo.bucket_count()) *
+                            active_memo.max_load_factor();
+    if (static_cast<double>(target) > capacity)
+      active_memo.reserve(target);
+  }
+
   struct StateKey {
     StateKeyCore core;
     uint64_t unseen_low = 0;
@@ -140,6 +376,8 @@ private:
     bool has_action = false;
     size_t action_count = 0;
     bool replayable = true;
+    uint64_t generation = 0;
+    uint64_t last_touched = 0;
   };
 
   struct OrderedAction : ActionOrderKey, OracleActionMetadata {
@@ -163,10 +401,14 @@ private:
 
   int attacker_ = 0;
   int depth_ = 0;
+  uint64_t max_nodes_ = 0;
+  size_t max_cache_states_ = 0;
   SearchLimit limits_;
   RevealVerifiedSearchStats stats_;
   std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash> memo_;
   std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash> exact_memo_;
+  uint64_t search_generation_ = 0;
+  uint64_t cache_touch_counter_ = 0;
   Game root_{0};
   HiddenOutcomeCatalog hidden_catalog_;
   std::vector<uint64_t> preferred_attacker_actions_;
@@ -175,6 +417,8 @@ private:
   uint64_t required_root_action_ = UINT64_MAX;
   bool strict_preferred_attacker_actions_ = false;
   size_t strict_preferred_attacker_prefix_ = 0;
+  bool exhaustive_attacker_actions_ = false;
+  bool exact_reveal_search_ = false;
   std::unordered_map<DepthStateKey, size_t, DepthStateKeyHash> proof_node_ids_;
   std::unordered_map<DepthStateKey, size_t, DepthStateKeyHash>
       proof_terminal_node_ids_;
@@ -198,11 +442,15 @@ private:
     if (game.current_player() == attacker_ && depth <= 0)
       return ForceStatus::REFUTED;
 
-    const DepthStateKey key{state_key(game), depth};
+    const DepthStateKey key{state_key(game, exact_refinement), depth};
     auto &memo = exact_refinement ? exact_memo_ : memo_;
     auto memo_it = memo.find(key);
     if (memo_it != memo.end()) {
       ++stats_.memo_hits;
+      if (memo_it->second.generation != search_generation_)
+        ++stats_.persistent_memo_hits;
+      memo_it->second.generation = search_generation_;
+      memo_it->second.last_touched = ++cache_touch_counter_;
       return memo_it->second.status;
     }
     if (path.find(key) != path.end()) {
@@ -211,18 +459,21 @@ private:
     }
     if (can_resolve_final_round(game)) {
       const Entry resolved = resolve_final_round(game, exact_refinement);
-      memo[key] = resolved;
+      store_entry(memo, key, resolved);
       return resolved.status;
     }
 
     std::vector<OrderedAction> actions =
         exact_refinement ? proof_ordered_actions(game) : ordered_actions(game);
+    if (exact_refinement)
+      prefer_iterative_action(key.state, depth, game.current_player(), actions);
     if (game.current_player() == attacker_)
       actions = forced_attacker_actions(game, actions, depth, path.empty());
     stats_.legal_moves += actions.size();
     if (actions.empty()) {
       ++stats_.terminal_nodes;
-      memo[key] = Entry{ForceStatus::REFUTED, 0, -1, false, 0};
+      store_entry(memo, key,
+                  Entry{ForceStatus::REFUTED, 0, -1, false, 0});
       return ForceStatus::REFUTED;
     }
 
@@ -268,16 +519,18 @@ private:
       }
       if (current_player == attacker_ && !action_refuted && !action_unknown) {
         path.erase(key);
-        memo[key] = Entry{ForceStatus::PROVEN,   ordered.code,
+        store_entry(memo, key,
+                    Entry{ForceStatus::PROVEN,   ordered.code,
                           representative_reveal, true,
-                          actions.size(),        is_replayable(ordered)};
+                          actions.size(),        is_replayable(ordered)});
         return ForceStatus::PROVEN;
       }
       if (current_player != attacker_ && action_refuted) {
         path.erase(key);
-        memo[key] = Entry{ForceStatus::REFUTED,  ordered.code,
+        store_entry(memo, key,
+                    Entry{ForceStatus::REFUTED,  ordered.code,
                           representative_reveal, true,
-                          actions.size(),        is_replayable(ordered)};
+                          actions.size(),        is_replayable(ordered)});
         return ForceStatus::REFUTED;
       }
       has_unknown = has_unknown || action_unknown;
@@ -290,8 +543,43 @@ private:
                                    ? ForceStatus::REFUTED
                                    : ForceStatus::PROVEN;
     representative.status = status;
-    memo[key] = representative;
+    store_entry(memo, key, representative);
     return status;
+  }
+
+  void store_entry(
+      std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash> &memo,
+      const DepthStateKey &key, Entry entry) {
+    entry.generation = search_generation_;
+    entry.last_touched = ++cache_touch_counter_;
+    memo[key] = std::move(entry);
+  }
+
+  void prefer_iterative_action(const StateKey &state, int depth,
+                               int current_player,
+                               std::vector<OrderedAction> &actions) {
+    if (actions.size() < 2 || depth <= 0)
+      return;
+    for (int cached_depth = depth - 1; cached_depth >= 0; --cached_depth) {
+      const auto cached = exact_memo_.find(DepthStateKey{state, cached_depth});
+      if (cached == exact_memo_.end() || !cached->second.has_action)
+        continue;
+      const bool useful =
+          current_player == attacker_
+              ? cached->second.status == ForceStatus::PROVEN
+              : cached->second.status == ForceStatus::REFUTED;
+      if (!useful)
+        continue;
+      const auto action = std::find_if(
+          actions.begin(), actions.end(), [&](const OrderedAction &candidate) {
+            return candidate.code == cached->second.action_code;
+          });
+      if (action == actions.end())
+        continue;
+      std::rotate(actions.begin(), action, action + 1);
+      ++stats_.iterative_order_hits;
+      return;
+    }
   }
 
   template <typename Visitor>
@@ -1049,6 +1337,12 @@ private:
       }
     }
 
+    if (exhaustive_attacker_actions_) {
+      std::vector<OrderedAction> exhaustive = actions;
+      prefer_candidate_action(exhaustive, depth);
+      return exhaustive;
+    }
+
     std::vector<OrderedAction> purchases;
     std::vector<std::pair<int, OrderedAction>> takes;
     std::vector<OrderedAction> reserves;
@@ -1057,8 +1351,6 @@ private:
       const Action action = Action::unpack(ordered.code);
       switch (action.type) {
       case PURCHASE:
-        if (!hidden_catalog_.is_initially_known(action.card_id))
-          break;
         purchases.push_back(ordered);
         break;
       case VISIT_NOBLE:
@@ -1069,8 +1361,7 @@ private:
         takes.push_back({attacker_take_score(game, action), ordered});
         break;
       case RESERVE_VISIBLE:
-        if (hidden_catalog_.is_initially_known(action.card_id))
-          reserves.push_back(ordered);
+        reserves.push_back(ordered);
         break;
       default:
         passthrough.push_back(ordered);
@@ -1184,12 +1475,14 @@ private:
     return OrderedAction{rank, -points, code};
   }
 
-  StateKey state_key(const Game &game) const {
+  StateKey state_key(const Game &game, bool root_independent = false) const {
     const Board &board = game.board;
     const CardIdSet unseen = hidden_catalog_.unseen_cards(board);
     const CardIdSet acquired_hidden =
-        hidden_catalog_.acquired_hidden_cards(board);
-    return StateKey{StateKeyCore{board.hash(), board.players[0].points,
+        root_independent ? CardIdSet{}
+                         : hidden_catalog_.acquired_hidden_cards(board);
+    const uint64_t rule_position_hash = board.compute_set_deck_search_hash();
+    return StateKey{StateKeyCore{rule_position_hash, board.players[0].points,
                                  board.players[1].points,
                                  board.players[0].purchased_count,
                                  board.players[1].purchased_count,
@@ -1200,6 +1493,92 @@ private:
                     acquired_hidden.high,
                     board.players[0].reserved_count,
                     board.players[1].reserved_count};
+  }
+
+  bool collect_frontier_action(
+      Game &game, const OrderedAction &ordered, int depth,
+      bool preserve_child_depth, size_t edge_limit,
+      std::vector<RevealVerifiedFrontierEdge> &action_edges) {
+    const int current_player = game.current_player();
+    const bool waiting_noble_action = game.board.waiting_noble;
+    bool all_children_proven = true;
+    const bool completed =
+        for_each_proof_outcome(game, ordered, [&](int reveal_card) {
+          const int next_depth =
+              waiting_noble_action || preserve_child_depth
+                  ? depth
+                  : depth - static_cast<int>(current_player == attacker_ &&
+                                             game.current_player() !=
+                                                 current_player);
+          std::unordered_set<DepthStateKey, DepthStateKeyHash> child_path;
+          const ForceStatus child_status =
+              forced_win(game, child_path, next_depth, false);
+          if (child_status != ForceStatus::PROVEN) {
+            all_children_proven = false;
+            return false;
+          }
+          if (edge_limit && action_edges.size() >= edge_limit)
+            throw ProofDagBuildAborted("frontier edge limit exceeded");
+          action_edges.push_back(RevealVerifiedFrontierEdge{
+              ordered.code, reveal_card, next_depth, game.clone_light()});
+          return true;
+        });
+    return completed && !action_edges.empty() && all_children_proven;
+  }
+
+  void expand_frontier_node(
+      Game &game, int depth, size_t edge_limit,
+      std::vector<RevealVerifiedFrontierEdge> &frontier_edges) {
+    const DepthStateKey key{state_key(game), depth};
+    const auto memo_it = memo_.find(key);
+    if (memo_it == memo_.end() ||
+        memo_it->second.status != ForceStatus::PROVEN) {
+      throw ProofDagBuildAborted(
+          "frontier references an unmaterialized proof state");
+    }
+    const Entry entry = memo_it->second;
+    const int current_player = game.current_player();
+    const bool preserve_child_depth = can_resolve_final_round(game);
+    std::vector<OrderedAction> actions = proof_ordered_actions(game);
+
+    if (current_player == attacker_ && entry.has_action) {
+      actions = forced_attacker_actions(game, actions, depth, true);
+      actions.erase(std::remove_if(actions.begin(), actions.end(),
+                                   [&](const OrderedAction &ordered) {
+                                     return ordered.code != entry.action_code;
+                                   }),
+                    actions.end());
+    }
+
+    bool expanded = false;
+    for (const OrderedAction &ordered : actions) {
+      std::vector<RevealVerifiedFrontierEdge> action_edges;
+      if (edge_limit && frontier_edges.size() >= edge_limit)
+        throw ProofDagBuildAborted("frontier edge limit exceeded");
+      const size_t remaining_limit =
+          edge_limit ? edge_limit - frontier_edges.size() : 0;
+      const bool action_proven =
+          collect_frontier_action(game, ordered, depth, preserve_child_depth,
+                                  remaining_limit, action_edges);
+      if (current_player == attacker_ && !action_proven)
+        continue;
+      if (!action_proven)
+        throw ProofDagBuildAborted(
+            "frontier reveal refinement failed for a defender response");
+      if (edge_limit &&
+          frontier_edges.size() + action_edges.size() > edge_limit) {
+        throw ProofDagBuildAborted("frontier edge limit exceeded");
+      }
+      frontier_edges.insert(frontier_edges.end(),
+                            std::make_move_iterator(action_edges.begin()),
+                            std::make_move_iterator(action_edges.end()));
+      expanded = true;
+      if (current_player == attacker_)
+        break;
+    }
+    if (!expanded)
+      throw ProofDagBuildAborted(
+          "frontier could not select a replayable proven action");
   }
 
   RevealVerifiedProofDag build_proof_dag() {
@@ -1526,7 +1905,8 @@ private:
     return node;
   }
 
-  std::vector<RevealVerifiedLineEntry> principal_line() const {
+  std::vector<RevealVerifiedLineEntry>
+  principal_line(bool exact_refinement = false) const {
     Game game = root_.clone_light();
     std::vector<RevealVerifiedLineEntry> line;
     std::unordered_set<DepthStateKey, DepthStateKeyHash> seen;
@@ -1534,20 +1914,28 @@ private:
     for (int ply = 0; ply < 200 && depth >= 0; ++ply) {
       if (game.is_game_over())
         break;
-      const DepthStateKey key{state_key(game), depth};
+      const DepthStateKey key{state_key(game, exact_refinement), depth};
       if (seen.find(key) != seen.end())
         break;
       seen.insert(key);
-      auto it = memo_.find(key);
-      if (it == memo_.end() || !it->second.has_action || !it->second.replayable)
+      const auto &memo = exact_refinement ? exact_memo_ : memo_;
+      auto it = memo.find(key);
+      if (it == memo.end() || !it->second.has_action || !it->second.replayable)
         break;
       const int current_player = game.current_player();
       const Action action = Action::unpack(it->second.action_code);
       const int reveal_card = it->second.reveal_card;
-      const bool applied =
-          action.type == RESERVE_DECK && reveal_card >= 0
-              ? apply_deck_reserve_outcome(game, action, reveal_card)
-              : game.apply_action_code_trusted(it->second.action_code, false);
+      bool applied = false;
+      if (action.type == RESERVE_DECK && reveal_card >= 0) {
+        applied = apply_deck_reserve_outcome(game, action, reveal_card);
+      } else if (reveal_card >= 0 && visible_refill_level(action) >= 0) {
+        const int level = visible_refill_level(action);
+        const int slot = visible_refill_slot(game.board, action);
+        applied =
+            apply_visible_refill_outcome(game, action, level, slot, reveal_card);
+      } else {
+        applied = game.apply_action_code_trusted(it->second.action_code, false);
+      }
       if (!applied)
         break;
       line.push_back(RevealVerifiedLineEntry{
@@ -1566,13 +1954,16 @@ RevealVerifiedSolver::RevealVerifiedSolver(
     std::vector<uint64_t> preferred_attacker_actions, bool include_proof_dag,
     size_t proof_dag_node_limit, size_t proof_dag_edge_limit,
     uint64_t required_root_action, bool strict_preferred_attacker_actions,
-    size_t strict_preferred_attacker_prefix)
+    size_t strict_preferred_attacker_prefix, bool exhaustive_attacker_actions,
+    bool exact_reveal_search,
+    std::shared_ptr<RevealSearchCancellationToken> cancellation_token)
     : impl_(std::make_unique<Impl>(
           attacker, depth, max_nodes, time_limit_seconds,
           std::move(preferred_attacker_actions), include_proof_dag,
           proof_dag_node_limit, proof_dag_edge_limit, required_root_action,
           strict_preferred_attacker_actions,
-          strict_preferred_attacker_prefix)) {}
+          strict_preferred_attacker_prefix, exhaustive_attacker_actions,
+          exact_reveal_search, std::move(cancellation_token))) {}
 
 RevealVerifiedSolver::~RevealVerifiedSolver() = default;
 
@@ -1594,4 +1985,36 @@ RevealVerifiedSolver::operator=(RevealVerifiedSolver &&) noexcept = default;
 
 RevealVerifiedSearchResult RevealVerifiedSolver::solve(const Game &input) {
   return impl_->solve(input);
+}
+
+RevealVerifiedSearchResult RevealVerifiedSolver::solve_reusing_exact_cache(
+    const Game &input, int depth, uint64_t max_nodes,
+    double time_limit_seconds,
+    std::vector<uint64_t> preferred_attacker_actions,
+    std::shared_ptr<RevealSearchCancellationToken> cancellation_token,
+    size_t max_cache_states) {
+  return impl_->solve_reusing_exact_cache(
+      input, depth, max_nodes, time_limit_seconds,
+      std::move(preferred_attacker_actions), std::move(cancellation_token),
+      max_cache_states);
+}
+
+void RevealVerifiedSolver::clear_exact_cache() { impl_->clear_exact_cache(); }
+
+void RevealVerifiedSolver::trim_exact_cache(size_t max_cache_states) {
+  impl_->trim_exact_cache(max_cache_states);
+}
+
+size_t RevealVerifiedSolver::exact_cache_size() const noexcept {
+  return impl_->exact_cache_size();
+}
+
+RevealVerifiedFrontierResult
+RevealVerifiedSolver::split_root(const Game &input, size_t edge_limit) {
+  return impl_->split_root(input, edge_limit);
+}
+
+RevealVerifiedFrontierResult
+RevealVerifiedSolver::expand_frontier(const Game &input, size_t edge_limit) {
+  return impl_->expand_frontier(input, edge_limit);
 }

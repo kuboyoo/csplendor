@@ -111,6 +111,23 @@ void test_unchecked_gateway_invalidates_before_hot_path_mutation() {
   check(board.hash() != before);
 }
 
+void test_set_deck_search_hash_is_canonical_for_reveal_search() {
+  Board board;
+  board.init(11);
+  const uint64_t search_hash = board.compute_set_deck_search_hash();
+  const uint64_t full_hash = board.compute_hash_uncached();
+
+  std::swap(board.decks[0][0], board.decks[0][1]);
+  check(board.compute_hash_uncached() != full_hash);
+  check(board.compute_set_deck_search_hash() == search_hash);
+
+  ++board.turn;
+  check(board.compute_set_deck_search_hash() == search_hash);
+
+  ++board.bank[0];
+  check(board.compute_set_deck_search_hash() != search_hash);
+}
+
 void test_game_transitions_stay_reachable() {
   for (uint64_t seed = 0; seed < 32; ++seed) {
     Game game(seed);
@@ -131,6 +148,7 @@ int main() {
   test_editor_failure_is_atomic_for_state_and_cache();
   test_valid_editor_commit_normalizes_and_invalidates();
   test_unchecked_gateway_invalidates_before_hot_path_mutation();
+  test_set_deck_search_hash_is_canonical_for_reveal_search();
   test_game_transitions_stay_reachable();
   return 0;
 }

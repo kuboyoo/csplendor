@@ -59,6 +59,7 @@ class GenerationStats:
     visible_prefiltered: int = 0
     uniqueness_filtered: int = 0
     uniqueness_checks: int = 0
+    uniqueness_depth_checks: int = 0
     mates: int = 0
     saved: int = 0
     duplicates: int = 0
@@ -74,6 +75,7 @@ class GenerationStats:
     ranked_candidates: int = 0
     visible_uniqueness_filtered: int = 0
     dag_builds: int = 0
+    saved_without_complete_dag: int = 0
 
 
 @dataclass(frozen=True)
@@ -498,17 +500,23 @@ def find_verified_winning_actions(
     *,
     attacker: int,
     depth: int,
+    max_depth: Optional[int] = None,
     max_winning_actions: int,
     node_limit: int,
     time_limit: float,
+    jobs: int = 1,
+    positive_time_limit: float = 0.0,
 ) -> dict[str, object]:
     return _puzzle_validation.find_verified_winning_actions(
         game,
         attacker=attacker,
         depth=depth,
+        max_depth=max_depth,
         max_winning_actions=max_winning_actions,
         node_limit=node_limit,
         time_limit=time_limit,
+        jobs=jobs,
+        positive_time_limit=positive_time_limit,
     )
 
 
@@ -541,6 +549,7 @@ def find_countermate_blunders(
     action_limit: int,
     node_limit: int,
     time_limit: float,
+    jobs: int = 1,
     progress: Optional[ProgressReporter] = None,
     attempt: Optional[int] = None,
 ) -> tuple[list[dict[str, object]], int]:
@@ -551,6 +560,7 @@ def find_countermate_blunders(
         action_limit=action_limit,
         node_limit=node_limit,
         time_limit=time_limit,
+        jobs=jobs,
         solve_reveal_verified_mate=solve_reveal_verified_mate,
         progress=progress,
         attempt=attempt,
@@ -566,6 +576,9 @@ def save_puzzle(
     attempt: int,
     quality: Optional[dict[str, object]] = None,
     strategy_dag_format: str = "compact",
+    strategy_dag_requested: Optional[bool] = None,
+    strategy_dag_omitted_reason: Optional[str] = None,
+    require_complete_dag: bool = False,
 ) -> Optional[Path]:
     return _persist_puzzle(
         output_dir,
@@ -575,6 +588,9 @@ def save_puzzle(
         attempt=attempt,
         quality=quality,
         strategy_dag_format=strategy_dag_format,
+        strategy_dag_requested=strategy_dag_requested,
+        strategy_dag_omitted_reason=strategy_dag_omitted_reason,
+        require_complete_dag=require_complete_dag,
     )
 
 
@@ -681,6 +697,7 @@ def try_save_candidate(
             time_limit=args.time_limit,
             include_proof=True,
             allow_deck_reserve=True,
+            jobs=int(_arg(args, "mate_jobs", 1)),
         ),
         include_proof_dag=False,
     )
@@ -701,17 +718,35 @@ def try_save_candidate(
         stats.filtered += 1
         report_rejected_position(progress, game, attempt=attempt, reason="depth_filter", depth=depth)
         return True
-    uniqueness = find_verified_winning_actions(
-        game,
-        attacker=int(game.board.current_player),
-        depth=depth,
-        max_winning_actions=int(_arg(args, "max_winning_actions", 1)),
-        node_limit=int(_arg(args, "uniqueness_node_limit", 0)),
-        time_limit=float(_arg(args, "uniqueness_time_limit", 5.0)),
-    )
+    require_unique_solution = bool(_arg(args, "require_unique_solution", True))
+    if require_unique_solution:
+        uniqueness = find_verified_winning_actions(
+            game,
+            attacker=int(game.board.current_player),
+            depth=depth,
+            max_depth=(
+                int(_arg(args, "uniqueness_max_depth", 0)) or depth
+            ),
+            max_winning_actions=int(_arg(args, "max_winning_actions", 1)),
+            node_limit=int(_arg(args, "uniqueness_node_limit", 0)),
+            time_limit=float(_arg(args, "uniqueness_time_limit", 5.0)),
+            jobs=int(_arg(args, "uniqueness_jobs", 1)),
+            positive_time_limit=float(
+                _arg(args, "uniqueness_positive_time_limit", 2.0)
+            ),
+        )
+    else:
+        uniqueness = {
+            "checks": 0,
+            "winning_actions": [],
+            "unknown_actions": [],
+            "complete": False,
+            "truncated": False,
+        }
     stats.uniqueness_checks += int(uniqueness["checks"])
+    stats.uniqueness_depth_checks += int(uniqueness.get("depth_checks", 0))
     winning_actions = list(uniqueness["winning_actions"])
-    if bool(_arg(args, "require_unique_solution", True)) and (
+    if require_unique_solution and (
         not bool(uniqueness["complete"])
         or len(winning_actions) != int(_arg(args, "max_winning_actions", 1))
     ):
@@ -728,19 +763,24 @@ def try_save_candidate(
         )
         return True
 
-    blunders, checks = find_countermate_blunders(
-        game,
-        result,
-        min_losing_alternatives=args.min_losing_alternatives,
-        action_limit=args.countermate_action_limit,
-        node_limit=args.countermate_node_limit,
-        time_limit=args.countermate_time_limit,
-        progress=progress,
-        attempt=attempt,
-    )
+    min_losing_alternatives = int(_arg(args, "min_losing_alternatives", 0))
+    if min_losing_alternatives > 0:
+        blunders, checks = find_countermate_blunders(
+            game,
+            result,
+            min_losing_alternatives=min_losing_alternatives,
+            action_limit=int(_arg(args, "countermate_action_limit", 12)),
+            node_limit=int(_arg(args, "countermate_node_limit", 0)),
+            time_limit=float(_arg(args, "countermate_time_limit", 5.0)),
+            jobs=int(_arg(args, "mate_jobs", 1)),
+            progress=progress,
+            attempt=attempt,
+        )
+    else:
+        blunders, checks = [], 0
     stats.countermate_checks += checks
     stats.countermates += len(blunders)
-    if len(blunders) < args.min_losing_alternatives:
+    if len(blunders) < min_losing_alternatives:
         stats.filtered += 1
         report_rejected_position(
             progress,
@@ -748,45 +788,85 @@ def try_save_candidate(
             attempt=attempt,
             reason="insufficient_countermate_blunders",
             found=len(blunders),
-            required=args.min_losing_alternatives,
+            required=min_losing_alternatives,
         )
         return True
 
-    progress.emit("proof_dag", force=True, attempt=attempt, depth=depth)
-    stats.dag_builds += 1
-    dag_result = solve_reveal_verified_mate(
-        game,
-        attacker=int(game.board.current_player),
-        options=SolverOptions(
-            max_nodes=args.node_limit,
-            time_limit=args.time_limit,
-            include_proof=True,
-            allow_deck_reserve=True,
-        ),
-        include_proof_dag=True,
-        proof_dag_node_limit=args.proof_dag_node_limit,
-        proof_dag_edge_limit=args.proof_dag_edge_limit,
-        proof_dag_format=str(_arg(args, "strategy_dag_format", "compact")),
-    )
-    if dag_result.status != MATE or dag_result.proof_tree is None:
-        stats.unknown += 1
-        report_rejected_position(progress, game, attempt=attempt, reason="dag_search_no_mate")
-        return True
-    dag = dag_result.proof_tree["verification"].get("proof_dag", {})
-    if not bool(dag.get("complete")):
-        stats.incomplete_dags += 1
-        report_rejected_position(progress, game, attempt=attempt, reason="incomplete_dag")
-        return True
+    build_strategy_dag = bool(_arg(args, "build_strategy_dag", True))
+    require_complete_dag = bool(_arg(args, "require_complete_dag", False))
+    result_to_save = result
+    dag: dict[str, object] = {}
+    dag_complete = False
+    dag_validated = False
+    dag_omitted_reason: Optional[str] = "not_requested"
+    if build_strategy_dag:
+        progress.emit("proof_dag", force=True, attempt=attempt, depth=depth)
+        stats.dag_builds += 1
+        dag_result = solve_reveal_verified_mate(
+            game,
+            attacker=int(game.board.current_player),
+            options=SolverOptions(
+                max_nodes=args.node_limit,
+                time_limit=args.time_limit,
+                include_proof=True,
+                allow_deck_reserve=True,
+                jobs=int(_arg(args, "mate_jobs", 1)),
+            ),
+            include_proof_dag=True,
+            proof_dag_node_limit=int(_arg(args, "proof_dag_node_limit", 100000)),
+            proof_dag_edge_limit=int(_arg(args, "proof_dag_edge_limit", 500000)),
+            proof_dag_format=str(_arg(args, "strategy_dag_format", "compact")),
+        )
+        dag_omitted_reason = "dag_search_no_mate"
+        if dag_result.status == MATE and dag_result.proof_tree is not None:
+            result_to_save = dag_result
+            dag_verification = dag_result.proof_tree.get("verification")
+            raw_dag = (
+                dag_verification.get("proof_dag")
+                if isinstance(dag_verification, dict)
+                else None
+            )
+            if isinstance(raw_dag, dict):
+                dag = raw_dag
+                dag_complete = bool(dag.get("complete"))
+                dag_validated = bool(dag.get("validated"))
+                raw_reason = dag.get("omitted_reason")
+                dag_omitted_reason = None if dag_complete else str(
+                    raw_reason or "incomplete"
+                )
+            else:
+                dag_omitted_reason = "proof_dag_not_returned"
+
+        if not dag_complete:
+            stats.incomplete_dags += 1
+            if require_complete_dag:
+                report_rejected_position(
+                    progress,
+                    game,
+                    attempt=attempt,
+                    reason="incomplete_dag",
+                    omitted_reason=dag_omitted_reason,
+                )
+                return True
+            progress.emit(
+                "proof_dag_omitted",
+                force=True,
+                attempt=attempt,
+                reason=dag_omitted_reason,
+            )
 
     scores = [int(score) for score in game.scores]
     defender = 1 - int(game.board.current_player)
     puzzle_dir = save_puzzle(
         output_dir,
         game,
-        dag_result,
+        result_to_save,
         game_seed=game_seed,
         attempt=attempt,
         strategy_dag_format=str(_arg(args, "strategy_dag_format", "compact")),
+        strategy_dag_requested=build_strategy_dag,
+        strategy_dag_omitted_reason=dag_omitted_reason,
+        require_complete_dag=require_complete_dag,
         quality={
             "sample_source": sample_source,
             "sample_ply": sample_ply,
@@ -798,12 +878,36 @@ def try_save_candidate(
             "threat_scores": [summary.score for summary in summaries],
             "verified_winning_actions": winning_actions,
             "verified_winning_action_count": len(winning_actions),
+            "verified_winning_action_depths": list(
+                uniqueness.get("winning_action_depths", [])
+            ),
+            "uniqueness_required": require_unique_solution,
             "uniqueness_complete": bool(uniqueness["complete"]),
             "uniqueness_checks": int(uniqueness["checks"]),
+            "uniqueness_depth_checks": int(uniqueness.get("depth_checks", 0)),
+            "uniqueness_jobs": int(uniqueness.get("jobs", 1)),
+            "mate_jobs": int(_arg(args, "mate_jobs", 1)),
+            "uniqueness_positive_time_limit": float(
+                uniqueness.get("positive_time_limit", 0.0)
+            ),
+            "uniqueness_min_depth": int(uniqueness.get("min_depth", depth)),
+            "uniqueness_max_depth": int(uniqueness.get("max_depth", depth)),
+            "uniqueness_action_results": list(
+                uniqueness.get("action_results", [])
+            ),
             "countermate_blunders": blunders,
             "countermate_blunder_count": len(blunders),
-            "strategy_dag_nodes": strategy_dag_node_count(dag),
-            "max_defender_responses": strategy_dag_max_children(dag, player=defender),
+            "countermate_required": min_losing_alternatives,
+            "strategy_dag_requested": build_strategy_dag,
+            "strategy_dag_complete": dag_complete,
+            "strategy_dag_validated": dag_validated,
+            "strategy_dag_omitted_reason": dag_omitted_reason,
+            "strategy_dag_nodes": strategy_dag_node_count(dag) if dag_complete else 0,
+            "max_defender_responses": (
+                strategy_dag_max_children(dag, player=defender)
+                if dag_complete
+                else 0
+            ),
         },
     )
     if puzzle_dir is None:
@@ -812,6 +916,8 @@ def try_save_candidate(
         return True
 
     stats.saved += 1
+    if not dag_complete:
+        stats.saved_without_complete_dag += 1
     print(f"[saved {stats.saved}/{args.count}] {puzzle_dir}", flush=True)
     return True
 
@@ -829,6 +935,10 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
         max_attempts=args.max_attempts,
         genbu_simulations=args.genbu_simulations,
         genbu_time_limit=args.genbu_time_limit,
+        build_strategy_dag=args.build_strategy_dag,
+        require_complete_dag=args.require_complete_dag,
+        min_losing_alternatives=args.min_losing_alternatives,
+        mate_jobs=args.mate_jobs,
     )
     players = create_genbu_players(
         Path(args.genbu_weights),
@@ -900,7 +1010,7 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate reveal-verified Splendor mate puzzles and compact complete response DAGs."
+        description="Generate reveal-verified Splendor mate puzzles and optional response DAGs."
     )
     parser.add_argument("--output-dir", default="generated/mate_puzzles")
     parser.add_argument("--count", type=int, default=100, help="number of puzzles to save")
@@ -945,23 +1055,80 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--visible-uniqueness-action-limit", type=int, default=16)
     parser.add_argument("--node-limit", type=int, default=0, help="0 disables the search node limit")
     parser.add_argument("--time-limit", type=float, default=30.0, help="seconds per candidate")
+    parser.add_argument(
+        "--mate-jobs",
+        type=int,
+        default=1,
+        help="CPU workers for candidate and countermate proof search; 0 uses CPU count",
+    )
     parser.add_argument("--proof-dag-node-limit", type=int, default=100000)
     parser.add_argument("--proof-dag-edge-limit", type=int, default=500000)
+    parser.add_argument(
+        "--no-strategy-dag",
+        dest="build_strategy_dag",
+        action="store_false",
+        help="skip the expensive response-DAG build and save the verified principal line only",
+    )
+    parser.set_defaults(build_strategy_dag=True)
+    parser.add_argument(
+        "--require-complete-dag",
+        action="store_true",
+        help="reject a proven mate unless a complete validated response DAG is also built",
+    )
     parser.add_argument(
         "--strategy-dag-format",
         choices=("compact", "v1", "both"),
         default="compact",
         help="strategy DAG encoding saved in strategy.json",
     )
-    parser.add_argument("--min-losing-alternatives", type=int, default=1)
+    parser.add_argument(
+        "--min-losing-alternatives",
+        type=int,
+        default=0,
+        help="required wrong moves allowing an opponent mate; 0 disables this optional quality filter",
+    )
     parser.add_argument("--countermate-action-limit", type=int, default=12, help="0 checks all wrong moves")
     parser.add_argument("--countermate-node-limit", type=int, default=0, help="0 disables the search node limit")
     parser.add_argument("--countermate-time-limit", type=float, default=5.0, help="seconds per wrong move")
     parser.add_argument("--no-require-unique-solution", dest="require_unique_solution", action="store_false")
     parser.set_defaults(require_unique_solution=True)
     parser.add_argument("--max-winning-actions", type=int, default=1)
-    parser.add_argument("--uniqueness-node-limit", type=int, default=0, help="0 disables the per-action node limit")
-    parser.add_argument("--uniqueness-time-limit", type=float, default=5.0, help="seconds per initial action")
+    parser.add_argument(
+        "--uniqueness-max-depth",
+        type=int,
+        default=0,
+        help=(
+            "verify every initial action from the puzzle depth through this depth; "
+            "0 checks only the puzzle depth"
+        ),
+    )
+    parser.add_argument(
+        "--uniqueness-node-limit",
+        type=int,
+        default=0,
+        help="cumulative node limit per initial action; 0 disables the limit",
+    )
+    parser.add_argument(
+        "--uniqueness-time-limit",
+        type=float,
+        default=5.0,
+        help="cumulative seconds per initial action across all uniqueness depths",
+    )
+    parser.add_argument(
+        "--uniqueness-jobs",
+        type=int,
+        default=1,
+        help="initial-action verification workers; 0 uses CPU count",
+    )
+    parser.add_argument(
+        "--uniqueness-positive-time-limit",
+        type=float,
+        default=2.0,
+        help=(
+            "seconds per initial action for a fast sound mate-proof pass "
+            "before exhaustive uniqueness refutation; 0 disables the pass"
+        ),
+    )
     parser.add_argument("--progress-interval", type=int, default=100)
     parser.add_argument("--progress-seconds", type=float, default=10.0, help="seconds between in-attempt progress messages; 0 disables periodic messages")
     return parser
@@ -1015,10 +1182,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         or args.visible_uniqueness_action_limit < 0
     ):
         raise ValueError("visible prefilter limits must be non-negative")
-    if args.node_limit < 0 or args.time_limit < 0:
+    if args.node_limit < 0 or args.time_limit < 0 or args.mate_jobs < 0:
         raise ValueError("search limits must be non-negative")
     if args.proof_dag_node_limit < 0 or args.proof_dag_edge_limit < 0:
         raise ValueError("proof DAG limits must be non-negative")
+    if args.require_complete_dag and not args.build_strategy_dag:
+        raise ValueError("--require-complete-dag cannot be used with --no-strategy-dag")
     if (
         args.min_losing_alternatives < 0
         or args.countermate_action_limit < 0
@@ -1028,8 +1197,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise ValueError("countermate limits must be non-negative")
     if (
         args.max_winning_actions <= 0
+        or args.uniqueness_max_depth < 0
         or args.uniqueness_node_limit < 0
         or args.uniqueness_time_limit < 0
+        or args.uniqueness_jobs < 0
+        or args.uniqueness_positive_time_limit < 0
     ):
         raise ValueError("uniqueness limits must be non-negative")
     stats = generate_puzzles(args)

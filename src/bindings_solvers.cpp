@@ -254,6 +254,109 @@ py::dict proof_dag_to_py_compact(const RevealVerifiedProofDag &dag) {
 namespace csplendor::python {
 
 void bind_solvers(py::module_ &m) {
+  using csplendor::solver_internal::RevealSearchCancellationToken;
+  py::class_<RevealSearchCancellationToken,
+             std::shared_ptr<RevealSearchCancellationToken>>(
+      m, "MateSearchCancellationToken")
+      .def(py::init<std::shared_ptr<RevealSearchCancellationToken>>(),
+           py::arg("parent") = nullptr)
+      .def("request_cancel",
+           &RevealSearchCancellationToken::request_cancel)
+      .def("reset", &RevealSearchCancellationToken::reset)
+      .def_property_readonly("is_cancelled",
+                             &RevealSearchCancellationToken::is_cancelled);
+
+  py::class_<RevealVerifiedSolver>(m, "NativeMateSearchSession")
+      .def(
+          py::init([](int attacker) {
+            if (attacker < 0 || attacker >= Board::NUM_PLAYERS)
+              throw std::invalid_argument("attacker must be 0 or 1");
+            return RevealVerifiedSolver(attacker, 0, 0, 0.0, {}, false, 0, 0,
+                                        UINT64_MAX, false, 0, true, true);
+          }),
+          py::arg("attacker"))
+      .def(
+          "search",
+          [](RevealVerifiedSolver &session, const Game &game, int depth,
+             uint64_t max_nodes, double time_limit_seconds,
+             const std::vector<uint64_t> &preferred_attacker_actions,
+             const std::shared_ptr<RevealSearchCancellationToken>
+                 &cancellation_token,
+             size_t max_cache_states) {
+            if (depth < 0)
+              throw std::invalid_argument("depth must be non-negative");
+            Game input_snapshot = game.clone_light();
+            RevealVerifiedSearchResult result;
+            {
+              py::gil_scoped_release release;
+              result = session.solve_reusing_exact_cache(
+                  input_snapshot, depth, max_nodes, time_limit_seconds,
+                  preferred_attacker_actions, cancellation_token,
+                  max_cache_states);
+            }
+
+            py::dict stats;
+            stats["nodes"] = result.stats.nodes;
+            stats["memo_hits"] = result.stats.memo_hits;
+            stats["persistent_memo_hits"] =
+                result.stats.persistent_memo_hits;
+            stats["iterative_order_hits"] =
+                result.stats.iterative_order_hits;
+            stats["terminal_nodes"] = result.stats.terminal_nodes;
+            stats["legal_moves"] = result.stats.legal_moves;
+            stats["reveal_branches"] = result.stats.reveal_branches;
+            stats["final_round_reveal_collapses"] =
+                result.stats.final_round_reveal_collapses;
+            stats["final_round_score_prunes"] =
+                result.stats.final_round_score_prunes;
+            stats["final_round_direct_resolutions"] =
+                result.stats.final_round_direct_resolutions;
+            stats["oracle_purchase_actions"] =
+                result.stats.oracle_purchase_actions;
+            stats["oracle_reserve_actions"] =
+                result.stats.oracle_reserve_actions;
+            stats["deck_reserve_candidates"] =
+                result.stats.deck_reserve_candidates;
+            stats["deck_reserve_branches"] =
+                result.stats.deck_reserve_branches;
+            stats["elapsed_ms"] = result.stats.elapsed_ms;
+
+            py::list line;
+            for (const RevealVerifiedLineEntry &entry : result.line) {
+              py::dict item;
+              item["action_code"] = entry.action_code;
+              item["reveal_card"] = entry.reveal_card < 0
+                                          ? py::none()
+                                          : py::cast(entry.reveal_card);
+              item["action_count"] = entry.action_count;
+              line.append(item);
+            }
+
+            py::dict payload;
+            payload["proven"] = result.proven;
+            payload["attacker"] = result.attacker;
+            payload["depth"] = result.depth;
+            payload["reason"] = result.reason;
+            payload["unknown_reason"] = result.unknown_reason.empty()
+                                            ? py::none()
+                                            : py::cast(result.unknown_reason);
+            payload["memoized_states"] = result.memoized_states;
+            payload["stats"] = stats;
+            payload["line"] = line;
+            return payload;
+          },
+          py::arg("game"), py::arg("depth"), py::arg("max_nodes") = 0,
+          py::arg("time_limit_seconds") = 0.0,
+          py::arg("preferred_attacker_actions") =
+              std::vector<uint64_t>{},
+          py::arg("cancellation_token") = nullptr,
+          py::arg("max_cache_states") = 0)
+      .def("clear", &RevealVerifiedSolver::clear_exact_cache)
+      .def("trim", &RevealVerifiedSolver::trim_exact_cache,
+           py::arg("max_cache_states"))
+      .def_property_readonly("memoized_states",
+                             &RevealVerifiedSolver::exact_cache_size);
+
   m.def(
       "solve_visible_only_winner_cpp",
       [](const Game &game, uint64_t max_nodes, double time_limit_seconds) {
@@ -304,6 +407,157 @@ void bind_solvers(py::module_ &m) {
       py::arg("time_limit_seconds") = 0.0);
 
   m.def(
+      "solve_reveal_verified_frontier_cpp",
+      [](const Game &game, int attacker, int depth, uint64_t max_nodes,
+         double time_limit_seconds, size_t edge_limit) {
+        if (attacker < 0 || attacker >= Board::NUM_PLAYERS)
+          throw std::invalid_argument("attacker must be 0 or 1");
+        if (depth < 0)
+          throw std::invalid_argument("depth must be non-negative");
+        Game input_snapshot = game.clone_light();
+        RevealVerifiedFrontierResult result;
+        {
+          py::gil_scoped_release release;
+          result = RevealVerifiedSolver(attacker, depth, max_nodes,
+                                        time_limit_seconds)
+                       .expand_frontier(input_snapshot, edge_limit);
+        }
+
+        py::dict stats;
+        stats["nodes"] = result.stats.nodes;
+        stats["memo_hits"] = result.stats.memo_hits;
+        stats["terminal_nodes"] = result.stats.terminal_nodes;
+        stats["legal_moves"] = result.stats.legal_moves;
+        stats["reveal_branches"] = result.stats.reveal_branches;
+        stats["final_round_reveal_collapses"] =
+            result.stats.final_round_reveal_collapses;
+        stats["final_round_score_prunes"] =
+            result.stats.final_round_score_prunes;
+        stats["final_round_direct_resolutions"] =
+            result.stats.final_round_direct_resolutions;
+        stats["oracle_purchase_actions"] = result.stats.oracle_purchase_actions;
+        stats["oracle_reserve_actions"] = result.stats.oracle_reserve_actions;
+        stats["deck_reserve_candidates"] = result.stats.deck_reserve_candidates;
+        stats["deck_reserve_branches"] = result.stats.deck_reserve_branches;
+        stats["elapsed_ms"] = result.stats.elapsed_ms;
+
+        py::list edges;
+        for (const RevealVerifiedFrontierEdge &edge : result.edges) {
+          py::dict item;
+          item["action_code"] = edge.action_code;
+          item["reveal_card"] =
+              edge.reveal_card < 0 ? py::none() : py::cast(edge.reveal_card);
+          item["child_depth"] = edge.child_depth;
+          item["child_game"] =
+              py::cast(edge.child, py::return_value_policy::copy);
+          edges.append(item);
+        }
+
+        py::dict payload;
+        payload["proven"] = result.proven;
+        payload["complete"] = result.complete;
+        payload["attacker"] = result.attacker;
+        payload["depth"] = result.depth;
+        payload["player"] = result.player;
+        payload["winner"] = result.winner;
+        payload["waiting_noble"] = result.waiting_noble;
+        payload["kind"] = result.kind;
+        payload["resolution"] = result.resolution.empty()
+                                    ? py::none()
+                                    : py::cast(result.resolution);
+        payload["reason"] = result.reason;
+        payload["unknown_reason"] = result.unknown_reason.empty()
+                                        ? py::none()
+                                        : py::cast(result.unknown_reason);
+        payload["memoized_states"] = result.memoized_states;
+        payload["stats"] = stats;
+        payload["edges"] = edges;
+        return payload;
+      },
+      py::arg("game"), py::arg("attacker"), py::arg("depth"),
+      py::arg("max_nodes") = 0, py::arg("time_limit_seconds") = 0.0,
+      py::arg("edge_limit") = 250000);
+
+  m.def(
+      "solve_reveal_verified_root_split_cpp",
+      [](const Game &game, int attacker, int depth,
+         uint64_t required_root_action, bool exhaustive_attacker_actions,
+         size_t edge_limit,
+         const std::shared_ptr<RevealSearchCancellationToken>
+             &cancellation_token) {
+        if (attacker < 0 || attacker >= Board::NUM_PLAYERS)
+          throw std::invalid_argument("attacker must be 0 or 1");
+        if (depth < 0)
+          throw std::invalid_argument("depth must be non-negative");
+        Game input_snapshot = game.clone_light();
+        RevealVerifiedFrontierResult result;
+        {
+          py::gil_scoped_release release;
+          result =
+              RevealVerifiedSolver(
+                  attacker, depth, 0, 0.0, {}, false, 0, 0,
+                  required_root_action, false, 0,
+                  exhaustive_attacker_actions, true, cancellation_token)
+                  .split_root(input_snapshot, edge_limit);
+        }
+
+        py::dict stats;
+        stats["nodes"] = result.stats.nodes;
+        stats["memo_hits"] = result.stats.memo_hits;
+        stats["terminal_nodes"] = result.stats.terminal_nodes;
+        stats["legal_moves"] = result.stats.legal_moves;
+        stats["reveal_branches"] = result.stats.reveal_branches;
+        stats["final_round_reveal_collapses"] =
+            result.stats.final_round_reveal_collapses;
+        stats["final_round_score_prunes"] =
+            result.stats.final_round_score_prunes;
+        stats["final_round_direct_resolutions"] =
+            result.stats.final_round_direct_resolutions;
+        stats["oracle_purchase_actions"] = result.stats.oracle_purchase_actions;
+        stats["oracle_reserve_actions"] = result.stats.oracle_reserve_actions;
+        stats["deck_reserve_candidates"] =
+            result.stats.deck_reserve_candidates;
+        stats["deck_reserve_branches"] = result.stats.deck_reserve_branches;
+        stats["elapsed_ms"] = result.stats.elapsed_ms;
+
+        py::list edges;
+        for (const RevealVerifiedFrontierEdge &edge : result.edges) {
+          py::dict item;
+          item["action_code"] = edge.action_code;
+          item["reveal_card"] =
+              edge.reveal_card < 0 ? py::none() : py::cast(edge.reveal_card);
+          item["child_depth"] = edge.child_depth;
+          item["child_game"] =
+              py::cast(edge.child, py::return_value_policy::copy);
+          edges.append(item);
+        }
+
+        py::dict payload;
+        payload["complete"] = result.complete;
+        payload["attacker"] = result.attacker;
+        payload["depth"] = result.depth;
+        payload["player"] = result.player;
+        payload["winner"] = result.winner;
+        payload["waiting_noble"] = result.waiting_noble;
+        payload["kind"] = result.kind;
+        payload["resolution"] = result.resolution.empty()
+                                    ? py::none()
+                                    : py::cast(result.resolution);
+        payload["reason"] = result.reason;
+        payload["unknown_reason"] = result.unknown_reason.empty()
+                                        ? py::none()
+                                        : py::cast(result.unknown_reason);
+        payload["stats"] = stats;
+        payload["edges"] = edges;
+        return payload;
+      },
+      py::arg("game"), py::arg("attacker"), py::arg("depth"),
+      py::arg("required_root_action") = UINT64_MAX,
+      py::arg("exhaustive_attacker_actions") = true,
+      py::arg("edge_limit") = 250000,
+      py::arg("cancellation_token") = nullptr);
+
+  m.def(
       "solve_reveal_verified_mate_cpp",
       [](const Game &game, int attacker, int depth, uint64_t max_nodes,
          double time_limit_seconds,
@@ -312,7 +566,10 @@ void bind_solvers(py::module_ &m) {
          size_t proof_dag_edge_limit, uint64_t required_root_action,
          bool strict_preferred_attacker_actions,
          size_t strict_preferred_attacker_prefix,
-         const std::string &proof_dag_format) {
+         const std::string &proof_dag_format,
+         bool exhaustive_attacker_actions, bool exact_reveal_search,
+         const std::shared_ptr<RevealSearchCancellationToken>
+             &cancellation_token) {
         if (proof_dag_format != "v1" && proof_dag_format != "compact") {
           throw std::invalid_argument(
               "proof_dag_format must be 'v1' or 'compact'");
@@ -332,7 +589,10 @@ void bind_solvers(py::module_ &m) {
                                         proof_dag_edge_limit,
                                         required_root_action,
                                         strict_preferred_attacker_actions,
-                                        strict_preferred_attacker_prefix)
+                                        strict_preferred_attacker_prefix,
+                                        exhaustive_attacker_actions,
+                                        exact_reveal_search,
+                                        cancellation_token)
                        .solve(input_snapshot);
         }
 
@@ -393,7 +653,10 @@ void bind_solvers(py::module_ &m) {
       py::arg("required_root_action") = UINT64_MAX,
       py::arg("strict_preferred_attacker_actions") = false,
       py::arg("strict_preferred_attacker_prefix") = 0,
-      py::arg("proof_dag_format") = "v1");
+      py::arg("proof_dag_format") = "v1",
+      py::arg("exhaustive_attacker_actions") = false,
+      py::arg("exact_reveal_search") = false,
+      py::arg("cancellation_token") = nullptr);
 }
 
 } // namespace csplendor::python

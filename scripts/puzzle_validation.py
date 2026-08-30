@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+import os
+import time
 from typing import Any, Callable, Optional
 
 import csplendor as cs
@@ -14,38 +17,197 @@ def find_verified_winning_actions(
     *,
     attacker: int,
     depth: int,
+    max_depth: Optional[int] = None,
     max_winning_actions: int,
     node_limit: int,
     time_limit: float,
+    jobs: int = 1,
+    positive_time_limit: float = 0.0,
 ) -> dict[str, object]:
-    winning_actions: list[str] = []
-    unknown_actions: list[str] = []
-    checks = 0
-    truncated = False
-    for action in game.legal_actions:
-        checks += 1
+    if jobs < 0:
+        raise ValueError("jobs must be non-negative")
+    if positive_time_limit < 0:
+        raise ValueError("positive_time_limit must be non-negative")
+    effective_jobs = max(1, (os.cpu_count() or 1) if jobs == 0 else jobs)
+    depth_ceiling = max(depth, depth if max_depth is None else int(max_depth))
+    actions = list(game.legal_actions)
+
+    def check_action(action: cs.Action) -> dict[str, object]:
+        started = time.monotonic()
         usi = action_to_usi(action, game=game)
-        raw = cs.solve_reveal_verified_mate_cpp(
+        positive_attempts: list[dict[str, object]] = []
+        positive_nodes = 0
+        positive_stop_reason: Optional[str] = None
+        if positive_time_limit > 0.0:
+            positive_budget = positive_time_limit
+            if time_limit > 0.0:
+                positive_budget = min(positive_budget, time_limit)
+            positive = cs.search_reveal_verified_mate_anytime(
+                game,
+                attacker=attacker,
+                min_depth=depth,
+                max_depth=depth_ceiling,
+                max_nodes=max(0, node_limit),
+                time_limit_seconds=positive_budget,
+                required_root_action=int(action.pack()),
+                jobs=1,
+            )
+            positive_nodes = int(positive["stats"].get("nodes", 0))
+            positive_stop_reason = str(positive["stop_reason"])
+            positive_attempts = [
+                {
+                    "depth": int(attempt["depth"]),
+                    "status": str(attempt["status"]),
+                    "phase": "positive_proof",
+                    "nodes": int(attempt["stats"].get("nodes", 0)),
+                    "elapsed_ms": float(
+                        attempt["stats"].get("elapsed_ms", 0.0)
+                    ),
+                    "unknown_reason": attempt.get("unknown_reason"),
+                }
+                for attempt in positive["attempts"]
+            ]
+            if positive["status"] == "mate":
+                return {
+                    "action": usi,
+                    "status": "mate",
+                    "mate_depth": positive["mate_depth"],
+                    "mate_depth_minimal": False,
+                    "verified_no_mate_through_depth": None,
+                    "permanent_no_mate_proven": False,
+                    "permanent_no_mate_certificate": None,
+                    "stop_reason": positive_stop_reason,
+                    "positive_proof_attempted": True,
+                    "positive_stop_reason": positive_stop_reason,
+                    "depth_attempts": positive_attempts,
+                }
+            if positive["status"] == "permanent_no_mate":
+                return {
+                    "action": usi,
+                    "status": "permanent_no_mate",
+                    "mate_depth": None,
+                    "mate_depth_minimal": False,
+                    "verified_no_mate_through_depth": depth_ceiling,
+                    "permanent_no_mate_proven": True,
+                    "permanent_no_mate_certificate": positive.get(
+                        "permanent_no_mate_certificate"
+                    ),
+                    "stop_reason": positive_stop_reason,
+                    "positive_proof_attempted": True,
+                    "positive_stop_reason": positive_stop_reason,
+                    "depth_attempts": positive_attempts,
+                }
+
+        remaining_nodes = (
+            0 if node_limit == 0 else max(0, node_limit - positive_nodes)
+        )
+        remaining_time = (
+            0.0
+            if time_limit == 0.0
+            else max(0.0, time_limit - (time.monotonic() - started))
+        )
+        budget_exhausted = (
+            node_limit > 0 and remaining_nodes == 0
+        ) or (time_limit > 0.0 and remaining_time == 0.0)
+        if budget_exhausted:
+            return {
+                "action": usi,
+                "status": "unknown",
+                "mate_depth": None,
+                "mate_depth_minimal": False,
+                "verified_no_mate_through_depth": None,
+                "permanent_no_mate_proven": False,
+                "permanent_no_mate_certificate": None,
+                "stop_reason": "uniqueness budget exhausted after positive proof search",
+                "positive_proof_attempted": positive_time_limit > 0.0,
+                "positive_stop_reason": positive_stop_reason,
+                "depth_attempts": positive_attempts,
+            }
+
+        search = cs.search_reveal_verified_mate_depths(
             game,
             attacker=attacker,
-            depth=depth,
-            max_nodes=max(0, node_limit),
-            time_limit_seconds=max(0.0, time_limit),
-            preferred_attacker_actions=[],
-            include_proof_dag=False,
+            min_depth=depth,
+            max_depth=depth_ceiling,
+            max_nodes=remaining_nodes,
+            time_limit_seconds=remaining_time,
             required_root_action=int(action.pack()),
+            jobs=1,
         )
-        if bool(raw["proven"]):
-            winning_actions.append(usi)
-            if len(winning_actions) > max_winning_actions:
-                truncated = True
+        attempts = list(search["attempts"])
+        return {
+            "action": usi,
+            "status": str(search["status"]),
+            "mate_depth": search["mate_depth"],
+            "mate_depth_minimal": bool(search["status"] == "mate"),
+            "verified_no_mate_through_depth": search[
+                "verified_no_mate_through_depth"
+            ],
+            "permanent_no_mate_proven": bool(
+                search.get("permanent_no_mate_proven", False)
+            ),
+            "permanent_no_mate_certificate": search.get(
+                "permanent_no_mate_certificate"
+            ),
+            "stop_reason": str(search["stop_reason"]),
+            "positive_proof_attempted": positive_time_limit > 0.0,
+            "positive_stop_reason": positive_stop_reason,
+            "depth_attempts": positive_attempts + [
+                {
+                    "depth": int(attempt["depth"]),
+                    "status": str(attempt["status"]),
+                    "phase": "exact_refutation",
+                    "nodes": int(attempt["stats"].get("nodes", 0)),
+                    "elapsed_ms": float(attempt["stats"].get("elapsed_ms", 0.0)),
+                    "unknown_reason": attempt["unknown_reason"],
+                }
+                for attempt in attempts
+            ],
+        }
+
+    action_results: list[dict[str, object]] = []
+    if effective_jobs > 1 and len(actions) > 1:
+        with ThreadPoolExecutor(
+            max_workers=min(effective_jobs, len(actions)),
+            thread_name_prefix="csplendor-uniqueness",
+        ) as executor:
+            action_results = list(executor.map(check_action, actions))
+    else:
+        for action in actions:
+            result_summary = check_action(action)
+            action_results.append(result_summary)
+            winning_so_far = sum(
+                result["status"] == "mate" for result in action_results
+            )
+            if winning_so_far > max_winning_actions:
                 break
-        elif raw["unknown_reason"] is not None:
+
+    winning_actions: list[str] = []
+    winning_action_depths: list[dict[str, object]] = []
+    unknown_actions: list[str] = []
+    for result_summary in action_results:
+        usi = str(result_summary["action"])
+        if result_summary["status"] == "mate":
+            winning_actions.append(usi)
+            winning_action_depths.append(
+                {"action": usi, "depth": int(result_summary["mate_depth"])}
+            )
+        elif result_summary["status"] == "unknown":
             unknown_actions.append(usi)
+    truncated = len(winning_actions) > max_winning_actions
     return {
-        "checks": checks,
+        "checks": len(action_results),
+        "depth_checks": sum(
+            len(result["depth_attempts"]) for result in action_results
+        ),
+        "jobs": min(effective_jobs, max(1, len(actions))),
+        "positive_time_limit": positive_time_limit,
+        "min_depth": depth,
+        "max_depth": depth_ceiling,
         "winning_actions": winning_actions,
+        "winning_action_depths": winning_action_depths,
         "unknown_actions": unknown_actions,
+        "action_results": action_results,
         "complete": not unknown_actions and not truncated,
         "truncated": truncated,
     }
@@ -116,10 +278,14 @@ def find_countermate_blunders(
     action_limit: int,
     node_limit: int,
     time_limit: float,
+    jobs: int = 1,
     solve_reveal_verified_mate: Callable[..., SearchResult],
     progress: Optional[Any] = None,
     attempt: Optional[int] = None,
 ) -> tuple[list[dict[str, object]], int]:
+    if min_losing_alternatives <= 0:
+        return [], 0
+
     proof = result.proof_tree or {}
     verification = proof.get("verification")
     line = verification.get("line") if isinstance(verification, dict) else None
@@ -163,6 +329,7 @@ def find_countermate_blunders(
                     time_limit=time_limit,
                     include_proof=True,
                     allow_deck_reserve=True,
+                    jobs=jobs,
                 ),
             )
             if countermate.status != MATE:

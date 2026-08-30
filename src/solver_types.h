@@ -2,11 +2,13 @@
 #define CSPLENDOR_SOLVER_TYPES_H
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <memory>
 #include <vector>
 
 struct VisibleOnlySearchStats {
@@ -38,6 +40,8 @@ struct VisibleOnlySearchResult {
 struct RevealVerifiedSearchStats {
   uint64_t nodes = 0;
   uint64_t memo_hits = 0;
+  uint64_t persistent_memo_hits = 0;
+  uint64_t iterative_order_hits = 0;
   uint64_t terminal_nodes = 0;
   uint64_t legal_moves = 0;
   uint64_t reveal_branches = 0;
@@ -105,21 +109,56 @@ struct RevealVerifiedSearchResult {
 
 namespace csplendor::solver_internal {
 
+class RevealSearchCancellationToken {
+public:
+  explicit RevealSearchCancellationToken(
+      std::shared_ptr<RevealSearchCancellationToken> parent = {}) noexcept
+      : parent_(std::move(parent)) {}
+
+  void request_cancel() noexcept {
+    cancelled_.store(true, std::memory_order_release);
+  }
+
+  void reset() noexcept { cancelled_.store(false, std::memory_order_release); }
+
+  bool is_cancelled() const noexcept {
+    return cancelled_.load(std::memory_order_acquire) ||
+           (parent_ && parent_->is_cancelled());
+  }
+
+private:
+  std::atomic<bool> cancelled_{false};
+  std::shared_ptr<RevealSearchCancellationToken> parent_;
+};
+
 struct SearchLimitExceeded : public std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
 class SearchLimit {
 public:
-  SearchLimit(uint64_t max_nodes, double time_limit_seconds)
-      : max_nodes_(max_nodes), time_limit_seconds_(time_limit_seconds) {}
+  SearchLimit(
+      uint64_t max_nodes, double time_limit_seconds,
+      std::shared_ptr<RevealSearchCancellationToken> cancellation_token = {})
+      : max_nodes_(max_nodes), time_limit_seconds_(time_limit_seconds),
+        cancellation_token_(std::move(cancellation_token)) {}
 
   void reset() noexcept { start_time_ = Clock::now(); }
 
   void check(uint64_t visited_nodes) const {
+    // Node limits are exact.  Clock and atomic cancellation reads are sampled:
+    // at solver throughput, checking them on every node costs a meaningful
+    // fraction of the available move time while adding negligible response
+    // latency.  Node zero keeps immediate timeout/pre-cancellation semantics.
+    constexpr uint64_t EXPENSIVE_CHECK_INTERVAL = 64;
+    const bool poll_expensive_limits =
+        (visited_nodes & (EXPENSIVE_CHECK_INTERVAL - 1)) == 0;
+    if (poll_expensive_limits && cancellation_token_ &&
+        cancellation_token_->is_cancelled())
+      throw SearchLimitExceeded("search cancelled");
     if (max_nodes_ && visited_nodes >= max_nodes_)
       throw SearchLimitExceeded("node limit exceeded");
-    if (time_limit_seconds_ > 0.0 &&
+    if (poll_expensive_limits && time_limit_seconds_ > 0.0 &&
         elapsed_ms() >= time_limit_seconds_ * 1000.0)
       throw SearchLimitExceeded("time limit exceeded");
   }
@@ -134,6 +173,7 @@ private:
 
   uint64_t max_nodes_ = 0;
   double time_limit_seconds_ = 0.0;
+  std::shared_ptr<RevealSearchCancellationToken> cancellation_token_;
   Clock::time_point start_time_ = Clock::now();
 };
 
