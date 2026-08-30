@@ -16,6 +16,7 @@ from ._csplendor import (
     LeafRequest,
     MCTSConfig,
     MCTSNode,
+    MateSearchCancellationToken,
     Noble,
     ParallelCancellationToken,
     ParallelSearchLedger,
@@ -33,6 +34,7 @@ from ._csplendor import (
     get_noble,
     mcts_search_parallel_native,
     mcts_search_root_parallel_native,
+    solve_reveal_verified_frontier_cpp,
     solve_reveal_verified_mate_cpp,
     solve_visible_only_winner_cpp,
 )
@@ -47,6 +49,19 @@ from .gem_colors import (
 from .gem_colors import (
     GEM_USI_SYMBOLS as GEM_USI_SYMBOLS,
 )
+from .mate_frontier import (
+    decode_mate_frontier_state,
+    encode_mate_frontier_state,
+    expand_mate_frontier,
+    load_mate_frontier_game,
+)
+from .mate_depth import (
+    MATE_ANYTIME_SEARCH_FORMAT,
+    MATE_DEPTH_SEARCH_FORMAT,
+    search_reveal_verified_mate_anytime,
+    search_reveal_verified_mate_depths,
+)
+from .mate_session import MATE_SEARCH_SESSION_FORMAT, MateSearchSession
 
 try:
     __version__ = _distribution_version("csplendor")
@@ -67,6 +82,13 @@ __all__ = [
     "RootParallelSearchResult", "mcts_search_parallel_native",
     "mcts_search_root_parallel_native",
     "LeafRequest", "InferenceResult",
+    "solve_reveal_verified_frontier_cpp",
     "solve_reveal_verified_mate_cpp",
     "solve_visible_only_winner_cpp",
+    "decode_mate_frontier_state", "encode_mate_frontier_state",
+    "expand_mate_frontier", "load_mate_frontier_game",
+    "MATE_DEPTH_SEARCH_FORMAT", "search_reveal_verified_mate_depths",
+    "MateSearchCancellationToken",
+    "MATE_SEARCH_SESSION_FORMAT", "MateSearchSession",
+    "MATE_ANYTIME_SEARCH_FORMAT", "search_reveal_verified_mate_anytime",
 ]

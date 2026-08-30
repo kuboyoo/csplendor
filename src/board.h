@@ -185,6 +185,20 @@ public:
   // Pure full-information position-hash computation.  Caching belongs in
   // hash(), so callers can use this as a validation oracle.
   uint64_t compute_hash_uncached() const {
+    return compute_hash_impl<true, true>();
+  }
+
+  // Canonical rule-state hash for searches that model hidden decks as sets.
+  // The caller must key the remaining card set separately.  Excluding both
+  // deck order and the absolute turn lets equivalent reveal histories share
+  // a transposition while retaining every field that affects legal play.
+  uint64_t compute_set_deck_search_hash() const {
+    return compute_hash_impl<false, false>();
+  }
+
+private:
+  template <bool IncludeDeckOrder, bool IncludeTurn>
+  uint64_t compute_hash_impl() const {
     const auto &z = Zobrist::get_instance();
     uint64_t h = 0;
 
@@ -212,13 +226,15 @@ public:
         h ^= z.nobles_on_board[slot][n_id];
     }
 
-    // Deck order determines which cards can be revealed next.  Hash every
-    // occupied stack position, rather than only the deck size.
-    for (int l = 0; l < 3; ++l) {
-      for (size_t s = 0; s < decks[l].size(); ++s) {
-        const uint8_t card_id = decks[l][s];
-        if (is_valid_card_id(card_id))
-          h ^= z.deck_cards[l][s][card_id];
+    if constexpr (IncludeDeckOrder) {
+      // Deck order determines which cards can be revealed next.  Hash every
+      // occupied stack position, rather than only the deck size.
+      for (int l = 0; l < 3; ++l) {
+        for (size_t s = 0; s < decks[l].size(); ++s) {
+          const uint8_t card_id = decks[l][s];
+          if (is_valid_card_id(card_id))
+            h ^= z.deck_cards[l][s][card_id];
+        }
       }
     }
 
@@ -265,10 +281,13 @@ public:
     h ^= z.final_round[final_round ? 1 : 0];
     if (winner >= -2 && winner <= 1)
       h ^= z.winner[winner + 2];
-    h ^= z.turn[turn];
+    if constexpr (IncludeTurn)
+      h ^= z.turn[turn];
 
     return h;
   }
+
+public:
 
   // Compute hash from scratch (for debugging/validation)
   uint64_t recompute_hash() const {

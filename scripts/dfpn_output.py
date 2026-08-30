@@ -482,12 +482,16 @@ def principal_line_to_kifu_text(
         action = entry.get("action")
         usi = action.get("usi") if isinstance(action, dict) else None
         if usi:
-            moves.append(
-                {
-                    "player": int(entry.get("player", 0)),
-                    "usi": str(usi),
-                }
-            )
+            move = {
+                "player": int(entry.get("player", 0)),
+                "usi": str(usi),
+            }
+            reveal_card = entry.get("reveal_card")
+            if reveal_card is not None:
+                move["comment"] = (
+                    f"{MATE_KIFU_REVEAL_COMMENT_PREFIX}{int(reveal_card)}"
+                )
+            moves.append(move)
     return _build_mate_kifu_text(
         game,
         moves,

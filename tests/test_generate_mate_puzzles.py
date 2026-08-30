@@ -3,6 +3,7 @@ from itertools import islice
 from types import SimpleNamespace
 
 import csplendor as cs
+import pytest
 import scripts.generate_mate_puzzles as generate_mate_puzzles
 from csplendor.api.usi_kifu import action_to_usi, parse_kifu_text, spn_to_game
 from scripts.generate_mate_puzzles import (
@@ -341,6 +342,62 @@ def test_save_puzzle_writes_depth_grouped_answer_and_complete_strategy(tmp_path)
     assert save_puzzle(tmp_path, game, result, game_seed=42, attempt=8) is None
 
 
+def test_save_puzzle_writes_verified_line_without_complete_strategy_dag(tmp_path):
+    game = cs.Game(seed=0)
+    usi = action_to_usi(game.legal_actions[0], game=game)
+    verified_line = [{"player": 0, "action": {"usi": usi}}]
+    result = SearchResult(
+        MATE,
+        5,
+        {
+            "forced_win_depth": 5,
+            "line": [],
+            "verification": {
+                "all_reveals_verified": True,
+                "reason": "pytest",
+                "line": verified_line,
+            },
+        },
+        None,
+        SearchStats(nodes=10),
+    )
+
+    puzzle_dir = save_puzzle(
+        tmp_path,
+        game,
+        result,
+        game_seed=42,
+        attempt=9,
+        strategy_dag_requested=False,
+    )
+
+    assert puzzle_dir is not None
+    problem = json.loads((puzzle_dir / "problem.json").read_text(encoding="utf-8"))
+    strategy = json.loads((puzzle_dir / "strategy.json").read_text(encoding="utf-8"))
+    kifu = parse_kifu_text((puzzle_dir / "answer.kifu").read_text(encoding="utf-8"))
+    assert problem["strategy_dag"] == {
+        "complete": False,
+        "omitted_reason": "not_requested",
+        "requested": False,
+        "validated": False,
+    }
+    assert strategy["principal_line"] == verified_line
+    assert strategy["strategy_dag"]["complete"] is False
+    assert strategy["strategy_dag"]["omitted_reason"] == "not_requested"
+    assert kifu["moves"] == [{"player": 0, "usi": usi}]
+
+    with pytest.raises(ValueError, match="complete strategy DAG"):
+        save_puzzle(
+            tmp_path / "strict",
+            game,
+            result,
+            game_seed=42,
+            attempt=9,
+            strategy_dag_requested=True,
+            require_complete_dag=True,
+        )
+
+
 def test_save_puzzle_keeps_exact_hidden_reserved_card_ids_for_replay(tmp_path):
     game = cs.Game(seed=0)
     reserve = next(
@@ -519,18 +576,121 @@ def test_candidate_builds_proof_dag_only_after_quality_filters(monkeypatch, tmp_
     assert calls == [False, True]
 
 
+def test_candidate_saves_when_optional_dag_is_incomplete(monkeypatch, tmp_path):
+    game = cs.Game(seed=0)
+    correct = game.legal_actions[0]
+    usi = action_to_usi(correct, game=game)
+    calls = []
+    saved_kwargs = {}
+
+    def fake_solve(*args, include_proof_dag=False, **kwargs):
+        calls.append(include_proof_dag)
+        proof = {
+            "forced_win_depth": 5,
+            "line": [{"player": 0, "action": {"usi": usi, "pack": int(correct.pack())}}],
+            "verification": {
+                "all_reveals_verified": True,
+                "line": [
+                    {"player": 0, "action": {"usi": usi, "pack": int(correct.pack())}}
+                ],
+            },
+        }
+        if include_proof_dag:
+            proof["verification"]["proof_dag"] = {
+                "requested": True,
+                "complete": False,
+                "validated": False,
+                "omitted_reason": "proof DAG node limit exceeded",
+                "root": None,
+                "nodes": [],
+            }
+        return SearchResult(MATE, 5, proof, None, SearchStats())
+
+    def fake_save(*args, **kwargs):
+        saved_kwargs.update(kwargs)
+        return tmp_path / "saved"
+
+    monkeypatch.setattr(generate_mate_puzzles, "is_suspicious_position", lambda *args, **kwargs: True)
+    monkeypatch.setattr(generate_mate_puzzles, "is_tactical_candidate", lambda *args, **kwargs: True)
+    monkeypatch.setattr(generate_mate_puzzles, "solve_reveal_verified_mate", fake_solve)
+    monkeypatch.setattr(
+        generate_mate_puzzles,
+        "find_verified_winning_actions",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("disabled uniqueness check should not run")
+        ),
+    )
+    monkeypatch.setattr(
+        generate_mate_puzzles,
+        "find_countermate_blunders",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("disabled countermate check should not run")
+        ),
+    )
+    monkeypatch.setattr(generate_mate_puzzles, "save_puzzle", fake_save)
+    stats = GenerationStats()
+
+    saved = try_save_candidate(
+        SimpleNamespace(
+            visible_prefilter=False,
+            visible_uniqueness_prefilter=False,
+            node_limit=0,
+            time_limit=1.0,
+            min_depth=5,
+            max_depth=7,
+            require_unique_solution=False,
+            min_losing_alternatives=0,
+            build_strategy_dag=True,
+            require_complete_dag=False,
+            proof_dag_node_limit=100,
+            proof_dag_edge_limit=100,
+            count=1,
+        ),
+        output_dir=tmp_path,
+        stats=stats,
+        progress=ProgressReporter(0),
+        game=game,
+        game_seed=0,
+        attempt=1,
+    )
+
+    assert saved is True
+    assert calls == [False, True]
+    assert stats.saved == 1
+    assert stats.incomplete_dags == 1
+    assert stats.saved_without_complete_dag == 1
+    assert saved_kwargs["strategy_dag_requested"] is True
+    assert saved_kwargs["strategy_dag_omitted_reason"] == "proof DAG node limit exceeded"
+    assert saved_kwargs["quality"]["strategy_dag_complete"] is False
+    assert saved_kwargs["quality"]["uniqueness_checks"] == 0
+    assert saved_kwargs["quality"]["countermate_blunder_count"] == 0
+
+
 def test_verified_winning_action_filter_finds_unique_root_move(monkeypatch):
     game = cs.Game(seed=0)
     winning_code = int(game.legal_actions[0].pack())
     winning_usi = action_to_usi(game.legal_actions[0], game=game)
 
-    def fake_reveal_verified(*args, required_root_action, **kwargs):
+    def fake_depth_search(*args, required_root_action, min_depth, max_depth, **kwargs):
+        proven = int(required_root_action) == winning_code
         return {
-            "proven": int(required_root_action) == winning_code,
-            "unknown_reason": None,
+            "status": "mate" if proven else "no_mate_within_max_depth",
+            "stop_reason": "mate_proven" if proven else "max_depth_reached",
+            "mate_depth": min_depth if proven else None,
+            "verified_no_mate_through_depth": (
+                min_depth - 1 if proven else max_depth
+            ),
+            "attempts": [
+                {
+                    "depth": min_depth,
+                    "status": "mate" if proven else "no_mate",
+                    "unknown_reason": None,
+                    "stats": {"nodes": 1, "elapsed_ms": 0.1},
+                }
+            ],
         }
 
-    monkeypatch.setattr(cs, "solve_reveal_verified_mate_cpp", fake_reveal_verified)
+    monkeypatch.setattr(cs, "search_reveal_verified_mate_depths", fake_depth_search)
 
     result = find_verified_winning_actions(
         game,
@@ -543,7 +703,135 @@ def test_verified_winning_action_filter_finds_unique_root_move(monkeypatch):
 
     assert result["complete"] is True
     assert result["checks"] == len(game.legal_actions)
+    assert result["depth_checks"] == len(game.legal_actions)
     assert result["winning_actions"] == [winning_usi]
+    assert result["winning_action_depths"] == [
+        {"action": winning_usi, "depth": 3}
+    ]
+
+
+def test_verified_winning_action_filter_rejects_longer_depth_alternative(monkeypatch):
+    game = cs.Game(seed=0)
+    action_depths = {
+        int(game.legal_actions[0].pack()): 5,
+        int(game.legal_actions[1].pack()): 6,
+    }
+
+    def fake_depth_search(*args, required_root_action, min_depth, max_depth, **kwargs):
+        mate_depth = action_depths.get(int(required_root_action))
+        proven = mate_depth is not None and mate_depth <= max_depth
+        attempts = []
+        stop_depth = mate_depth if proven else max_depth
+        for candidate_depth in range(min_depth, stop_depth + 1):
+            is_mate = proven and candidate_depth == mate_depth
+            attempts.append(
+                {
+                    "depth": candidate_depth,
+                    "status": "mate" if is_mate else "no_mate",
+                    "unknown_reason": None,
+                    "stats": {"nodes": 1, "elapsed_ms": 0.1},
+                }
+            )
+        return {
+            "status": "mate" if proven else "no_mate_within_max_depth",
+            "stop_reason": "mate_proven" if proven else "max_depth_reached",
+            "mate_depth": mate_depth if proven else None,
+            "verified_no_mate_through_depth": (
+                mate_depth - 1 if proven else max_depth
+            ),
+            "attempts": attempts,
+        }
+
+    monkeypatch.setattr(cs, "search_reveal_verified_mate_depths", fake_depth_search)
+
+    result = find_verified_winning_actions(
+        game,
+        attacker=0,
+        depth=5,
+        max_depth=7,
+        max_winning_actions=1,
+        node_limit=0,
+        time_limit=5.0,
+    )
+
+    assert result["complete"] is False
+    assert result["truncated"] is True
+    assert result["winning_action_depths"] == [
+        {
+            "action": action_to_usi(game.legal_actions[0], game=game),
+            "depth": 5,
+        },
+        {
+            "action": action_to_usi(game.legal_actions[1], game=game),
+            "depth": 6,
+        },
+    ]
+    assert result["depth_checks"] == 3
+
+
+def test_verified_winning_action_filter_runs_positive_proof_before_exact(monkeypatch):
+    game = cs.Game(seed=0)
+    winning_code = int(game.legal_actions[0].pack())
+    winning_usi = action_to_usi(game.legal_actions[0], game=game)
+    exact_calls = []
+
+    def fake_anytime(*args, required_root_action, min_depth, **kwargs):
+        proven = int(required_root_action) == winning_code
+        return {
+            "status": "mate" if proven else "no_mate_found",
+            "stop_reason": "mate_proven" if proven else "time limit exceeded",
+            "mate_depth": min_depth if proven else None,
+            "attempts": [
+                {
+                    "depth": min_depth,
+                    "status": "mate" if proven else "inconclusive",
+                    "unknown_reason": None if proven else "time limit exceeded",
+                    "stats": {"nodes": 2, "elapsed_ms": 0.1},
+                }
+            ],
+            "stats": {"nodes": 2, "elapsed_ms": 0.1},
+        }
+
+    def fake_exact(*args, required_root_action, min_depth, max_depth, **kwargs):
+        exact_calls.append(int(required_root_action))
+        return {
+            "status": "no_mate_within_max_depth",
+            "stop_reason": "max_depth_reached",
+            "mate_depth": None,
+            "verified_no_mate_through_depth": max_depth,
+            "permanent_no_mate_proven": False,
+            "permanent_no_mate_certificate": None,
+            "attempts": [
+                {
+                    "depth": min_depth,
+                    "status": "no_mate",
+                    "unknown_reason": None,
+                    "stats": {"nodes": 1, "elapsed_ms": 0.1},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(cs, "search_reveal_verified_mate_anytime", fake_anytime)
+    monkeypatch.setattr(cs, "search_reveal_verified_mate_depths", fake_exact)
+
+    result = find_verified_winning_actions(
+        game,
+        attacker=0,
+        depth=5,
+        max_depth=7,
+        max_winning_actions=1,
+        node_limit=100,
+        time_limit=5.0,
+        positive_time_limit=1.0,
+    )
+
+    assert result["complete"] is True
+    assert result["winning_actions"] == [winning_usi]
+    assert winning_code not in exact_calls
+    assert len(exact_calls) == len(game.legal_actions) - 1
+    winner = result["action_results"][0]
+    assert winner["mate_depth_minimal"] is False
+    assert winner["depth_attempts"][0]["phase"] == "positive_proof"
 
 
 def test_countermate_filter_accepts_wrong_move_that_allows_opponent_mate(monkeypatch):
@@ -576,3 +864,35 @@ def test_countermate_filter_accepts_wrong_move_that_allows_opponent_mate(monkeyp
     assert len(blunders) == 1
     assert blunders[0]["opponent"] == 1
     assert blunders[0]["forced_win_depth"] == 2
+
+
+def test_countermate_filter_does_no_search_when_disabled(monkeypatch):
+    game = cs.Game(seed=0)
+    result = SearchResult(MATE, 1, {}, None, SearchStats())
+    monkeypatch.setattr(
+        generate_mate_puzzles,
+        "solve_reveal_verified_mate",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("countermate search should not run")
+        ),
+    )
+
+    assert find_countermate_blunders(
+        game,
+        result,
+        min_losing_alternatives=0,
+        action_limit=0,
+        node_limit=0,
+        time_limit=1.0,
+    ) == ([], 0)
+
+
+def test_generator_defaults_keep_quality_filters_practical():
+    args = build_parser().parse_args([])
+
+    assert args.min_losing_alternatives == 0
+    assert args.build_strategy_dag is True
+    assert args.require_complete_dag is False
+    assert args.mate_jobs == 1
+    assert args.uniqueness_jobs == 1
+    assert args.uniqueness_positive_time_limit == 2.0

@@ -76,6 +76,28 @@ def main(
         help="find a visible-only candidate mate, then verify all defender responses and hidden reveal shapes",
     )
     parser.add_argument(
+        "--reveal-depth-range",
+        nargs=2,
+        type=int,
+        metavar=("MIN", "MAX"),
+        help=(
+            "with --reveal-verified, test every attacker depth from MIN through MAX; "
+            "stop on mate, unknown, or MAX"
+        ),
+    )
+    parser.add_argument(
+        "--required-root-action",
+        help="USI root action to hold fixed during --reveal-depth-range",
+    )
+    parser.add_argument(
+        "--reveal-anytime",
+        action="store_true",
+        help=(
+            "with --reveal-depth-range, advance after inconclusive depths and "
+            "return only positive mate proofs; intended for live AI clocks"
+        ),
+    )
+    parser.add_argument(
         "--reveal-proof-dag",
         action="store_true",
         help="with --reveal-verified, emit the proven strategy DAG after search",
@@ -102,23 +124,26 @@ def main(
         "--jobs",
         type=int,
         default=1,
-        help="worker processes for root-parallel DFPN search; 0 uses CPU count",
+        help=(
+            "parallel workers for DFPN or exact reveal root branches; "
+            "0 uses CPU count"
+        ),
     )
     parser.add_argument("--allow-deck-reserve", action="store_true")
     parser.add_argument(
         "--no-threat-reveal-pruning",
         action="store_true",
-        help="disable immediate-win threat based reveal collapsing",
+        help="disable counterexample-first reveal ordering",
     )
     parser.add_argument(
         "--no-lazy-reveal-pruning",
         action="store_true",
-        help="disable delayed blank reveal refinement before concrete reveal branching",
+        help="disable one-at-a-time concrete reveal generation",
     )
     parser.add_argument(
         "--no-attacker-dependency-pruning",
         action="store_true",
-        help="disable lazy pruning of attacker moves outside the score dependency cone",
+        help="disable lazy deferral of attacker moves outside the score dependency cone",
     )
     parser.add_argument(
         "--no-defender-relevance-pruning",
@@ -128,12 +153,12 @@ def main(
     parser.add_argument(
         "--no-equivalence-hash",
         action="store_true",
-        help="disable threat-equivalence hashing and use exact state keys",
+        help="disable slot-order-independent exact canonicalization",
     )
     parser.add_argument(
         "--no-return-pattern-pruning",
         action="store_true",
-        help="Disable representative pruning for equivalent payment/return patterns.",
+        help="disable exact merging of take actions with identical net token deltas",
     )
     parser.add_argument(
         "--no-upper-bound-pruning",
@@ -148,19 +173,19 @@ def main(
     parser.add_argument(
         "--defender-threat-filter",
         action="store_true",
-        help="Only expand defender replies that address immediate attacker threats.",
+        help="expand immediate-threat replies first and defer other defender replies",
     )
     parser.add_argument(
         "--max-actions-per-node",
         type=int,
         default=0,
-        help="Optional cap after move ordering and pruning; 0 means no cap.",
+        help="initial eager action batch size; remaining legal moves are deferred; 0 means all",
     )
     parser.add_argument(
         "--target-candidate-limit",
         type=int,
         default=int(_DFPN_DEFAULT_PRUNING["target_candidate_limit"]),
-        help="Limit scored target cards for dependency pruning; 0 disables the limit.",
+        help="limit scored target cards used for ordering and dependency deferral; 0 means all",
     )
     parser.add_argument(
         "--parallel-tt-limit",
@@ -193,6 +218,16 @@ def main(
     try:
         if args.reveal_proof_dag and not args.reveal_verified:
             raise ValueError("--reveal-proof-dag requires --reveal-verified")
+        if args.reveal_depth_range and not args.reveal_verified:
+            raise ValueError("--reveal-depth-range requires --reveal-verified")
+        if args.required_root_action and not args.reveal_depth_range:
+            raise ValueError("--required-root-action requires --reveal-depth-range")
+        if args.reveal_anytime and not args.reveal_depth_range:
+            raise ValueError("--reveal-anytime requires --reveal-depth-range")
+        if args.reveal_anytime and args.reveal_proof_dag:
+            raise ValueError("--reveal-anytime does not build a proof DAG")
+        if args.reveal_depth_range and args.kifu_output:
+            raise ValueError("--kifu-output is not supported with --reveal-depth-range")
         if args.reveal_proof_dag and args.no_proof:
             raise ValueError("--reveal-proof-dag cannot be combined with --no-proof")
         if args.kifu_output and args.no_proof:
@@ -228,6 +263,57 @@ def main(
             print(json.dumps(result.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
             return 0 if result.status in (PLAYER0_WIN, PLAYER1_WIN, DRAW) else 2
         if args.reveal_verified:
+            if args.reveal_depth_range:
+                from csplendor.api.usi_kifu import find_legal_action_index_by_usi
+
+                min_depth, max_depth = (int(value) for value in args.reveal_depth_range)
+                required_action = None
+                if args.required_root_action:
+                    action_index = find_legal_action_index_by_usi(
+                        game, args.required_root_action
+                    )
+                    required_action = int(game.legal_actions[action_index].pack())
+                search_function = (
+                    cs.search_reveal_verified_mate_anytime
+                    if args.reveal_anytime
+                    else cs.search_reveal_verified_mate_depths
+                )
+                depth_search = search_function(
+                    game,
+                    attacker=args.attacker,
+                    min_depth=min_depth,
+                    max_depth=max_depth,
+                    max_nodes=options.max_nodes,
+                    time_limit_seconds=options.time_limit,
+                    required_root_action=required_action,
+                    jobs=args.jobs,
+                    **(
+                        {}
+                        if args.reveal_anytime
+                        else {
+                            "include_proof_dag": args.reveal_proof_dag,
+                            "proof_dag_node_limit": args.proof_dag_node_limit,
+                            "proof_dag_edge_limit": args.proof_dag_edge_limit,
+                            "proof_dag_format": (
+                                "compact"
+                                if args.proof_dag_format == "both"
+                                else args.proof_dag_format
+                            ),
+                        }
+                    ),
+                )
+                print(
+                    json.dumps(
+                        depth_search,
+                        indent=2 if args.pretty else None,
+                        sort_keys=True,
+                    )
+                )
+                return 0 if depth_search["status"] in {
+                    "mate",
+                    "no_mate_within_max_depth",
+                    "permanent_no_mate",
+                } else 2
             result = solve_reveal_verified_mate(
                 game,
                 attacker=args.attacker,
@@ -246,19 +332,6 @@ def main(
                 write_principal_line_kifu(args.kifu_output, game, line, attacker=args.attacker)
             print(json.dumps(result.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
             return 0 if result.status == MATE else 2
-        _DFPN_DEFAULT_PRUNING.update(
-            {
-                "lazy_reveal": not args.no_lazy_reveal_pruning,
-                "attacker_dependency": not args.no_attacker_dependency_pruning,
-                "defender_relevance": not args.no_defender_relevance_pruning,
-                "return_pattern": not args.no_return_pattern_pruning,
-                "upper_bound": not args.no_upper_bound_pruning,
-                "immediate_terminal": not args.no_immediate_terminal_pruning,
-                "defender_threat_filter": args.defender_threat_filter,
-                "max_actions_per_node": max(0, int(args.max_actions_per_node)),
-                "target_candidate_limit": max(0, int(args.target_candidate_limit)),
-            }
-        )
         result = solve_game_dfpn(
             game,
             attacker=args.attacker,

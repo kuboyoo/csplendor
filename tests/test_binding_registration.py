@@ -37,6 +37,16 @@ config = native.MCTSConfig()
 assert native.MCTS(config).tree_size() == 0
 result = native.solve_visible_only_winner_cpp(game, 1, 0.0)
 assert set(result) >= {"winner", "stats", "line"}
+frontier = native.solve_reveal_verified_frontier_cpp(game, 0, 0, 1, 0.0, 10)
+assert set(frontier) >= {"proven", "complete", "edges", "stats"}
+token = native.MateSearchCancellationToken()
+split = native.solve_reveal_verified_root_split_cpp(game, 0, 1, edge_limit=500)
+assert split["complete"] and split["edges"]
+session = native.NativeMateSearchSession(0)
+cached = session.search(game, 0, max_nodes=10, time_limit_seconds=1.0)
+assert set(cached) >= {"proven", "memoized_states", "stats", "line"}
+token.request_cancel()
+assert token.is_cancelled
 """
     subprocess.run(
         [sys.executable, "-c", code], cwd=ROOT, check=True, timeout=30

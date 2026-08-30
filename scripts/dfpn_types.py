@@ -21,6 +21,8 @@ class DFPNStats(SearchStats):
     dangerous_reveal_collapses: int = 0
     lazy_reveal_branches: int = 0
     lazy_reveal_refinements: int = 0
+    # Compatibility field names: these count initially deferred children.
+    # Deferred children are materialized before a conclusive result requires them.
     lazy_reveal_pruned: int = 0
     lazy_action_pruned: int = 0
     lazy_action_refinements: int = 0
@@ -62,6 +64,7 @@ class DFPNNode:
     reason: Optional[str] = None
     reveal_level: Optional[int] = None
     reveal_candidates: Tuple[int, ...] = ()
+    reveal_next_index: int = 0
     lazy_reveal_materialized: bool = False
     omitted_actions: Tuple[cs.Action, ...] = ()
     lazy_actions_materialized: bool = True

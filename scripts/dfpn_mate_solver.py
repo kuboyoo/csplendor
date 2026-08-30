@@ -73,6 +73,7 @@ _DFPN_DEFAULT_PRUNING = {
     "lazy_reveal": True,
     "attacker_dependency": True,
     "defender_relevance": True,
+    "threat_reveal": True,
     "return_pattern": True,
     "upper_bound": True,
     "immediate_terminal": True,
@@ -194,7 +195,7 @@ class ProgressReporter:
             f"memo={stats.memo_hits}",
             f"reveal={stats.reveal_branches}",
             f"lazy={stats.lazy_reveal_branches}/{stats.lazy_reveal_refinements}",
-            f"pruned={stats.threat_pruned_reveals + stats.lazy_action_pruned}",
+            f"deferred={stats.lazy_reveal_pruned + stats.lazy_action_pruned}",
         ]
         if extra:
             parts.append(extra)
@@ -349,7 +350,7 @@ class DFPNMateSolver:
         self.use_lazy_reveal_pruning = bool(_DFPN_DEFAULT_PRUNING["lazy_reveal"])
         self.use_attacker_dependency_pruning = bool(_DFPN_DEFAULT_PRUNING["attacker_dependency"])
         self.use_defender_relevance_pruning = bool(_DFPN_DEFAULT_PRUNING["defender_relevance"])
-        self.use_threat_reveal_pruning = True
+        self.use_threat_reveal_pruning = bool(_DFPN_DEFAULT_PRUNING["threat_reveal"])
         self.use_equivalence_hash = True
         self.use_tactical_action_pruning = True
         self.use_return_pattern_pruning = bool(_DFPN_DEFAULT_PRUNING["return_pattern"])
@@ -422,6 +423,14 @@ class DFPNMateSolver:
         self._update(root)
         if not root.children or root.proof == 0 or root.disproof == 0:
             return self._result_from_root(root)
+
+        # Root tasks have no parent DFPN loop that could later request a lazily
+        # deferred move.  Materialize every root move before splitting work so
+        # parallel NoMate/Mate aggregation keeps the same quantifiers as the
+        # sequential search.
+        while root.omitted_actions:
+            self._materialize_state_actions(root)
+        self._update(root)
 
         assert root.state is not None
         groups: Dict[int, Dict[str, Any]] = {}
@@ -888,105 +897,56 @@ class DFPNMateSolver:
         return self._equivalence_key(state)
 
     def _equivalence_key(self, state: SolverState) -> Tuple[Any, ...]:
+        """Return an exact, slot-order-independent position key.
+
+        Visible and reserved slots are interchangeable, but card identities are
+        deliberately retained.  The previous threat-shaped key merged distinct
+        hidden cards using the current affordability only; reusing the resulting
+        node could also leave a proof tree containing an action for a card that
+        was not present on that concrete branch.
+        """
         board = state.game.board
         players = []
         for player_idx in range(2):
             player = board.get_player(player_idx)
+            reserved = sorted(
+                (
+                    int(player.reserved[index]),
+                    bool(player.reserved_is_hidden[index]),
+                )
+                for index in range(len(player.reserved))
+                if int(player.reserved[index]) >= 0
+            )
             players.append(
                 (
                     int(player.points),
                     tuple(int(v) for v in player.gems),
                     tuple(int(v) for v in player.bonuses),
-                    tuple(int(v) for v in player.reserved),
-                    tuple(bool(v) for v in player.reserved_is_hidden),
+                    tuple(reserved),
                     int(player.reserved_count),
                     int(player.purchased_count),
-                    tuple(sorted(int(v) for v in player.purchased_cards)),
-                    tuple(sorted(int(v) for v in player.acquired_nobles)),
                 )
             )
 
         return (
-            "threat-v1",
-            int(board.turn),
+            "position-v2",
             int(board.current_player),
             bool(board.final_round),
             bool(board.waiting_noble),
             int(board.winner),
             tuple(int(v) for v in board.bank),
             tuple(
-                tuple(self._card_equivalence_key(state, int(card_id), visible=True) for card_id in row)
+                tuple(sorted(int(card_id) for card_id in row))
                 for row in board.visible
             ),
             tuple(sorted(int(noble_id) for noble_id in board.nobles)),
             tuple(players),
-            tuple(self._unseen_equivalence_key(state, level) for level in range(3)),
+            tuple(
+                tuple(sorted(int(card_id) for card_id in level))
+                for level in state.unseen_by_level
+            ),
             bool(state.game.simple_payment_mode),
             bool(state.game.blank_refill_mode),
-        )
-
-    def _unseen_equivalence_key(self, state: SolverState, level: int) -> Tuple[Any, ...]:
-        counts: Dict[Tuple[Any, ...], int] = {}
-        for card_id in state.unseen_by_level[level]:
-            key = self._card_equivalence_key(state, int(card_id), visible=False)
-            counts[key] = counts.get(key, 0) + 1
-        return tuple(
-            (key, count)
-            for key, count in sorted(counts.items(), key=lambda item: repr(item[0]))
-        )
-
-    def _card_equivalence_key(
-        self,
-        state: SolverState,
-        card_id: int,
-        visible: bool,
-    ) -> Tuple[Any, ...]:
-        if card_id < 0:
-            return ("empty",)
-        if self._is_immediate_winning_reveal(state, card_id):
-            return ("immediate-win", int(card_id))
-
-        level, points, bonus, cost = self._card_info(card_id)
-        player_terms = []
-        for player_idx in range(2):
-            player = state.game.board.get_player(player_idx)
-            bonuses = self._fixed_ints(player.bonuses, 5)
-            net_cost = tuple(
-                max(0, cost[color] - bonuses[color])
-                for color in range(5)
-            )
-            gems = self._fixed_ints(player.gems, 6)
-            shortage = tuple(
-                max(0, net_cost[color] - gems[color])
-                for color in range(5)
-            )
-            gold_needed = sum(shortage)
-            bonuses_after = self._fixed_ints(player.bonuses, 5)
-            if 0 <= bonus < 5:
-                bonuses_after[bonus] += 1
-            noble_options = tuple(
-                sorted(self._nobles_available_after_purchase(state, player_idx, bonuses_after))
-            )
-            player_terms.append(
-                (
-                    int(self._can_afford_card_cost(player, cost)),
-                    net_cost,
-                    shortage,
-                    min(gold_needed, 6),
-                    noble_options,
-                )
-            )
-
-        # Visible safe cards keep slightly more information because they can be
-        # bought/reserved directly; hidden safe cards are grouped more aggressively.
-        visibility_term = "visible" if visible else "hidden"
-        return (
-            "safe-card",
-            visibility_term,
-            level,
-            points,
-            bonus,
-            tuple(player_terms),
         )
 
     def _dfpn(self, node: _DFPNNode, proof_limit: int, disproof_limit: int) -> None:
@@ -1213,7 +1173,7 @@ class DFPNMateSolver:
         level = self._visible_refill_level(action)
         if level is None:
             return None
-        candidates = tuple(sorted(int(card_id) for card_id in state.unseen_by_level[level]))
+        candidates = tuple(self._ordered_reveal_candidates(state, action, level))
         if not candidates:
             return None
         return _DFPNNode(
@@ -1239,11 +1199,25 @@ class DFPNMateSolver:
         assert node.reveal_level is not None
         if node.lazy_reveal_materialized:
             return
-        outcome = self._apply_with_blank_reveal(
+        self._materialize_next_reveal(node)
+        self.stats.lazy_reveal_branches += 1
+        self.stats.lazy_reveal_pruned += max(0, len(node.reveal_candidates) - 1)
+
+    def _materialize_next_reveal(self, node: _DFPNNode) -> None:
+        """Append one concrete reveal branch, preserving exact AND semantics."""
+        assert node.state is not None
+        assert node.action is not None
+        assert node.reveal_level is not None
+        if node.reveal_next_index >= len(node.reveal_candidates):
+            node.lazy_reveal_materialized = True
+            return
+
+        card_id = int(node.reveal_candidates[node.reveal_next_index])
+        outcome = self._helper._apply_with_reveal(
             node.state,
             node.action,
             node.reveal_level,
-            node.reveal_candidates,
+            card_id,
         )
         node.children.append(
             self._outcome_node(
@@ -1253,75 +1227,53 @@ class DFPNMateSolver:
                 node.reason == "attacker_action",
             )
         )
+        node.reveal_next_index += 1
+        node.lazy_reveal_materialized = (
+            node.reveal_next_index >= len(node.reveal_candidates)
+        )
         self.stats.reveal_branches += 1
-        self.stats.lazy_reveal_branches += 1
-        self.stats.lazy_reveal_pruned += max(0, len(node.reveal_candidates) - 1)
+        if self._is_immediate_winning_reveal(node.state, card_id):
+            self.stats.dangerous_reveals += 1
 
-    def _apply_with_blank_reveal(
+    def _transition_outcomes(self, state: SolverState, action: cs.Action) -> List[_Outcome]:
+        level = self._visible_refill_level(action)
+        if level is None:
+            return self._helper._transition_outcomes(state, action)
+
+        candidates = self._ordered_reveal_candidates(state, action, level)
+        if not candidates:
+            return [self._helper._apply_with_reveal(state, action, level, None)]
+
+        outcomes = [
+            self._helper._apply_with_reveal(state, action, level, card_id)
+            for card_id in candidates
+        ]
+        self.stats.dangerous_reveals += sum(
+            self._is_immediate_winning_reveal(state, card_id)
+            for card_id in candidates
+        )
+        self.stats.reveal_branches += len(outcomes)
+        return outcomes
+
+    def _ordered_reveal_candidates(
         self,
         state: SolverState,
         action: cs.Action,
         level: int,
-        candidates: Sequence[int],
-    ) -> _Outcome:
-        representative = self._blank_reveal_representative(state, candidates)
-        game = state.game.clone_light()
-        game.board.decks = self._helper._deck_order_for(state, level, representative)
-        original_blank_mode = bool(game.blank_refill_mode)
-        game.blank_refill_mode = True
-        try:
-            if not game.apply(action, False):
-                raise RuntimeError("engine rejected a legal action during blank reveal transition")
-        finally:
-            game.blank_refill_mode = original_blank_mode
-
-        # The blank child is an abstraction: the slot is unknown, but no concrete
-        # card identity is committed until refinement.
-        game.board.decks = [
-            sorted(int(card_id) for card_id in unseen)
-            for unseen in state.unseen_by_level
+    ) -> List[int]:
+        candidates = [
+            int(card_id)
+            for card_id in state.unseen_by_level[level]
         ]
-        raw_child = SolverState(game=game, unseen_by_level=state.unseen_by_level)
-        children = self._helper._finalize_noble_choices(raw_child)
-        return _Outcome(level, None, children)
-
-    def _blank_reveal_representative(self, state: SolverState, candidates: Sequence[int]) -> Optional[int]:
-        if not candidates:
-            return None
-        return max((int(card_id) for card_id in candidates), key=lambda card_id: self._safe_reveal_score(state, card_id))
-
-    def _transition_outcomes(self, state: SolverState, action: cs.Action) -> List[_Outcome]:
-        level = self._visible_refill_level(action)
-        if level is None or not self.use_threat_reveal_pruning:
-            return self._helper._transition_outcomes(state, action)
-
-        candidates = sorted(int(card_id) for card_id in state.unseen_by_level[level])
-        if not candidates:
-            return [self._helper._apply_with_reveal(state, action, level, None)]
-
-        dangerous: List[int] = []
-        safe: List[int] = []
-        for card_id in candidates:
-            if self._is_immediate_winning_reveal(state, card_id):
-                dangerous.append(card_id)
-            else:
-                safe.append(card_id)
-
-        dangerous_representatives = self._dangerous_reveal_representatives(state, dangerous)
-        outcomes = [
-            self._helper._apply_with_reveal(state, action, level, card_id)
-            for card_id in self._helper._ordered_reveals(dangerous_representatives)
-        ]
-        self.stats.dangerous_reveals += len(dangerous_representatives)
-
-        if safe:
-            representative = self._safe_reveal_representative(state, safe)
-            outcomes.append(self._helper._apply_with_reveal(state, action, level, representative))
-            self.stats.safe_reveal_collapses += 1
-            self.stats.threat_pruned_reveals += max(0, len(safe) - 1)
-
-        self.stats.reveal_branches += len(outcomes)
-        return outcomes
+        if not self.use_threat_reveal_pruning:
+            return self._helper._ordered_reveals(candidates)
+        return sorted(
+            candidates,
+            key=lambda card_id: (
+                tuple(-value for value in self._reveal_counterexample_score(state, card_id)),
+                int(card_id),
+            ),
+        )
 
     def _visible_refill_level(self, action: cs.Action) -> Optional[int]:
         action_type = int(action.type)
@@ -1329,6 +1281,8 @@ class DFPNMateSolver:
             return self._card_info(int(action.card_id))[0] - 1
         if action_type == int(cs.ActionType.PURCHASE) and not bool(action.from_reserved):
             return self._card_info(int(action.card_id))[0] - 1
+        if action_type == int(cs.ActionType.RESERVE_DECK):
+            return int(action.deck_level)
         return None
 
     def _is_immediate_winning_reveal(self, state: SolverState, card_id: int) -> bool:
@@ -1345,59 +1299,42 @@ class DFPNMateSolver:
                 return True
         return False
 
-    def _dangerous_reveal_representatives(self, state: SolverState, card_ids: Sequence[int]) -> List[int]:
-        groups: Dict[Tuple[Any, ...], Tuple[int, Tuple[int, int, int, int, int]]] = {}
-        for card_id in card_ids:
-            card_id = int(card_id)
-            key = self._reveal_threat_key(state, card_id)
-            score = self._safe_reveal_score(state, card_id)
-            current = groups.get(key)
-            if current is None or score > current[1]:
-                groups[key] = (card_id, score)
-
-        representatives = [card_id for card_id, _ in groups.values()]
-        self.stats.dangerous_reveal_collapses += max(0, len(card_ids) - len(representatives))
-        return representatives
-
-    def _reveal_threat_key(self, state: SolverState, card_id: int) -> Tuple[Any, ...]:
+    def _reveal_counterexample_score(
+        self,
+        state: SolverState,
+        card_id: int,
+    ) -> Tuple[int, ...]:
+        """Order concrete reveals from worst to best for the attacker."""
         _, points, bonus, cost = self._card_info(card_id)
-        player_terms = []
-        for player_idx in range(2):
+        terms: Dict[int, Tuple[int, int, int, int]] = {}
+        for player_idx in (self.attacker, 1 - self.attacker):
             player = state.game.board.get_player(player_idx)
             can_afford = self._can_afford_card_cost(player, cost)
             bonuses_after = self._fixed_ints(player.bonuses, 5)
             if 0 <= bonus < 5:
                 bonuses_after[bonus] += 1
-            noble_gain = self._can_visit_noble_after_purchase(state, player_idx, bonuses_after)
-            immediate_win = can_afford and int(player.points) + points + (3 if noble_gain else 0) >= 15
-            player_terms.append((int(immediate_win), int(can_afford), int(noble_gain)))
-        return (points, bonus, tuple(player_terms))
+            noble_gain = 3 if self._can_visit_noble_after_purchase(
+                state, player_idx, bonuses_after
+            ) else 0
+            gap, _ = self._card_payment_gap(player, card_id)
+            resulting_score = int(player.points) + points + noble_gain
+            terms[player_idx] = (
+                int(can_afford and resulting_score >= 15),
+                int(can_afford),
+                resulting_score if can_afford else 0,
+                -gap,
+            )
 
-    def _safe_reveal_representative(self, state: SolverState, card_ids: Sequence[int]) -> int:
-        return max(card_ids, key=lambda card_id: self._safe_reveal_score(state, int(card_id)))
-
-    def _safe_reveal_score(self, state: SolverState, card_id: int) -> Tuple[int, int, int, int, int]:
-        _, points, bonus, cost = self._card_info(card_id)
-        best_affordable_score = 0
-        best_noble_gain = 0
-        affordable_count = 0
-        for player_idx in range(2):
-            player = state.game.board.get_player(player_idx)
-            if not self._can_afford_card_cost(player, cost):
-                continue
-            affordable_count += 1
-            bonus_after = [int(v) for v in player.bonuses]
-            if 0 <= bonus < 5:
-                bonus_after[bonus] += 1
-            noble_gain = 3 if self._can_visit_noble_after_purchase(state, player_idx, bonus_after) else 0
-            best_noble_gain = max(best_noble_gain, noble_gain)
-            best_affordable_score = max(best_affordable_score, int(player.points) + points + noble_gain)
+        defender = terms[1 - self.attacker]
+        attacker = terms[self.attacker]
         return (
-            best_affordable_score,
-            best_noble_gain,
+            *defender,
+            -attacker[0],
+            -attacker[1],
+            -attacker[2],
+            -attacker[3],
             points,
-            affordable_count,
-            int(card_id),
+            bonus,
         )
 
     @staticmethod
@@ -1421,25 +1358,20 @@ class DFPNMateSolver:
         player_idx: int,
         bonuses_after: Sequence[int],
     ) -> bool:
-        return bool(self._nobles_available_after_purchase(state, player_idx, bonuses_after))
-
-    def _nobles_available_after_purchase(
-        self,
-        state: SolverState,
-        player_idx: int,
-        bonuses_after: Sequence[int],
-    ) -> List[int]:
-        acquired = set(int(v) for v in state.game.board.get_player(player_idx).acquired_nobles)
-        available: List[int] = []
-        for noble_id in state.game.board.nobles:
-            noble_id = int(noble_id)
+        player = state.game.board.get_player(player_idx)
+        acquired = set(int(value) for value in player.acquired_nobles)
+        bonuses = self._fixed_ints(bonuses_after, 5)
+        for raw_noble_id in state.game.board.nobles:
+            noble_id = int(raw_noble_id)
             if noble_id < 0 or noble_id in acquired:
                 continue
-            requirements = self._noble_requirement(noble_id)
-            bonuses = self._fixed_ints(bonuses_after, 5)
-            if all(bonuses[color] >= requirements[color] for color in range(5)):
-                available.append(noble_id)
-        return available
+            requirement = self._noble_requirement(noble_id)
+            if all(
+                bonuses[color] >= requirement[color]
+                for color in range(5)
+            ):
+                return True
+        return False
 
     def _expand_noble(self, node: _DFPNNode) -> None:
         assert node.state is not None
@@ -1481,49 +1413,61 @@ class DFPNMateSolver:
                 remaining_turns,
                 targets,
             )
-        if self.use_defender_threat_filter and player_idx != self.attacker:
-            working = self._filter_defender_threat_responses(
-                state,
-                working,
-                player_idx,
-                remaining_turns,
-                targets,
-            )
-
         omitted: List[cs.Action] = []
-        if self.use_attacker_dependency_pruning and player_idx == self.attacker:
-            working, omitted = self._filter_attacker_dependency_actions(
+        if self.use_defender_threat_filter and player_idx != self.attacker:
+            working, deferred = self._filter_defender_threat_responses(
                 state,
                 working,
                 player_idx,
                 remaining_turns,
                 targets,
             )
+            omitted.extend(deferred)
+
+        if self.use_attacker_dependency_pruning and player_idx == self.attacker:
+            working, deferred = self._filter_attacker_dependency_actions(
+                state,
+                working,
+                player_idx,
+                remaining_turns,
+                targets,
+            )
+            omitted.extend(deferred)
         elif self.use_defender_relevance_pruning and player_idx != self.attacker:
-            working, omitted = self._filter_defender_relevance_actions(
+            working, deferred = self._filter_defender_relevance_actions(
                 state,
                 working,
                 player_idx,
                 depth,
             )
+            omitted.extend(deferred)
 
-        ordered = sorted(
-            working,
-            key=lambda action: (
-                -self._move_order_score(state, action, player_idx, remaining_turns, targets),
+        score_by_code = {
+            int(action.pack()): self._move_order_score(
+                state, action, player_idx, remaining_turns, targets
+            )
+            for action in [*working, *omitted]
+        }
+        def order_key(action: cs.Action) -> Tuple[int, Tuple[int, int, int]]:
+            return (
+                -score_by_code[int(action.pack())],
                 self._helper._action_order_key(action),
-            ),
-        )
+            )
+
+        ordered = sorted(working, key=order_key)
         if self.max_actions_per_node and len(ordered) > self.max_actions_per_node:
-            self.stats.action_pruned += len(ordered) - self.max_actions_per_node
+            overflow = ordered[self.max_actions_per_node :]
+            omitted.extend(overflow)
+            self.stats.action_pruned += len(overflow)
+            self.stats.lazy_action_pruned += len(overflow)
             ordered = ordered[: self.max_actions_per_node]
-        ordered_omitted = sorted(
-            omitted,
-            key=lambda action: (
-                -self._move_order_score(state, action, player_idx, remaining_turns, targets),
-                self._helper._action_order_key(action),
-            ),
-        )
+        ordered_codes = {int(action.pack()) for action in ordered}
+        unique_omitted = {
+            int(action.pack()): action
+            for action in omitted
+            if int(action.pack()) not in ordered_codes
+        }
+        ordered_omitted = sorted(unique_omitted.values(), key=order_key)
         return ordered, ordered_omitted
 
     def _filter_attacker_dependency_actions(
@@ -1799,10 +1743,18 @@ class DFPNMateSolver:
         if turns <= 0:
             return base_score
 
+        attacker_gems = self._fixed_ints(attacker.gems, 6)
+        attacker_bonuses = self._fixed_ints(attacker.bonuses, 5)
         card_scores = [
             self._card_info(card_id)[1]
             for card_id in self._attacker_upper_bound_card_ids(state)
-            if self._card_can_reach_with_relaxed_resources(attacker, card_id, turns)
+            if self._card_can_reach_with_relaxed_resources(
+                attacker,
+                card_id,
+                turns,
+                gems=attacker_gems,
+                bonuses=attacker_bonuses,
+            )
         ]
         card_scores.sort(reverse=True)
         best_card_points = sum(card_scores[:turns])
@@ -1842,18 +1794,29 @@ class DFPNMateSolver:
         player: cs.PlayerState,
         card: Any,
         turns: int,
+        *,
+        gems: Optional[Sequence[int]] = None,
+        bonuses: Optional[Sequence[int]] = None,
     ) -> bool:
-        gems = self._fixed_ints(player.gems, 6)
-        bonuses = self._fixed_ints(player.bonuses, 5)
+        gem_values = (
+            self._fixed_ints(player.gems, 6)
+            if gems is None
+            else gems
+        )
+        bonus_values = (
+            self._fixed_ints(player.bonuses, 5)
+            if bonuses is None
+            else bonuses
+        )
         cost = self._card_cost(card)
         total_missing = 0
         for color in range(5):
             # Relaxation: previous purchases may add at most one bonus per turn,
             # and all token gains may be used on this card. This can only
             # overestimate reachability.
-            need = max(0, cost[color] - bonuses[color] - turns)
-            total_missing += max(0, need - gems[color])
-        relaxed_tokens = gems[5] + turns * 4
+            need = max(0, cost[color] - bonus_values[color] - turns)
+            total_missing += max(0, need - gem_values[color])
+        relaxed_tokens = gem_values[5] + turns * 4
         return total_missing <= relaxed_tokens
 
     def _representative_payment_and_return_actions(
@@ -1864,42 +1827,10 @@ class DFPNMateSolver:
         remaining_turns: int,
         targets: Dict[int, Tuple[int, int, int]],
     ) -> List[cs.Action]:
-        groups: Dict[Tuple[Any, ...], List[cs.Action]] = {}
-        for action in actions:
-            groups.setdefault(self._representative_action_key(action), []).append(action)
-
-        representatives: List[cs.Action] = []
-        for grouped in groups.values():
-            if len(grouped) == 1:
-                representatives.append(grouped[0])
-                continue
-            best = max(
-                grouped,
-                key=lambda action: self._representative_action_score(
-                    state,
-                    action,
-                    player_idx,
-                    remaining_turns,
-                    targets,
-                ),
-            )
-            representatives.append(best)
-            self.stats.return_pattern_pruned += len(grouped) - 1
-        return self._collapse_equivalent_take_actions(representatives)
-
-    def _representative_action_key(self, action: cs.Action) -> Tuple[Any, ...]:
-        action_type = int(action.type)
-        if action_type == int(cs.ActionType.PURCHASE):
-            return ("buy", int(action.card_id), bool(action.from_reserved))
-        if action_type in (int(cs.ActionType.TAKE_DIFFERENT), int(cs.ActionType.TAKE_SAME)):
-            return ("take", action_type, tuple(self._fixed_ints(action.take, 6)))
-        if action_type == int(cs.ActionType.RESERVE_VISIBLE):
-            return ("reserve-visible", int(action.card_id))
-        if action_type == int(cs.ActionType.RESERVE_DECK):
-            return ("reserve-deck", int(action.deck_level))
-        if action_type == int(cs.ActionType.VISIT_NOBLE):
-            return ("noble", int(action.noble_choice))
-        return ("other", action_type, int(action.pack()))
+        # Different payment or return patterns generally leave different gems
+        # and must remain separate proof obligations.  A take action may only be
+        # collapsed when its complete bank/player delta is identical.
+        return self._collapse_equivalent_take_actions(actions)
 
     def _collapse_equivalent_take_actions(self, actions: Sequence[cs.Action]) -> List[cs.Action]:
         groups: Dict[Tuple[int, ...], List[cs.Action]] = {}
@@ -1937,29 +1868,6 @@ class DFPNMateSolver:
             -int(self._helper._action_order_key(action)[0]),
         )
 
-    def _representative_action_score(
-        self,
-        state: SolverState,
-        action: cs.Action,
-        player_idx: int,
-        remaining_turns: int,
-        targets: Dict[int, Tuple[int, int, int]],
-    ) -> int:
-        base = self._move_order_score(state, action, player_idx, remaining_turns, targets)
-        action_type = int(action.type)
-        if action_type == int(cs.ActionType.PURCHASE):
-            gold_used = sum(self._fixed_ints(action.gold_as, 5))
-            return base - gold_used * 2000
-        if action_type in (
-            int(cs.ActionType.TAKE_DIFFERENT),
-            int(cs.ActionType.TAKE_SAME),
-            int(cs.ActionType.RESERVE_VISIBLE),
-            int(cs.ActionType.RESERVE_DECK),
-        ):
-            returns = self._fixed_ints(action.return_gems, 6)
-            return base - returns[5] * 2000 - sum(returns[:5]) * 200
-        return base
-
     def _filter_defender_threat_responses(
         self,
         state: SolverState,
@@ -1967,17 +1875,20 @@ class DFPNMateSolver:
         player_idx: int,
         remaining_turns: int,
         targets: Dict[int, Tuple[int, int, int]],
-    ) -> List[cs.Action]:
+    ) -> Tuple[List[cs.Action], List[cs.Action]]:
         attacker_threats = self._immediate_scoring_threat_cards(state, self.attacker)
         if not attacker_threats:
-            return list(actions)
+            return list(actions), []
 
         kept: List[cs.Action] = []
+        deferred: List[cs.Action] = []
         for action in actions:
             action_type = int(action.type)
             if action_type == int(cs.ActionType.PURCHASE):
                 if self._action_reaches_15(state, action, player_idx):
                     kept.append(action)
+                else:
+                    deferred.append(action)
                 continue
             if action_type == int(cs.ActionType.RESERVE_VISIBLE) and int(action.card_id) in attacker_threats:
                 kept.append(action)
@@ -1985,12 +1896,15 @@ class DFPNMateSolver:
             if action_type in (int(cs.ActionType.TAKE_DIFFERENT), int(cs.ActionType.TAKE_SAME)):
                 if self._token_denies_attacker_threat(state, action, attacker_threats):
                     kept.append(action)
+                else:
+                    deferred.append(action)
                 continue
+            deferred.append(action)
 
         if kept:
-            self.stats.action_pruned += max(0, len(actions) - len(kept))
-            return kept
-        return list(actions)
+            self.stats.lazy_action_pruned += len(deferred)
+            return kept, deferred
+        return list(actions), []
 
     def _immediate_scoring_threat_cards(self, state: SolverState, player_idx: int) -> set:
         threats = set()
@@ -2044,28 +1958,51 @@ class DFPNMateSolver:
     ) -> int:
         action_type = int(action.type)
         if action_type == int(cs.ActionType.VISIT_NOBLE):
-            return 900000
+            return 900_000
 
         if action_type == int(cs.ActionType.PURCHASE):
             card_id = int(action.card_id)
-            expected, turns, gap = self._card_expected_score(state, player_idx, card_id)
+            card_score = targets.get(card_id)
+            if card_score is None:
+                card_score = self._card_expected_score(state, player_idx, card_id)
+            expected, turns, gap = card_score
+            player = state.game.board.get_player(player_idx)
+            if int(player.points) + expected >= 15:
+                return 3_000_000 + expected * 10_000
             horizon_bonus = 50000 if turns <= max(1, remaining_turns) else 0
-            return 1000000 + horizon_bonus + expected * 10000 - turns * 500 - gap * 100
+            gold_used = sum(self._fixed_ints(action.gold_as, 5))
+            return (
+                1_000_000
+                + horizon_bonus
+                + expected * 10_000
+                - turns * 500
+                - gap * 100
+                - gold_used * 2_000
+            )
 
         if action_type == int(cs.ActionType.RESERVE_VISIBLE):
             card_id = int(action.card_id)
-            expected, turns, gap = targets.get(
-                card_id,
-                self._card_expected_score(state, player_idx, card_id),
+            card_score = targets.get(card_id)
+            if card_score is None:
+                card_score = self._card_expected_score(state, player_idx, card_id)
+            expected, turns, gap = card_score
+            returns = self._fixed_ints(action.return_gems, 6)
+            return (
+                450_000
+                + expected * 7_000
+                - turns * 700
+                - gap * 150
+                - returns[5] * 2_000
+                - sum(returns[:5]) * 200
             )
-            return 450000 + expected * 7000 - turns * 700 - gap * 150
 
         if action_type in (int(cs.ActionType.TAKE_DIFFERENT), int(cs.ActionType.TAKE_SAME)):
             progress_score = self._token_progress_score(state, player_idx, action, targets)
-            return 300000 + progress_score
+            return 300_000 + progress_score
 
         if action_type == int(cs.ActionType.RESERVE_DECK):
-            return 120000
+            returns = self._fixed_ints(action.return_gems, 6)
+            return 120_000 - returns[5] * 2_000 - sum(returns[:5]) * 200
 
         return 0
 
@@ -2171,6 +2108,7 @@ class DFPNMateSolver:
 
         player = state.game.board.get_player(player_idx)
         before_gems = self._fixed_ints(player.gems, 6)
+        bonuses = self._fixed_ints(player.bonuses, 5)
         take = self._fixed_ints(action.take, 6)
         returns = self._fixed_ints(action.return_gems, 6)
         after_gems = [
@@ -2180,8 +2118,18 @@ class DFPNMateSolver:
 
         best = 0
         for card_id, (expected, turns, _) in targets.items():
-            gap_before, lack_before = self._card_payment_gap(player, card_id, before_gems)
-            gap_after, lack_after = self._card_payment_gap(player, card_id, after_gems)
+            gap_before, lack_before = self._card_payment_gap(
+                player,
+                card_id,
+                before_gems,
+                bonuses_override=bonuses,
+            )
+            gap_after, lack_after = self._card_payment_gap(
+                player,
+                card_id,
+                after_gems,
+                bonuses_override=bonuses,
+            )
             progress = max(0, gap_before - gap_after)
             color_match = sum(
                 min(max(0, int(action.take[color]) - int(action.return_gems[color])), lack_before[color])
@@ -2204,9 +2152,19 @@ class DFPNMateSolver:
         player: cs.PlayerState,
         card: Any,
         gems_override: Optional[Sequence[int]] = None,
+        *,
+        bonuses_override: Optional[Sequence[int]] = None,
     ) -> Tuple[int, Tuple[int, int, int, int, int]]:
-        gems = DFPNMateSolver._fixed_ints(gems_override if gems_override is not None else player.gems, 6)
-        bonuses = DFPNMateSolver._fixed_ints(player.bonuses, 5)
+        gems = (
+            DFPNMateSolver._fixed_ints(player.gems, 6)
+            if gems_override is None
+            else gems_override
+        )
+        bonuses = (
+            DFPNMateSolver._fixed_ints(player.bonuses, 5)
+            if bonuses_override is None
+            else bonuses_override
+        )
         cost = DFPNMateSolver._card_cost(card)
         lack = tuple(
             max(0, cost[color] - bonuses[color] - gems[color])
@@ -2218,15 +2176,17 @@ class DFPNMateSolver:
     @staticmethod
     def _fixed_ints(values: Sequence[Any], length: int, default: int = 0) -> List[int]:
         try:
-            return [int(values[idx]) for idx in range(length)]
+            out = [int(value) for value in values]
         except Exception:
-            out: List[int] = []
+            out = []
             for idx in range(length):
                 try:
                     out.append(int(values[idx]))
                 except Exception:
                     out.append(default)
-            return out
+        if len(out) < length:
+            out.extend([default] * (length - len(out)))
+        return out[:length]
 
     @staticmethod
     def _card_info(card_or_id: Any) -> Tuple[int, int, int, Tuple[int, int, int, int, int]]:
@@ -2289,44 +2249,51 @@ class DFPNMateSolver:
 
     def _materialize_state_actions(self, node: _DFPNNode) -> None:
         assert node.state is not None
+        if not node.omitted_actions:
+            node.lazy_actions_materialized = True
+            return
         actor_is_attacker = int(node.state.game.board.current_player) == self.attacker
-        for action in node.omitted_actions:
-            node.children.append(self._action_node(node.state, node.depth, action, actor_is_attacker))
-        node.omitted_actions = ()
-        node.lazy_actions_materialized = True
+        action = node.omitted_actions[0]
+        node.children.append(
+            self._action_node(node.state, node.depth, action, actor_is_attacker)
+        )
+        node.omitted_actions = node.omitted_actions[1:]
+        node.lazy_actions_materialized = not bool(node.omitted_actions)
         self.stats.lazy_action_refinements += 1
 
     def _lazy_reveal_needs_refinement(self, node: _DFPNNode) -> bool:
         if node.kind != "lazy_reveal" or node.lazy_reveal_materialized:
             return False
-        if node.reason == "defender_action" and node.depth <= 0:
-            return False
         if not node.children:
-            return False
-        return any(child.proof == 0 or child.disproof == 0 for child in node.children)
+            return True
+        # A reveal node is always AND.  A single refuted concrete reveal is
+        # sufficient to refute the move; another reveal is needed only after
+        # every generated reveal has been proven.
+        return all(child.proof == 0 for child in node.children)
 
     def _materialize_lazy_reveal(self, node: _DFPNNode) -> None:
         assert node.state is not None
         assert node.action is not None
         assert node.reveal_level is not None
-        actor_is_attacker = node.reason == "attacker_action"
-        outcomes = self._transition_outcomes(node.state, node.action)
-        node.children.clear()
-        for outcome in outcomes:
-            node.children.append(
-                self._outcome_node(node.depth, node.action, outcome, actor_is_attacker)
-            )
-        node.lazy_reveal_materialized = True
+        self._materialize_next_reveal(node)
         self.stats.lazy_reveal_refinements += 1
 
     def _select_most_proving_child(self, node: _DFPNNode) -> Tuple[_DFPNNode, int]:
-        if node.node_type == "OR":
-            ordered = sorted(node.children, key=lambda child: (child.proof, child.disproof))
-            second = ordered[1].proof if len(ordered) > 1 else INF
-            return ordered[0], second
-        ordered = sorted(node.children, key=lambda child: (child.disproof, child.proof))
-        second = ordered[1].disproof if len(ordered) > 1 else INF
-        return ordered[0], second
+        primary = (lambda child: child.proof) if node.node_type == "OR" else (
+            lambda child: child.disproof
+        )
+        secondary = (lambda child: child.disproof) if node.node_type == "OR" else (
+            lambda child: child.proof
+        )
+        best = node.children[0]
+        second_value = INF
+        for child in node.children[1:]:
+            if (primary(child), secondary(child)) < (primary(best), secondary(best)):
+                second_value = min(second_value, primary(best))
+                best = child
+            else:
+                second_value = min(second_value, primary(child))
+        return best, second_value
 
     def _extract_tree(self, node: _DFPNNode, want_proof: bool) -> Dict[str, Any]:
         return _extract_proof_tree(
@@ -2357,6 +2324,7 @@ class DFPNMateSolver:
         if node.kind == "lazy_reveal":
             data["reveal_level"] = None if node.reveal_level is None else node.reveal_level + 1
             data["reveal_candidate_count"] = len(node.reveal_candidates)
+            data["reveal_materialized_count"] = int(node.reveal_next_index)
             data["lazy_reveal_materialized"] = bool(node.lazy_reveal_materialized)
         if node.kind == "state" and node.omitted_actions:
             data["omitted_action_count"] = len(node.omitted_actions)
@@ -2481,7 +2449,10 @@ def _parallel_root_worker(task: Dict[str, Any]) -> Dict[str, Any]:
     solver._start_time = time.monotonic()
     solver._helper.stats = solver.stats
     solver._helper._start_time = solver._start_time
-    solver._prune_inactive_subtrees = True
+    # State nodes are shared through the transposition table.  Releasing an
+    # inactive sibling recursively can otherwise clear a node still referenced
+    # by the proving branch.
+    solver._prune_inactive_subtrees = False
     solver.use_threat_reveal_pruning = use_threat_reveal_pruning
     solver.use_lazy_reveal_pruning = use_lazy_reveal_pruning
     solver.use_attacker_dependency_pruning = use_attacker_dependency_pruning
@@ -3064,6 +3035,72 @@ def solve_reveal_verified_mate(
         for entry in candidate_tree.get("line", [])
         if int(entry["player"]) == attacker
     ]
+
+    def run_full_verification(
+        verification_nodes: int,
+        verification_time: float,
+    ) -> Dict[str, Any]:
+        if int(options.jobs) != 1 and not include_proof_dag:
+            depth_search = cs.search_reveal_verified_mate_anytime(
+                game,
+                attacker=int(attacker),
+                min_depth=int(candidate_depth),
+                max_depth=int(candidate_depth),
+                max_nodes=max(0, int(verification_nodes)),
+                time_limit_seconds=max(0.0, float(verification_time)),
+                preferred_attacker_actions=preferred_attacker_actions,
+                jobs=int(options.jobs),
+            )
+            attempts = list(depth_search["attempts"])
+            if attempts:
+                attempt = dict(attempts[-1])
+                proven = attempt.get("status") == "mate"
+                return {
+                    "proven": proven,
+                    "reason": str(attempt["reason"]),
+                    "unknown_reason": (
+                        None
+                        if proven
+                        else str(
+                            attempt.get("unknown_reason")
+                            or "parallel positive mate proof was not found"
+                        )
+                    ),
+                    "memoized_states": 0,
+                    "stats": dict(attempt["stats"]),
+                    "line": [dict(entry) for entry in attempt.get("line", [])],
+                    "proof_dag": {},
+                }
+            return {
+                "proven": False,
+                "reason": str(depth_search["stop_reason"]),
+                "unknown_reason": (
+                    None
+                    if bool(depth_search["permanent_no_mate_proven"])
+                    else str(depth_search["stop_reason"])
+                ),
+                "memoized_states": 0,
+                "stats": dict(depth_search["stats"]),
+                "line": [],
+                "proof_dag": {},
+            }
+        return cs.solve_reveal_verified_mate_cpp(
+            game,
+            attacker=int(attacker),
+            depth=int(candidate_depth),
+            max_nodes=verification_nodes,
+            time_limit_seconds=verification_time,
+            preferred_attacker_actions=preferred_attacker_actions,
+            include_proof_dag=bool(include_proof_dag),
+            proof_dag_node_limit=max(0, int(proof_dag_node_limit)),
+            proof_dag_edge_limit=max(0, int(proof_dag_edge_limit)),
+            proof_dag_format=(
+                "compact"
+                if include_proof_dag and proof_dag_format == "compact"
+                else "v1"
+            ),
+        )
+
     strict_verification_stats = None
     used_strict_result = False
     if (
@@ -3126,39 +3163,9 @@ def solve_reveal_verified_mate(
                 if options.max_nodes
                 else 0
             )
-            raw = cs.solve_reveal_verified_mate_cpp(
-                game,
-                attacker=int(attacker),
-                depth=int(candidate_depth),
-                max_nodes=remaining_nodes,
-                time_limit_seconds=remaining_time,
-                preferred_attacker_actions=preferred_attacker_actions,
-                include_proof_dag=bool(include_proof_dag),
-                proof_dag_node_limit=max(0, int(proof_dag_node_limit)),
-                proof_dag_edge_limit=max(0, int(proof_dag_edge_limit)),
-                proof_dag_format=(
-                    "compact"
-                    if include_proof_dag and proof_dag_format == "compact"
-                    else "v1"
-                ),
-            )
+            raw = run_full_verification(remaining_nodes, remaining_time)
     else:
-        raw = cs.solve_reveal_verified_mate_cpp(
-            game,
-            attacker=int(attacker),
-            depth=int(candidate_depth),
-            max_nodes=remaining_nodes,
-            time_limit_seconds=remaining_time,
-            preferred_attacker_actions=preferred_attacker_actions,
-            include_proof_dag=bool(include_proof_dag),
-            proof_dag_node_limit=max(0, int(proof_dag_node_limit)),
-            proof_dag_edge_limit=max(0, int(proof_dag_edge_limit)),
-            proof_dag_format=(
-                "compact"
-                if include_proof_dag and proof_dag_format == "compact"
-                else "v1"
-            ),
-        )
+        raw = run_full_verification(remaining_nodes, remaining_time)
     verification_stats = raw["stats"]
     if strict_verification_stats is not None and not used_strict_result:
         verification_stats = dict(verification_stats)
@@ -3357,6 +3364,9 @@ def solve_game_dfpn(*args: Any, **kwargs: Any) -> SearchResult:
     use_defender_relevance_pruning = kwargs.pop(
         "use_defender_relevance_pruning", _DFPN_DEFAULT_PRUNING["defender_relevance"]
     )
+    use_threat_reveal_pruning = kwargs.pop(
+        "use_threat_reveal_pruning", _DFPN_DEFAULT_PRUNING["threat_reveal"]
+    )
     use_return_pattern_pruning = kwargs.pop(
         "use_return_pattern_pruning", _DFPN_DEFAULT_PRUNING["return_pattern"]
     )
@@ -3375,24 +3385,12 @@ def solve_game_dfpn(*args: Any, **kwargs: Any) -> SearchResult:
     target_candidate_limit = kwargs.pop(
         "target_candidate_limit", _DFPN_DEFAULT_PRUNING["target_candidate_limit"]
     )
-    _DFPN_DEFAULT_PRUNING.update(
-        {
-            "lazy_reveal": bool(use_lazy_reveal_pruning),
-            "attacker_dependency": bool(use_attacker_dependency_pruning),
-            "defender_relevance": bool(use_defender_relevance_pruning),
-            "return_pattern": bool(use_return_pattern_pruning),
-            "upper_bound": bool(use_upper_bound_pruning),
-            "immediate_terminal": bool(use_immediate_terminal_pruning),
-            "defender_threat_filter": bool(use_defender_threat_filter),
-            "max_actions_per_node": max(0, int(max_actions_per_node)),
-            "target_candidate_limit": max(0, int(target_candidate_limit)),
-        }
-    )
     return _solve_game_dfpn_impl(
         *args,
         use_lazy_reveal_pruning=bool(use_lazy_reveal_pruning),
         use_attacker_dependency_pruning=bool(use_attacker_dependency_pruning),
         use_defender_relevance_pruning=bool(use_defender_relevance_pruning),
+        use_threat_reveal_pruning=bool(use_threat_reveal_pruning),
         use_return_pattern_pruning=bool(use_return_pattern_pruning),
         use_upper_bound_pruning=bool(use_upper_bound_pruning),
         use_immediate_terminal_pruning=bool(use_immediate_terminal_pruning),

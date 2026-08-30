@@ -2,6 +2,7 @@
 #include "action.h"
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -21,6 +22,8 @@ public:
 
   VisibleOnlySearchResult solve(const Game &input) {
     memo_.clear();
+    forced_memo_.clear();
+    forced_bounds_.clear();
     stats_ = VisibleOnlySearchStats();
     limits_.reset();
 
@@ -36,7 +39,6 @@ public:
     try {
       const int attacker = game.current_player();
       for (int depth = 1; depth <= FORCED_WIN_MAX_DEPTH; ++depth) {
-        forced_memo_.clear();
         std::unordered_set<DepthStateKey, DepthStateKeyHash> forced_path;
         if (forced_win(game, forced_path, known_card_count(game), attacker,
                        depth) == ForceStatus::PROVEN) {
@@ -119,12 +121,20 @@ private:
     size_t action_count = 0;
   };
 
+  struct ForceBounds {
+    int min_proven_depth = std::numeric_limits<int>::max();
+    int max_refuted_depth = -1;
+    ForceEntry proven;
+    ForceEntry refuted;
+  };
+
   using OrderedAction = ActionOrderKey;
 
   SearchLimit limits_;
   VisibleOnlySearchStats stats_;
   std::unordered_map<StateKey, Entry, StateKeyHash> memo_;
   std::unordered_map<DepthStateKey, ForceEntry, DepthStateKeyHash> forced_memo_;
+  std::unordered_map<StateKey, ForceBounds, StateKeyHash> forced_bounds_;
   Game root_{0};
   static constexpr int FORCED_WIN_MAX_DEPTH = 8;
   static constexpr size_t ATTACKER_TAKE_LIMIT = 6;
@@ -155,6 +165,20 @@ private:
       ++stats_.memo_hits;
       return memo_it->second.status;
     }
+    auto bounds_it = forced_bounds_.find(key.state);
+    if (bounds_it != forced_bounds_.end()) {
+      const ForceBounds &bounds = bounds_it->second;
+      if (bounds.min_proven_depth <= depth) {
+        ++stats_.memo_hits;
+        forced_memo_[key] = bounds.proven;
+        return ForceStatus::PROVEN;
+      }
+      if (bounds.max_refuted_depth >= depth) {
+        ++stats_.memo_hits;
+        forced_memo_[key] = bounds.refuted;
+        return ForceStatus::REFUTED;
+      }
+    }
     if (path.find(key) != path.end()) {
       ++stats_.terminal_nodes;
       return ForceStatus::UNKNOWN;
@@ -166,7 +190,8 @@ private:
     stats_.legal_moves += actions.size();
     if (actions.empty()) {
       ++stats_.terminal_nodes;
-      forced_memo_[key] = ForceEntry{ForceStatus::REFUTED, 0, false, 0};
+      store_force_entry(key,
+                        ForceEntry{ForceStatus::REFUTED, 0, false, 0});
       return ForceStatus::REFUTED;
     }
 
@@ -194,14 +219,16 @@ private:
       }
       if (current_player == attacker && child == ForceStatus::PROVEN) {
         path.erase(key);
-        forced_memo_[key] =
-            ForceEntry{ForceStatus::PROVEN, ordered.code, true, actions.size()};
+        store_force_entry(
+            key, ForceEntry{ForceStatus::PROVEN, ordered.code, true,
+                            actions.size()});
         return ForceStatus::PROVEN;
       }
       if (current_player != attacker && child == ForceStatus::REFUTED) {
         path.erase(key);
-        forced_memo_[key] = ForceEntry{ForceStatus::REFUTED, ordered.code, true,
-                                       actions.size()};
+        store_force_entry(
+            key, ForceEntry{ForceStatus::REFUTED, ordered.code, true,
+                            actions.size()});
         return ForceStatus::REFUTED;
       }
       has_unknown = has_unknown || child == ForceStatus::UNKNOWN;
@@ -212,9 +239,23 @@ private:
       return ForceStatus::UNKNOWN;
     const ForceStatus status =
         current_player == attacker ? ForceStatus::REFUTED : ForceStatus::PROVEN;
-    forced_memo_[key] =
-        ForceEntry{status, first_action, has_first_action, actions.size()};
+    store_force_entry(
+        key, ForceEntry{status, first_action, has_first_action, actions.size()});
     return status;
+  }
+
+  void store_force_entry(const DepthStateKey &key, const ForceEntry &entry) {
+    forced_memo_[key] = entry;
+    ForceBounds &bounds = forced_bounds_[key.state];
+    if (entry.status == ForceStatus::PROVEN &&
+        key.depth < bounds.min_proven_depth) {
+      bounds.min_proven_depth = key.depth;
+      bounds.proven = entry;
+    } else if (entry.status == ForceStatus::REFUTED &&
+               key.depth > bounds.max_refuted_depth) {
+      bounds.max_refuted_depth = key.depth;
+      bounds.refuted = entry;
+    }
   }
 
   int minimax(Game &game, std::unordered_set<StateKey, StateKeyHash> &path,
@@ -495,8 +536,10 @@ private:
 
   static StateKey state_key(const Game &game) {
     const Board &board = game.board;
+    const uint64_t rule_position_hash =
+        board.hash() ^ Zobrist::get_instance().turn[board.turn];
     return StateKey{StateKeyCore{
-        board.hash(), board.players[0].points, board.players[1].points,
+        rule_position_hash, board.players[0].points, board.players[1].points,
         board.players[0].purchased_count, board.players[1].purchased_count,
         board.final_round, board.winner}};
   }
@@ -527,14 +570,22 @@ private:
         break;
       seen.insert(key);
       auto it = forced_memo_.find(key);
-      if (it == forced_memo_.end() || !it->second.has_action)
+      const ForceEntry *entry =
+          it == forced_memo_.end() ? nullptr : &it->second;
+      if (entry == nullptr) {
+        auto bounds = forced_bounds_.find(key.state);
+        if (bounds != forced_bounds_.end() &&
+            bounds->second.min_proven_depth <= depth)
+          entry = &bounds->second.proven;
+      }
+      if (entry == nullptr || !entry->has_action)
         break;
       const int current_player = game.current_player();
-      if (!game.apply_action_code_trusted(it->second.action_code, false))
+      if (!game.apply_action_code_trusted(entry->action_code, false))
         break;
-      line.push_back(VisibleOnlyLineEntry{it->second.action_code, attacker,
+      line.push_back(VisibleOnlyLineEntry{entry->action_code, attacker,
                                           "forced_visible_only_win",
-                                          it->second.action_count});
+                                          entry->action_count});
       depth -= static_cast<int>(current_player == attacker &&
                                 game.current_player() != current_player);
     }

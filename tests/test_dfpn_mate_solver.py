@@ -84,6 +84,23 @@ def test_solver_line_serializes_kifu_moves():
     assert parsed["moves"] == [{"player": 0, "usi": usi}]
 
 
+def test_verified_solver_line_serializes_concrete_reveal_card():
+    game = cs.Game(seed=0)
+    usi = action_to_usi(game.legal_actions[0], game=game)
+
+    parsed = parse_kifu_text(principal_line_to_kifu_text(
+        game,
+        [{"player": 0, "action": {"usi": usi}, "reveal_card": 12}],
+        attacker=0,
+    ))
+
+    assert parsed["moves"] == [{
+        "player": 0,
+        "usi": usi,
+        "comment": "reveal:C12",
+    }]
+
+
 def test_compact_strategy_dag_groups_reveals_without_losing_cards():
     reveal_edges = [
         {"action_code": 123, "reveal_card": card, "child": 1}
@@ -314,7 +331,7 @@ def test_parallel_dfpn_matches_sequential_on_small_branching_state():
     assert parallel.stats.nodes > 0
 
 
-def test_dfpn_collapses_non_dangerous_reveal_cards():
+def test_dfpn_keeps_every_non_dangerous_reveal_card():
     game = cs.Game(seed=1)
     state = SolverState.from_game(game)
     solver = DFPNMateSolver(attacker=0, max_depth=1, options=_fast_options())
@@ -326,12 +343,15 @@ def test_dfpn_collapses_non_dangerous_reveal_cards():
 
     outcomes = solver._transition_outcomes(state, action)
 
-    assert len(outcomes) < len(state.unseen_by_level[level])
-    assert solver.stats.safe_reveal_collapses == 1
-    assert solver.stats.threat_pruned_reveals > 0
+    assert {outcome.reveal_card for outcome in outcomes} == set(
+        state.unseen_by_level[level]
+    )
+    assert len(outcomes) == len(state.unseen_by_level[level])
+    assert solver.stats.safe_reveal_collapses == 0
+    assert solver.stats.threat_pruned_reveals == 0
 
 
-def test_dfpn_collapses_dangerous_reveals_by_threat_shape():
+def test_dfpn_orders_but_does_not_collapse_dangerous_reveals():
     game = cs.Game(seed=1)
     player = game.board.get_player(0)
     player.points = 14
@@ -347,9 +367,11 @@ def test_dfpn_collapses_dangerous_reveals_by_threat_shape():
 
     outcomes = solver._transition_outcomes(state, action)
 
-    assert solver.stats.dangerous_reveal_collapses > 0
+    assert solver.stats.dangerous_reveal_collapses == 0
     assert len(outcomes) == solver.stats.dangerous_reveals
-    assert len(outcomes) < len(state.unseen_by_level[0])
+    assert {outcome.reveal_card for outcome in outcomes} == set(
+        state.unseen_by_level[0]
+    )
 
 
 def test_dfpn_splits_root_action_tasks_by_reveal_outcome():
@@ -357,6 +379,7 @@ def test_dfpn_splits_root_action_tasks_by_reveal_outcome():
     state = SolverState.from_game(game)
     solver = DFPNMateSolver(attacker=0, max_depth=1, options=_fast_options())
     solver.use_lazy_reveal_pruning = False
+    solver.use_upper_bound_pruning = False
     root = solver._state_node(state, 1)
     solver._expand(root)
     action_child = next(child for child in root.children if child.kind == "action")
@@ -400,7 +423,7 @@ def test_dfpn_root_parallel_materializes_omitted_defender_actions(monkeypatch):
     }
 
 
-def test_dfpn_lazy_reveal_starts_with_blank_then_refines():
+def test_dfpn_lazy_reveal_generates_one_concrete_branch_at_a_time():
     game = cs.Game(seed=1)
     state = SolverState.from_game(game)
     solver = DFPNMateSolver(attacker=0, max_depth=1, options=_fast_options())
@@ -417,20 +440,50 @@ def test_dfpn_lazy_reveal_starts_with_blank_then_refines():
 
     solver._expand(lazy)
     assert len(lazy.children) == 1
-    assert lazy.children[0].outcome.reveal_card is None
+    assert lazy.children[0].outcome.reveal_card is not None
+    assert lazy.reveal_next_index == 1
     assert solver.stats.lazy_reveal_branches == 1
 
     lazy.children[0].proof = 0
     lazy.children[0].disproof = dfpn_mate_solver.INF
     solver._update(lazy)
 
-    assert lazy.lazy_reveal_materialized
     assert solver.stats.lazy_reveal_refinements == 1
-    assert len(lazy.children) >= 1
+    assert len(lazy.children) == 2
+    assert not lazy.lazy_reveal_materialized
     assert all(child.outcome.reveal_card is not None for child in lazy.children)
 
 
-def test_dfpn_skips_defender_depth_zero_lazy_reveal_refinement():
+def test_dfpn_lazy_reveal_proves_only_after_every_card_is_proven():
+    game = cs.Game(seed=1)
+    state = SolverState.from_game(game)
+    solver = DFPNMateSolver(attacker=0, max_depth=1, options=_fast_options())
+    action = next(
+        action
+        for action in solver._helper._legal_actions(state)
+        if int(action.type) == int(cs.ActionType.RESERVE_VISIBLE)
+    )
+    lazy = solver._lazy_reveal_node(state, 1, action, actor_is_attacker=True)
+    assert lazy is not None
+    solver._expand(lazy)
+
+    while not lazy.lazy_reveal_materialized:
+        lazy.children[-1].proof = 0
+        lazy.children[-1].disproof = dfpn_mate_solver.INF
+        solver._update(lazy)
+        if not lazy.lazy_reveal_materialized:
+            assert lazy.proof > 0
+
+    lazy.children[-1].proof = 0
+    lazy.children[-1].disproof = dfpn_mate_solver.INF
+    solver._update(lazy)
+
+    assert len(lazy.children) == len(lazy.reveal_candidates)
+    assert lazy.proof == 0
+    assert lazy.disproof == dfpn_mate_solver.INF
+
+
+def test_dfpn_refines_defender_depth_zero_reveals_before_proof():
     game = cs.Game(seed=1)
     game.board.current_player = 1
     state = SolverState.from_game(game)
@@ -450,15 +503,16 @@ def test_dfpn_skips_defender_depth_zero_lazy_reveal_refinement():
     solver._update(lazy)
 
     assert not lazy.lazy_reveal_materialized
-    assert solver.stats.lazy_reveal_refinements == 0
-    assert len(lazy.children) == 1
-    assert lazy.children[0].outcome.reveal_card is None
+    assert solver.stats.lazy_reveal_refinements == 1
+    assert len(lazy.children) == 2
+    assert all(child.outcome.reveal_card is not None for child in lazy.children)
 
 
 def test_dfpn_root_parallel_keeps_lazy_reveal_inside_action_task():
     game = cs.Game(seed=1)
     state = SolverState.from_game(game)
     solver = DFPNMateSolver(attacker=0, max_depth=1, options=_fast_options())
+    solver.use_upper_bound_pruning = False
     root = solver._state_node(state, 1)
     solver._expand(root)
     action_child = next(
@@ -490,9 +544,35 @@ def test_dfpn_lazy_attacker_actions_refine_before_disproof():
     omitted = len(root.omitted_actions)
     solver._update(root)
 
-    assert root.lazy_actions_materialized
+    assert root.lazy_actions_materialized is (omitted == 1)
     assert solver.stats.lazy_action_refinements == 1
-    assert len(root.children) == before + omitted
+    assert len(root.children) == before + 1
+    assert len(root.omitted_actions) == omitted - 1
+
+
+def test_dfpn_lazy_attacker_actions_disprove_only_after_all_moves_are_read():
+    game = cs.Game(seed=4)
+    state = SolverState.from_game(game)
+    solver = DFPNMateSolver(attacker=0, max_depth=4, options=_fast_options())
+    root = solver._state_node(state, 4)
+    solver._expand(root)
+    assert root.omitted_actions
+
+    while root.omitted_actions:
+        for child in root.children:
+            child.proof = dfpn_mate_solver.INF
+            child.disproof = 0
+        solver._update(root)
+        if root.omitted_actions:
+            assert root.disproof > 0
+
+    for child in root.children:
+        child.proof = dfpn_mate_solver.INF
+        child.disproof = 0
+    solver._update(root)
+
+    assert root.disproof == 0
+    assert root.proof == dfpn_mate_solver.INF
 
 
 def test_dfpn_lazy_defender_actions_refine_before_proof():
@@ -513,9 +593,10 @@ def test_dfpn_lazy_defender_actions_refine_before_proof():
     omitted = len(root.omitted_actions)
     solver._update(root)
 
-    assert root.lazy_actions_materialized
+    assert root.lazy_actions_materialized is (omitted == 1)
     assert solver.stats.lazy_action_refinements == 1
-    assert len(root.children) == before + omitted
+    assert len(root.children) == before + 1
+    assert len(root.omitted_actions) == omitted - 1
 
 
 def test_dfpn_collapses_take_actions_by_net_token_delta():
@@ -550,6 +631,87 @@ def test_dfpn_collapses_take_actions_by_net_token_delta():
     assert len(action_shapes) > 1
     assert len(child_keys) == 1
     assert len(collapsed) < len(actions)
+
+
+def test_dfpn_keeps_distinct_return_patterns_as_separate_actions():
+    game = load_game_from_usi_text(BENCH_POSITION)
+    state = SolverState.from_game(game)
+    solver = DFPNMateSolver(attacker=0, max_depth=5, options=_fast_options())
+    actions = solver._helper._legal_actions(state)
+    grouped = {}
+    for action in actions:
+        if int(action.type) != int(cs.ActionType.TAKE_DIFFERENT):
+            continue
+        take = tuple(solver._fixed_ints(action.take, 6))
+        grouped.setdefault(take, []).append(action)
+    distinct_returns = next(group for group in grouped.values() if len(group) >= 5)
+
+    targets = solver._target_card_scores(state, 0, 5)
+    representatives = solver._representative_payment_and_return_actions(
+        state,
+        actions,
+        0,
+        5,
+        targets,
+    )
+    representative_codes = {int(action.pack()) for action in representatives}
+
+    assert {int(action.pack()) for action in distinct_returns}.issubset(
+        representative_codes
+    )
+    child_keys = set()
+    for action in distinct_returns:
+        child = game.clone_light()
+        assert child.apply(action, False)
+        child_keys.add(solver._helper._canonical_key(SolverState.from_game(child)))
+    assert len(child_keys) == len(distinct_returns)
+
+
+def test_dfpn_action_cap_defers_instead_of_dropping_legal_moves():
+    game = load_game_from_usi_text(BENCH_POSITION)
+    state = SolverState.from_game(game)
+    solver = DFPNMateSolver(attacker=0, max_depth=5, options=_fast_options())
+    solver.use_attacker_dependency_pruning = False
+    solver.max_actions_per_node = 2
+
+    ordered, omitted = solver._ordered_actions_with_omissions(
+        state,
+        solver._helper._legal_actions(state),
+        depth=5,
+    )
+
+    assert len(ordered) == 2
+    assert omitted
+    assert {int(action.pack()) for action in ordered}.isdisjoint(
+        int(action.pack()) for action in omitted
+    )
+    assert solver.stats.action_pruned == len(omitted)
+
+
+def test_dfpn_lazily_enumerates_every_deck_reserve_card():
+    game = cs.Game(seed=3)
+    state = SolverState.from_game(game)
+    solver = DFPNMateSolver(
+        attacker=0,
+        max_depth=2,
+        options=_fast_options(allow_deck_reserve=True),
+    )
+    action = next(
+        action
+        for action in solver._helper._legal_actions(state)
+        if int(action.type) == int(cs.ActionType.RESERVE_DECK)
+    )
+    action_node = solver._action_node(state, 2, action, actor_is_attacker=True)
+
+    solver._expand(action_node)
+    lazy = action_node.children[0]
+    solver._expand(lazy)
+
+    assert lazy.kind == "lazy_reveal"
+    assert set(lazy.reveal_candidates) == set(
+        state.unseen_by_level[int(action.deck_level)]
+    )
+    assert lazy.children[0].outcome.reveal_card in lazy.reveal_candidates
 
 
 def test_dfpn_limits_dependency_target_candidates():
@@ -642,6 +804,93 @@ def test_dfpn_cli_accepts_simple_payment(monkeypatch, capsys):
     assert code == 2
     assert captured["simple_payment_mode"] is True
     assert '"status": "Unknown"' in capsys.readouterr().out
+
+
+def test_dfpn_cli_reveal_depth_range_stops_at_first_mate(monkeypatch, capsys):
+    captured = {}
+
+    def fake_depth_search(game, **kwargs):
+        captured.update(kwargs)
+        return {
+            "format": "csplendor_mate_depth_search_v1",
+            "status": "mate",
+            "stop_reason": "mate_proven",
+            "mate_depth": 6,
+            "attempts": [
+                {"depth": 5, "status": "no_mate"},
+                {"depth": 6, "status": "mate"},
+            ],
+        }
+
+    monkeypatch.setattr(
+        dfpn_mate_solver.cs,
+        "search_reveal_verified_mate_depths",
+        fake_depth_search,
+    )
+
+    code = dfpn_mate_solver.main([
+        "--position",
+        "position startpos 2",
+        "--attacker",
+        "0",
+        "--reveal-verified",
+        "--reveal-depth-range",
+        "5",
+        "8",
+        "--required-root-action",
+        "take:WUG",
+        "--jobs",
+        "4",
+    ])
+
+    assert code == 0
+    assert captured["min_depth"] == 5
+    assert captured["max_depth"] == 8
+    assert captured["required_root_action"] is not None
+    assert captured["jobs"] == 4
+    assert '"mate_depth": 6' in capsys.readouterr().out
+
+
+def test_dfpn_cli_reveal_anytime_uses_positive_proof_search(monkeypatch, capsys):
+    captured = {}
+
+    def fake_anytime(game, **kwargs):
+        captured.update(kwargs)
+        return {
+            "format": "csplendor_mate_anytime_search_v1",
+            "status": "mate",
+            "stop_reason": "mate_proven",
+            "mate_depth": 7,
+            "winning_root_action": 1,
+            "winning_root_action_usi": "take:WUG",
+            "attempts": [],
+        }
+
+    monkeypatch.setattr(
+        dfpn_mate_solver.cs,
+        "search_reveal_verified_mate_anytime",
+        fake_anytime,
+    )
+
+    code = dfpn_mate_solver.main([
+        "--position",
+        "position startpos 2",
+        "--attacker",
+        "0",
+        "--reveal-verified",
+        "--reveal-depth-range",
+        "5",
+        "8",
+        "--reveal-anytime",
+        "--jobs",
+        "16",
+    ])
+
+    assert code == 0
+    assert captured["min_depth"] == 5
+    assert captured["max_depth"] == 8
+    assert captured["jobs"] == 16
+    assert '"winning_root_action_usi": "take:WUG"' in capsys.readouterr().out
 
 
 def test_visible_only_winner_ignores_depth_and_decks():
@@ -755,17 +1004,50 @@ def test_dfpn_cli_visible_only_winner_does_not_require_max_depth(monkeypatch, ca
     assert '"status": "Player0Win"' in capsys.readouterr().out
 
 
-def test_dfpn_uses_threat_equivalence_key_when_enabled():
+def test_dfpn_uses_exact_slot_independent_position_key_when_enabled():
     game = cs.Game(seed=0)
     state = SolverState.from_game(game)
     solver = DFPNMateSolver(attacker=0, max_depth=1, options=_fast_options())
 
     equivalence_key = solver._state_table_key(state)
+    permuted = game.clone_light()
+    visible = [list(row) for row in permuted.board.visible]
+    visible[0][0], visible[0][1] = visible[0][1], visible[0][0]
+    permuted.board.visible = visible
+    permuted.board.turn = int(permuted.board.turn) + 7
+    permuted_key = solver._state_table_key(SolverState.from_game(permuted))
     solver.use_equivalence_hash = False
     exact_key = solver._state_table_key(state)
 
-    assert equivalence_key[0] == "threat-v1"
+    assert equivalence_key[0] == "position-v2"
+    assert permuted_key == equivalence_key
     assert exact_key == solver._helper._canonical_key(state)
+
+
+def test_dfpn_per_call_options_do_not_change_later_solver_defaults():
+    defaults = dict(dfpn_mate_solver._DFPN_DEFAULT_PRUNING)
+    game = cs.Game(seed=0)
+    game.board.winner = 0
+
+    solve_game_dfpn(
+        game,
+        attacker=0,
+        max_depth=1,
+        options=_fast_options(),
+        use_lazy_reveal_pruning=False,
+        use_threat_reveal_pruning=False,
+        use_return_pattern_pruning=False,
+        use_upper_bound_pruning=False,
+        max_actions_per_node=1,
+    )
+    fresh = DFPNMateSolver(attacker=0, max_depth=1, options=_fast_options())
+
+    assert dfpn_mate_solver._DFPN_DEFAULT_PRUNING == defaults
+    assert fresh.use_lazy_reveal_pruning is defaults["lazy_reveal"]
+    assert fresh.use_threat_reveal_pruning is defaults["threat_reveal"]
+    assert fresh.use_return_pattern_pruning is defaults["return_pattern"]
+    assert fresh.use_upper_bound_pruning is defaults["upper_bound"]
+    assert fresh.max_actions_per_node == defaults["max_actions_per_node"]
 
 
 def test_dfpn_keeps_proof_and_disproof_numbers_in_stats():
