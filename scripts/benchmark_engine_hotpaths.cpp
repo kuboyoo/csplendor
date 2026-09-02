@@ -172,12 +172,13 @@ constexpr uint64_t kFormalTraceSimulations = 41;
 
 volatile uint64_t benchmark_sink = 0;
 
-const std::array<const char *, 22> kWorkloads = {
+const std::array<const char *, 23> kWorkloads = {
     "legal_count",
     "legal_codes",
     "legal_actions",
     "random_selfplay_apply",
     "apply_only",
+    "purchase_apply",
     "apply_exact_hash",
     "apply_observable_hash",
     "cold_hash",
@@ -1094,6 +1095,58 @@ std::vector<TransitionCase> make_transition_corpus(const Fixture &fixture,
   return corpus;
 }
 
+std::vector<TransitionCase>
+make_purchase_transition_corpus(const Fixture &fixture, uint64_t seed) {
+  std::vector<TransitionCase> corpus;
+  corpus.reserve(kTransitionCorpusSize);
+  Game game = fixture.game.clone_light();
+  uint64_t random = seed ^ 0xd1b54a32d192ed03ULL;
+  uint64_t trajectory_plies = 0;
+  uint64_t attempts = 0;
+
+  while (corpus.size() < kTransitionCorpusSize) {
+    if (++attempts > 1000000)
+      throw std::runtime_error("fixture cannot produce purchase corpus");
+    if (game.is_game_over() || trajectory_plies >= 192) {
+      game = fixture.game.clone_light();
+      trajectory_plies = 0;
+    }
+
+    const auto codes = game.legal_action_codes();
+    if (codes.empty())
+      throw std::runtime_error("purchase corpus state has no legal action");
+
+    std::vector<uint64_t> purchases;
+    std::vector<uint64_t> progress;
+    purchases.reserve(codes.size());
+    progress.reserve(codes.size());
+    for (uint64_t code : codes) {
+      const Action action = Action::unpack(code);
+      if (action.type == PURCHASE) {
+        purchases.push_back(code);
+      } else if (action.type == VISIT_NOBLE ||
+                 action.type == TAKE_DIFFERENT || action.type == TAKE_SAME) {
+        progress.push_back(code);
+      }
+    }
+
+    const uint64_t random_value = next_random(random);
+    const auto &choices = !purchases.empty() ? purchases
+                                             : (!progress.empty() ? progress
+                                                                  : codes);
+    const uint64_t code =
+        choices[static_cast<size_t>(random_value % choices.size())];
+    if (!purchases.empty()) {
+      game.board.invalidate_hash();
+      corpus.push_back({game.clone_light(), code, -1});
+    }
+    if (!game.apply_action_code_trusted(code, false))
+      throw std::runtime_error("purchase corpus transition failed");
+    ++trajectory_plies;
+  }
+  return corpus;
+}
+
 template <typename Operation>
 Result benchmark_transitions(const Arguments &arguments,
                              const std::vector<TransitionCase> &corpus,
@@ -1281,6 +1334,22 @@ Result run_apply_only(const Arguments &arguments,
         return direct_state_digest(digest, game);
       });
   append_transition_correctness(result, arguments, corpus.front(), false);
+  return result;
+}
+
+Result run_purchase_apply(const Arguments &arguments,
+                          const std::vector<TransitionCase> &corpus) {
+  if (corpus.empty())
+    throw std::runtime_error("purchase_apply corpus is empty");
+  Result result = benchmark_transitions(
+      arguments, corpus,
+      [](Game &game, const TransitionCase &entry, uint64_t digest) {
+        if (!game.apply_action_code_trusted(entry.action_code, false))
+          throw std::runtime_error("purchase_apply transition failed");
+        return direct_state_digest(digest, game);
+      });
+  append_transition_correctness(result, arguments, corpus.front(), false);
+  result.counters.integer("purchase_transitions", corpus.size());
   return result;
 }
 
@@ -3289,7 +3358,8 @@ bool known_workload(const std::string &name) {
 
 Result dispatch(const std::string &workload, const Arguments &arguments,
                 const Fixture &fixture,
-                const std::vector<TransitionCase> &transitions) {
+                const std::vector<TransitionCase> &transitions,
+                const std::vector<TransitionCase> &purchase_transitions) {
   if (workload == "legal_count")
     return run_legal_count(arguments, fixture);
   if (workload == "legal_codes")
@@ -3300,6 +3370,8 @@ Result dispatch(const std::string &workload, const Arguments &arguments,
     return run_random_selfplay(arguments);
   if (workload == "apply_only")
     return run_apply_only(arguments, transitions);
+  if (workload == "purchase_apply")
+    return run_purchase_apply(arguments, purchase_transitions);
   if (workload == "apply_exact_hash")
     return run_apply_exact_hash(arguments, transitions);
   if (workload == "apply_observable_hash")
@@ -3372,8 +3444,15 @@ int main(int argc, char **argv) {
 
     const Fixture fixture = make_fixture(arguments);
     const auto transitions = make_transition_corpus(fixture, arguments.seed);
+    std::vector<TransitionCase> purchase_transitions;
+    if (std::find(unique.begin(), unique.end(), "purchase_apply") !=
+        unique.end()) {
+      purchase_transitions =
+          make_purchase_transition_corpus(fixture, arguments.seed);
+    }
     for (const std::string &workload : unique) {
-      Result result = dispatch(workload, arguments, fixture, transitions);
+      Result result = dispatch(workload, arguments, fixture, transitions,
+                               purchase_transitions);
       emit_result(workload, arguments, fixture, std::move(result));
     }
     return benchmark_sink == std::numeric_limits<uint64_t>::max() ? 2 : 0;

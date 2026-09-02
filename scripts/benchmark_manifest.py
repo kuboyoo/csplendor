@@ -61,6 +61,7 @@ _SAFE_CMAKE_CACHE_KEYS = frozenset(
         "CSPLENDOR_BUILD_PYTHON_MODULE",
         "CSPLENDOR_CPU_TARGET",
         "CSPLENDOR_INCREMENTAL_EXACT_HASH",
+        "CSPLENDOR_NOBLE_ELIGIBILITY_TABLE",
         "CSPLENDOR_PERF_INSTRUMENTATION",
         "CSPLENDOR_SANITIZER",
         "CSPLENDOR_VERIFY_INCREMENTAL_HASH",
@@ -82,6 +83,9 @@ _BENCHMARK_BUILD_KEYS = _SAFE_CMAKE_CACHE_KEYS - {
     # because this one option differs. Verification remains part of the build
     # fingerprint and must match across throughput binaries.
     "CSPLENDOR_INCREMENTAL_EXACT_HASH",
+    # Phase-2A experiment axis. Keep the OFF/ON value in each manifest while
+    # allowing the paired runner to compare the two otherwise-identical builds.
+    "CSPLENDOR_NOBLE_ELIGIBILITY_TABLE",
 }
 _SAFE_FLAG_PREFIXES = (
     "-march=",

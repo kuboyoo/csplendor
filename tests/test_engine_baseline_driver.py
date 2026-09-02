@@ -10,7 +10,7 @@ from scripts import run_phase0_baseline as baseline
 def test_phase0_cases_are_complete_unique_and_safe_at_tree_capacity(tmp_path):
     assert baseline.DEFAULT_PHASE0_PAIRS == 22
     names = [case.workload for case in baseline.CASES]
-    assert len(names) == 22
+    assert len(names) == 23
     assert len(set(names)) == len(names)
     scheduler = next(
         case for case in baseline.CASES if case.workload == "parallel_scheduler"

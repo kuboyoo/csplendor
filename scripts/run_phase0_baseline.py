@@ -49,6 +49,7 @@ CASES = (
     Case("legal_actions", "midgame_250", 20_000, 2_000),
     Case("random_selfplay_apply", "initial", 250_000, 25_000),
     Case("apply_only", "midgame_250", 2_000_000, 200_000),
+    Case("purchase_apply", "midgame_250", 2_000_000, 200_000),
     Case("apply_exact_hash", "midgame_250", 2_000_000, 200_000),
     Case(
         "apply_observable_hash",

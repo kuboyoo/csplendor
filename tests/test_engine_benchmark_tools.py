@@ -308,6 +308,16 @@ def test_counter_contract_separates_correctness_and_measurement():
     with pytest.raises(runner.BenchmarkContractError, match="counter key set"):
         runner.validate_record_pair(correctness_a, missing)
 
+    purchase_a = _record(
+        workload="purchase_apply",
+        counters={"instrumentation_enabled": False, "purchase_transitions": 256},
+    )
+    purchase_b = deepcopy(purchase_a)
+    runner.validate_record_pair(purchase_a, purchase_b)
+    purchase_b["counters"]["purchase_transitions"] = 255
+    with pytest.raises(runner.BenchmarkContractError, match="correctness counter"):
+        runner.validate_record_pair(purchase_a, purchase_b)
+
     measured_a = _record(
         counters={"instrumentation_enabled": True, "exact_hash_calls": 100}
     )
@@ -529,6 +539,7 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
         "CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -DPRIVATE_VALUE=hidden\n"
         "CSPLENDOR_CPU_TARGET:STRING=portable\n"
         "CSPLENDOR_INCREMENTAL_EXACT_HASH:BOOL=OFF\n"
+        "CSPLENDOR_NOBLE_ELIGIBILITY_TABLE:BOOL=OFF\n"
         "CSPLENDOR_VERIFY_INCREMENTAL_HASH:BOOL=OFF\n"
         "UNRELATED_API_TOKEN:STRING=do-not-read-or-emit\n",
         encoding="utf-8",
@@ -539,7 +550,14 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
     assert "UNRELATED_API_TOKEN" not in rendered
     assert "do-not-read-or-emit" not in rendered
     assert "PRIVATE_VALUE" not in rendered
-    assert metadata["allowlisted_entries"]["CSPLENDOR_INCREMENTAL_EXACT_HASH"] == "OFF"
+    assert (
+        metadata["allowlisted_entries"]["CSPLENDOR_INCREMENTAL_EXACT_HASH"]
+        == "OFF"
+    )
+    assert (
+        metadata["allowlisted_entries"]["CSPLENDOR_NOBLE_ELIGIBILITY_TABLE"]
+        == "OFF"
+    )
     assert metadata["allowlisted_entries"]["CSPLENDOR_VERIFY_INCREMENTAL_HASH"] == "OFF"
     assert (
         metadata["allowlisted_entries"]["CMAKE_CXX_FLAGS_RELEASE"][
@@ -563,6 +581,24 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
     )
     assert (
         candidate_metadata["benchmark_build_fingerprint_sha256"]
+        == metadata["benchmark_build_fingerprint_sha256"]
+    )
+
+    noble_cache = tmp_path / "noble-CMakeCache.txt"
+    noble_cache.write_text(
+        cache.read_text(encoding="utf-8").replace(
+            "CSPLENDOR_NOBLE_ELIGIBILITY_TABLE:BOOL=OFF",
+            "CSPLENDOR_NOBLE_ELIGIBILITY_TABLE:BOOL=ON",
+        ),
+        encoding="utf-8",
+    )
+    noble_metadata, _ = manifest_tool._cmake_build_metadata(noble_cache)
+    assert (
+        noble_metadata["allowlisted_entries"]["CSPLENDOR_NOBLE_ELIGIBILITY_TABLE"]
+        == "ON"
+    )
+    assert (
+        noble_metadata["benchmark_build_fingerprint_sha256"]
         == metadata["benchmark_build_fingerprint_sha256"]
     )
 

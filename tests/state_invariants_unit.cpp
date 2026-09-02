@@ -1,8 +1,10 @@
+#include "board_editor.h"
 #include "game.h"
 #include "state_invariants.h"
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <string>
 
 namespace {
@@ -93,6 +95,52 @@ void test_local_and_derived_diagnostics() {
             .has(InvariantViolation::FixedCapacityOverflow));
 }
 
+uint16_t reference_noble_mask(const std::array<uint8_t, 5> &bonuses) {
+  uint16_t mask = 0;
+  for (int noble_id = 0; noble_id < NOBLE_COUNT; ++noble_id) {
+    bool eligible = true;
+    for (int color = 0; color < 5; ++color) {
+      if (bonuses[color] < NOBLES[noble_id].requirement[color]) {
+        eligible = false;
+        break;
+      }
+    }
+    if (eligible)
+      mask |= static_cast<uint16_t>(uint16_t{1} << noble_id);
+  }
+  return mask;
+}
+
+void test_noble_eligibility_exhaustive_and_editor_range() {
+  constexpr uint32_t BASE = MAX_NOBLE_REQUIREMENT + 1U;
+  uint32_t combinations = 1;
+  for (int color = 0; color < 5; ++color)
+    combinations *= BASE;
+
+  for (uint32_t encoded = 0; encoded < combinations; ++encoded) {
+    uint32_t remaining = encoded;
+    PlayerState player;
+    for (int color = 0; color < 5; ++color) {
+      player.bonuses[color] = static_cast<uint8_t>(remaining % BASE);
+      remaining /= BASE;
+    }
+    player.sync_packed_bonuses_and_noble_eligibility();
+    check(player.noble_eligibility_mask ==
+          reference_noble_mask(player.bonuses));
+  }
+
+  Board board;
+  board.init(25);
+  PlayerState player = board.players[0];
+  player.bonuses.fill(std::numeric_limits<uint8_t>::max());
+  player.packed_bonuses = 0;
+  player.noble_eligibility_mask = 0;
+  csplendor::state::editor::set_player(board, 0, player);
+  check(board.players[0].noble_eligibility_mask ==
+        reference_noble_mask(board.players[0].bonuses));
+  require_valid(board, Profile::Editor);
+}
+
 void test_stale_hash_is_visible_without_mutation() {
   Game game(31);
   const uint64_t cached = game.board.hash();
@@ -140,6 +188,7 @@ int main() {
   test_reachable_corpus();
   test_profile_specific_physical_rules();
   test_local_and_derived_diagnostics();
+  test_noble_eligibility_exhaustive_and_editor_range();
   test_stale_hash_is_visible_without_mutation();
   test_search_determinization();
   test_deterministic_description();

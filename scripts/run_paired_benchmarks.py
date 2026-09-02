@@ -107,6 +107,7 @@ _CORRECTNESS_COUNTERS = frozenset(
         "persistent_cache_states_after",
         "persistent_cache_states_before",
         "persistent_memo_hits",
+        "purchase_transitions",
         "purchased_cards",
         "reservations_aborted",
         "reservations_committed",
