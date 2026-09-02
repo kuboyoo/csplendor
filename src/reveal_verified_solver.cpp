@@ -899,6 +899,10 @@ private:
         std::find(deck.begin(), deck.end(), static_cast<uint8_t>(card_id));
     if (it == deck.end())
       return false;
+    // Exact-reveal traversal can erase an arbitrary stack position. Every
+    // following positional salt changes, so this path deliberately falls
+    // back to the uncached oracle instead of using the normal top-pop delta.
+    board.invalidate_hash();
     deck.erase(it);
     return true;
   }

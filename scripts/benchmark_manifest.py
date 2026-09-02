@@ -60,8 +60,10 @@ _SAFE_CMAKE_CACHE_KEYS = frozenset(
         "CSPLENDOR_BUILD_PARALLEL_BENCHMARK",
         "CSPLENDOR_BUILD_PYTHON_MODULE",
         "CSPLENDOR_CPU_TARGET",
+        "CSPLENDOR_INCREMENTAL_EXACT_HASH",
         "CSPLENDOR_PERF_INSTRUMENTATION",
         "CSPLENDOR_SANITIZER",
+        "CSPLENDOR_VERIFY_INCREMENTAL_HASH",
     }
 )
 _FLAG_CACHE_KEYS = frozenset(
@@ -75,6 +77,11 @@ _BENCHMARK_BUILD_KEYS = _SAFE_CMAKE_CACHE_KEYS - {
     "CSPLENDOR_BUILD_NATIVE_TESTS",
     "CSPLENDOR_BUILD_PARALLEL_BENCHMARK",
     "CSPLENDOR_BUILD_PYTHON_MODULE",
+    # This is the explicit Phase-1A A/B experiment axis. Preserve its value in
+    # each manifest, but do not reject the intended OFF/ON comparison solely
+    # because this one option differs. Verification remains part of the build
+    # fingerprint and must match across throughput binaries.
+    "CSPLENDOR_INCREMENTAL_EXACT_HASH",
 }
 _SAFE_FLAG_PREFIXES = (
     "-march=",

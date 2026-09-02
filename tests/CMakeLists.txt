@@ -86,6 +86,8 @@ csplendor_add_native_test(state_invariants_unit state_invariants_unit.cpp
                           "unit;state;invariants;hash" 30)
 csplendor_add_native_test(domain_state_unit domain_state_unit.cpp
                           "unit;state;editor;mutation;fixed-capacity" 30)
+csplendor_add_native_test(incremental_hash_unit incremental_hash_unit.cpp
+                          "unit;state;hash;incremental;differential" 120)
 csplendor_add_native_test(state_copy_unit state_copy_unit.cpp
                           "unit;state;copy;snapshot;undo" 30)
 csplendor_add_native_test(perf_counters_unit perf_counters_unit.cpp

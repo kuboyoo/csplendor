@@ -9,6 +9,7 @@
 #include "mcts_concurrent_tree.h"
 #include "mcts_parallel_searcher.h"
 #include "mcts_parallel_trace.h"
+#include "mcts_root_parallel.h"
 #include "perf_counters.h"
 #include "reveal_solver_components.h"
 #include "reveal_verified_solver.h"
@@ -171,7 +172,7 @@ constexpr uint64_t kFormalTraceSimulations = 41;
 
 volatile uint64_t benchmark_sink = 0;
 
-const std::array<const char *, 21> kWorkloads = {
+const std::array<const char *, 22> kWorkloads = {
     "legal_count",
     "legal_codes",
     "legal_actions",
@@ -189,6 +190,7 @@ const std::array<const char *, 21> kWorkloads = {
     "legacy_mcts",
     "shared_tree",
     "parallel_scheduler",
+    "root_parallel",
     "board_copy_restore",
     "solver_state_key",
     "solver_tt",
@@ -396,7 +398,7 @@ void print_help() {
       << "  --seed N                   initial/random fixture seed\n"
       << "  --fixture-plies N          random fixture setup plies\n"
       << "  --batch-size N             legacy MCTS synthetic batch size\n"
-      << "  --threads N                parallel scheduler workers (default 4)\n"
+      << "  --threads N                parallel/root workers (default 4)\n"
       << "  --latency-us N             synthetic inference latency (default "
          "0)\n"
       << "  --observer 0|1             observable-state perspective\n"
@@ -1080,6 +1082,10 @@ std::vector<TransitionCase> make_transition_corpus(const Fixture &fixture,
         codes[static_cast<size_t>(random_value % codes.size())];
     const ActionMaskBits mask =
         ActionEncoderCpp::get_action_mask_bits_trusted(game);
+    // Normalize the benchmark input independently of whether the engine under
+    // test preserved a cache while constructing this trajectory. Individual
+    // workloads explicitly prime it when a valid-cache precondition matters.
+    game.board.invalidate_hash();
     corpus.push_back(
         {game.clone_light(), code, first_action_index(mask, random_value)});
     if (!game.apply_action_code_trusted(code, false))
@@ -1280,14 +1286,22 @@ Result run_apply_only(const Arguments &arguments,
 
 Result run_apply_exact_hash(const Arguments &arguments,
                             const std::vector<TransitionCase> &corpus) {
+  // Incremental maintenance is conditional on the incoming exact cache
+  // already being valid. Prime outside the timed region so this workload
+  // measures the MCTS-style apply+key path; apply_only and random self-play
+  // retain invalid-cache inputs as the no-hash controls.
+  std::vector<TransitionCase> primed = corpus;
+  for (TransitionCase &entry : primed)
+    (void)entry.game.board.hash();
   Result result = benchmark_transitions(
-      arguments, corpus,
+      arguments, primed,
       [](Game &game, const TransitionCase &entry, uint64_t digest) {
         if (!game.apply_action_code_trusted(entry.action_code, false))
           throw std::runtime_error("apply_exact_hash transition failed");
         return digest_u64(digest, game.board.hash());
       });
-  append_transition_correctness(result, arguments, corpus.front(), false);
+  append_transition_correctness(result, arguments, primed.front(), false);
+  result.semantics.boolean("input_exact_hash_cache_valid", true);
   return result;
 }
 
@@ -2209,6 +2223,298 @@ Result run_parallel_scheduler(const Arguments &arguments,
   return result;
 }
 
+struct RootParallelRun {
+  mcts_parallel::RootParallelResult search;
+  uint64_t callback_batches = 0;
+  uint64_t callback_items = 0;
+};
+
+RootParallelRun root_parallel_search(const Arguments &arguments,
+                                     const Fixture &fixture,
+                                     uint64_t simulations,
+                                     PerfAccumulator *perf,
+                                     uint64_t *elapsed_ns) {
+  MCTSConfig config = mcts_config(arguments);
+  mcts_parallel::ParallelSearchOptions options;
+  options.batch_size = arguments.batch_size;
+  options.batch_wait_us = 200;
+  options.deterministic_epoch_size = arguments.batch_size;
+  options.master_seed = arguments.seed;
+  options.search_nonce = 0;
+  options.evaluator_version = 0x4353504c454e444fULL;
+  // Root parallelism uses independent 1T worker trees. Keep the worker
+  // backend aligned with the established CSV benchmark rather than coupling
+  // this workload to the shared-tree backend argument.
+  options.tree_backend = mcts_parallel::TreeBackend::Coarse;
+  options.shard_count = 64;
+
+  std::atomic<uint64_t> callback_batches{0};
+  std::atomic<uint64_t> callback_items{0};
+  const mcts_parallel::ParallelEvaluatorFactory factory =
+      [&](uint32_t) -> mcts_parallel::ParallelInferenceFunction {
+    return [&](const std::vector<mcts_parallel::ParallelInferenceRequest>
+                   &requests) {
+      callback_batches.fetch_add(1, std::memory_order_relaxed);
+      callback_items.fetch_add(requests.size(), std::memory_order_relaxed);
+      if (arguments.latency_us)
+        std::this_thread::sleep_for(
+            std::chrono::microseconds(arguments.latency_us));
+      std::vector<mcts_parallel::ParallelInferenceResult> results(
+          requests.size());
+      for (auto &inference : results) {
+        for (size_t action = 0; action < MAX_ACTIONS; ++action)
+          inference.policy[action] = static_cast<float>(action + 1);
+        inference.value = {0.1f, -0.1f};
+      }
+      return results;
+    };
+  };
+
+  RootParallelRun run;
+  auto body = [&] {
+    run.search = mcts_parallel::run_root_parallel(
+        config, fixture.game, simulations, arguments.threads, options, factory);
+  };
+  if (perf && elapsed_ns)
+    *elapsed_ns = time_once(body, *perf);
+  else
+    body();
+  run.callback_batches = callback_batches.load(std::memory_order_relaxed);
+  run.callback_items = callback_items.load(std::memory_order_relaxed);
+  return run;
+}
+
+void validate_root_parallel_run(const RootParallelRun &run,
+                                uint64_t simulations,
+                                uint32_t requested_workers) {
+  const auto &merged = run.search.merged;
+  const auto &ledger = merged.ledger;
+  if (run.search.workers.size() != requested_workers)
+    throw std::runtime_error("root-parallel worker result count mismatch");
+  if (ledger.completed() != simulations || ledger.issued != simulations)
+    throw std::runtime_error("root-parallel completion total mismatch");
+  if (!ledger.virtual_loss_balanced())
+    throw std::runtime_error("root-parallel retained virtual loss");
+  if (ledger.failed != 0 || ledger.cancelled != 0 ||
+      ledger.integrity_errors != 0 || ledger.invalid_replay != 0 ||
+      ledger.duplicate_result != 0 || ledger.stale_result != 0)
+    throw std::runtime_error("root-parallel ledger integrity failure");
+  if (merged.stop_reason != mcts_parallel::SearchStopReason::Completed ||
+      merged.partial)
+    throw std::runtime_error("root-parallel returned a partial result");
+
+  const uint64_t root_visits =
+      std::accumulate(merged.visits.begin(), merged.visits.end(), uint64_t{0});
+  if (root_visits != simulations)
+    throw std::runtime_error("root-parallel root visit total mismatch");
+
+  uint64_t worker_tree_size = 0;
+  uint64_t worker_completed = 0;
+  const uint64_t quotient = simulations / requested_workers;
+  const uint64_t remainder = simulations % requested_workers;
+  for (uint32_t worker_index = 0; worker_index < requested_workers;
+       ++worker_index) {
+    const auto &worker = run.search.workers[worker_index];
+    const uint64_t expected =
+        quotient + (worker_index < remainder ? uint64_t{1} : uint64_t{0});
+    if (worker.ledger.completed() != expected ||
+        !worker.ledger.virtual_loss_balanced())
+      throw std::runtime_error("root-parallel worker budget mismatch");
+    if (expected != 0 &&
+        (worker.stop_reason != mcts_parallel::SearchStopReason::Completed ||
+         worker.partial))
+      throw std::runtime_error("root-parallel worker returned partial result");
+    const uint64_t worker_root_visits = std::accumulate(
+        worker.visits.begin(), worker.visits.end(), uint64_t{0});
+    if (worker_root_visits != expected)
+      throw std::runtime_error("root-parallel worker root visits mismatch");
+    worker_completed += worker.ledger.completed();
+    worker_tree_size += worker.tree_size;
+  }
+  if (worker_completed != simulations || worker_tree_size != merged.tree_size)
+    throw std::runtime_error("root-parallel worker merge mismatch");
+
+  const uint64_t active_workers =
+      std::min<uint64_t>(requested_workers, simulations);
+  if (run.search.duplicate_root_evaluations_avoided + 1 != active_workers)
+    throw std::runtime_error(
+        "root-parallel duplicate-root accounting mismatch");
+}
+
+Result run_root_parallel(const Arguments &arguments, const Fixture &fixture) {
+  if (fixture.game.requires_forced_pass())
+    throw std::runtime_error("root-parallel fixture requires a forced pass");
+  if (arguments.retained_tree)
+    throw std::invalid_argument(
+        "root_parallel uses independent warmup and does not retain trees");
+
+  if (arguments.warmup) {
+    const RootParallelRun warmup = root_parallel_search(
+        arguments, fixture, arguments.warmup, nullptr, nullptr);
+    validate_root_parallel_run(warmup, arguments.warmup, arguments.threads);
+    benchmark_sink ^= warmup.search.merged.tree_size ^
+                      warmup.search.merged.ledger.completed();
+  }
+
+  Result result;
+  const RootParallelRun run =
+      root_parallel_search(arguments, fixture, arguments.iterations,
+                           &result.perf, &result.elapsed_ns);
+  validate_root_parallel_run(run, arguments.iterations, arguments.threads);
+
+  const auto &merged = run.search.merged;
+  const auto &ledger = merged.ledger;
+  const uint64_t root_visits =
+      std::accumulate(merged.visits.begin(), merged.visits.end(), uint64_t{0});
+  const auto best =
+      std::max_element(merged.visits.begin(), merged.visits.end());
+  const size_t selected_action =
+      static_cast<size_t>(std::distance(merged.visits.begin(), best));
+  const ActionMaskBits root_mask =
+      ActionEncoderCpp::get_action_mask_bits_trusted(fixture.game);
+  if (root_visits == 0 ||
+      !mcts_action_mask::contains(root_mask, selected_action))
+    throw std::runtime_error("root-parallel selected an illegal root action");
+  const Action selected = ActionEncoderCpp::decode_trusted(
+      static_cast<int>(selected_action), fixture.game);
+  if (selected.type == ACTION_TYPE_COUNT || !fixture.game.is_legal(selected))
+    throw std::runtime_error("root-parallel selected action failed decoding");
+
+  uint64_t visit_digest = kDigestOffset;
+  uint64_t q_digest = kDigestOffset;
+  uint64_t probability_digest = kDigestOffset;
+  for (size_t action = 0; action < MAX_ACTIONS; ++action) {
+    visit_digest = digest_u64(visit_digest, merged.visits[action]);
+    uint64_t q_bits = 0;
+    std::memcpy(&q_bits, &merged.q_values[action], sizeof(q_bits));
+    q_digest = digest_u64(q_digest, q_bits);
+    probability_digest =
+        digest_float(probability_digest, merged.probabilities[action]);
+  }
+
+  uint64_t worker_digest = kDigestOffset;
+  for (size_t worker_index = 0; worker_index < run.search.workers.size();
+       ++worker_index) {
+    const auto &worker = run.search.workers[worker_index];
+    worker_digest = digest_u64(worker_digest, worker_index);
+    worker_digest = digest_u64(worker_digest, worker.ledger.completed());
+    worker_digest = digest_u64(worker_digest, worker.tree_size);
+    worker_digest =
+        digest_u64(worker_digest, worker.ledger.evaluation_requested);
+    worker_digest = digest_u64(worker_digest, worker.ledger.evaluation_waiter);
+    for (size_t action = 0; action < MAX_ACTIONS; ++action) {
+      worker_digest = digest_u64(worker_digest, worker.visits[action]);
+      uint64_t q_bits = 0;
+      std::memcpy(&q_bits, &worker.q_values[action], sizeof(q_bits));
+      worker_digest = digest_u64(worker_digest, q_bits);
+    }
+  }
+
+  const uint8_t root_observer =
+      static_cast<uint8_t>(fixture.game.current_player());
+  const uint64_t root_position_hash =
+      arguments.determinization
+          ? fixture.game.board.observable_hash(root_observer)
+          : fixture.game.board.hash();
+  uint64_t digest = digest_u64(kDigestOffset, ledger.completed());
+  digest = digest_u64(digest, merged.tree_size);
+  digest = digest_u64(digest, ledger.evaluation_requested);
+  digest = digest_u64(digest, ledger.evaluation_waiter);
+  digest = digest_u64(digest, root_visits);
+  digest = digest_u64(digest, selected_action);
+  digest = digest_u64(digest, selected.pack());
+  digest = digest_u64(digest, visit_digest);
+  digest = digest_u64(digest, q_digest);
+  digest = digest_u64(digest, probability_digest);
+  digest = digest_u64(digest, worker_digest);
+  digest = digest_u64(digest, root_position_hash);
+  digest = digest_u64(digest, arguments.determinization ? 1 : 0);
+  digest = digest_u64(digest, arguments.threads);
+  digest = digest_u64(digest, arguments.batch_size);
+  digest = digest_u64(digest, arguments.latency_us);
+  digest = digest_u64(digest, arguments.seed);
+  digest = digest_u64(digest, merged.resolved_seed);
+  digest = digest_u64(digest, merged.search_nonce);
+  digest = digest_u64(digest, merged.tree_generation);
+  digest = digest_u64(digest, run.search.duplicate_root_evaluations_avoided);
+
+  result.operations = ledger.completed();
+  result.digest = digest;
+  result.counters.integer("tree_size", merged.tree_size);
+  result.counters.integer("root_visits", root_visits);
+  result.counters.integer("root_visits_before", 0);
+  result.counters.integer("measured_root_visits", root_visits);
+  result.counters.string("root_visit_digest", hex_digest(visit_digest));
+  result.counters.string("root_q_digest", hex_digest(q_digest));
+  result.counters.integer("issued", ledger.issued);
+  result.counters.integer("completed", ledger.completed());
+  result.counters.integer("completed_evaluated", ledger.completed_evaluated);
+  result.counters.integer("completed_terminal", ledger.completed_terminal);
+  result.counters.integer("completed_max_depth", ledger.completed_max_depth);
+  result.counters.integer("selected", ledger.selected);
+  result.counters.integer("evaluation_owners", ledger.evaluation_owner);
+  result.counters.integer("inference_requests", ledger.evaluation_requested);
+  result.counters.integer("inference_waiters", ledger.evaluation_waiter);
+  result.counters.integer("evaluated_boards", ledger.evaluated_boards);
+  result.counters.integer("callback_batches", run.callback_batches);
+  result.counters.integer("callback_items", run.callback_items);
+  result.counters.integer("max_inflight", ledger.max_inflight_observed);
+  result.counters.integer("virtual_loss_added", ledger.virtual_loss_added);
+  result.counters.integer("virtual_loss_released",
+                          ledger.virtual_loss_released);
+  result.counters.integer("reservations_committed",
+                          ledger.reservations_committed);
+  result.counters.integer("reservations_aborted", ledger.reservations_aborted);
+  result.counters.integer("expansion_claimed", ledger.expansion_claimed);
+  result.counters.integer("expansion_published", ledger.expansion_published);
+  result.counters.integer("expansion_waited", ledger.expansion_waited);
+  result.counters.integer("cancelled", ledger.cancelled);
+  result.counters.integer("failed", ledger.failed);
+  result.counters.integer("stale_result", ledger.stale_result);
+  result.counters.integer("duplicate_result", ledger.duplicate_result);
+  result.counters.integer("invalid_replay", ledger.invalid_replay);
+  result.counters.integer("integrity_errors", ledger.integrity_errors);
+
+  result.semantics.boolean("completed_exact", true);
+  result.semantics.boolean("virtual_loss_balanced", true);
+  result.semantics.boolean("ledger_integrity_ok", true);
+  result.semantics.boolean("worker_budgets_exact", true);
+  result.semantics.boolean("worker_tree_merge_exact", true);
+  result.semantics.boolean("warmup_independent", true);
+  result.semantics.boolean("retained_tree", false);
+  result.semantics.boolean("partial", false);
+  result.semantics.integer("stop_reason",
+                           static_cast<uint64_t>(merged.stop_reason));
+  result.semantics.integer("threads", arguments.threads);
+  result.semantics.integer(
+      "active_workers",
+      std::min<uint64_t>(arguments.threads, arguments.iterations));
+  result.semantics.integer("batch_size", arguments.batch_size);
+  result.semantics.integer("latency_us", arguments.latency_us);
+  result.semantics.integer("master_seed", arguments.seed);
+  result.semantics.integer("resolved_seed", merged.resolved_seed);
+  result.semantics.integer("search_nonce", merged.search_nonce);
+  result.semantics.integer("rng_version", merged.rng_version);
+  result.semantics.integer("tree_generation", merged.tree_generation);
+  result.semantics.integer("duplicate_root_evaluations_avoided",
+                           run.search.duplicate_root_evaluations_avoided);
+  result.semantics.integer("selected_action_index", selected_action);
+  result.semantics.string("selected_action_code",
+                          std::to_string(selected.pack()));
+  result.semantics.integer("selected_action_visits", *best);
+  result.semantics.boolean("selected_action_legal", true);
+  result.semantics.string("root_probability_digest",
+                          hex_digest(probability_digest));
+  result.semantics.string("worker_result_digest", hex_digest(worker_digest));
+  result.semantics.string("tree_backend", "coarse_independent_worker_trees");
+  result.semantics.string("tree_domain",
+                          arguments.determinization ? "observable" : "exact");
+  result.semantics.integer("root_observer", root_observer);
+  result.semantics.string("root_key", std::to_string(root_position_hash));
+  benchmark_sink ^= result.digest;
+  return result;
+}
+
 Result run_board_copy_restore(const Arguments &arguments,
                               const Fixture &fixture) {
   const auto codes = fixture.game.legal_action_codes();
@@ -3018,6 +3324,8 @@ Result dispatch(const std::string &workload, const Arguments &arguments,
     return run_shared_tree(arguments, fixture);
   if (workload == "parallel_scheduler")
     return run_parallel_scheduler(arguments, fixture);
+  if (workload == "root_parallel")
+    return run_root_parallel(arguments, fixture);
   if (workload == "board_copy_restore")
     return run_board_copy_restore(arguments, fixture);
   if (workload == "solver_state_key")

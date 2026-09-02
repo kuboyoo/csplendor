@@ -206,6 +206,15 @@ private:
   }
 
   bool apply_unchecked(const Action &action, bool record_history) {
+#ifdef CSPLENDOR_INCREMENTAL_EXACT_HASH
+    if (board.hash_valid)
+      return apply_unchecked_with_mutator<true>(action, record_history);
+#endif
+    return apply_unchecked_with_mutator<false>(action, record_history);
+  }
+
+  template <bool MaintainExactHash>
+  bool apply_unchecked_with_mutator(const Action &action, bool record_history) {
     Board previous;
     if (record_history) {
       CSPLENDOR_PERF_INC(BoardSnapshotCopies);
@@ -217,30 +226,58 @@ private:
       delta_previous = csplendor::detail::UndoRecord::capture(board);
 #endif
 
-    // Enter the trusted hot-path mutation boundary once for the whole action.
-    board.begin_unchecked_mutation();
+    // A pass is built on a copy because its stalemate probe may reject an
+    // arbitrary editor state.  Prime the copy before opening its transaction
+    // so an already-valid exact hash remains available for delta maintenance.
+    if (action.type == PASS) {
+      CSPLENDOR_PERF_INC(BoardSnapshotCopies);
+      Board next = board;
+      Board::RuleMutator<MaintainExactHash> mutation(next);
+      csplendor::detail::end_turn(next, mutation);
+      // If neither player can act, no future state change is possible.
+      // Resolve the stalemate as a draw instead of allowing an infinite pass
+      // cycle. A final-round result produced by end_turn() takes precedence.
+      if (!next.is_game_over() &&
+          MoveGenerator::requires_forced_pass(next, simple_payment_mode))
+        mutation.set_winner(-2);
+      mutation.commit();
+      board = std::move(next);
+      if (record_history) {
+#ifdef CSPLENDOR_VERIFY_DELTA_UNDO
+        assert(delta_previous.restores_snapshot(board, previous));
+#endif
+        board_history.push_back(std::move(previous));
+        history.push_back(action);
+      }
+      return true;
+    }
+
+    // Enter the successful-publication mutation boundary once for the whole
+    // action. An early return leaves the exact cache invalid.
+    Board::RuleMutator<MaintainExactHash> mutation(board);
 
     bool applied = false;
     switch (action.type) {
     case TAKE_DIFFERENT:
     case TAKE_SAME:
-      applied = apply_take_gems(action);
+      applied = apply_take_gems(action, mutation);
       break;
     case RESERVE_VISIBLE:
-      applied = apply_reserve_visible(action);
+      applied = apply_reserve_visible(action, mutation);
       break;
     case RESERVE_DECK:
-      applied = apply_reserve_deck(action);
+      applied = apply_reserve_deck(action, mutation);
       break;
     case PURCHASE:
-      applied = apply_purchase(action);
+      applied = apply_purchase(action, mutation);
       break;
     case VISIT_NOBLE:
-      applied = apply_noble_visit(action);
+      applied = apply_noble_visit(action, mutation);
       if (!applied)
         return false;
-      board.waiting_noble = false;
-      csplendor::detail::end_turn(board);
+      mutation.set_waiting_noble(false);
+      csplendor::detail::end_turn(board, mutation);
+      mutation.commit();
       if (record_history) {
 #ifdef CSPLENDOR_VERIFY_DELTA_UNDO
         assert(delta_previous.restores_snapshot(board, previous));
@@ -250,31 +287,7 @@ private:
       }
       return true;
     case PASS:
-      // The post-pass stalemate check can validate the opponent's public
-      // editor state and throw. Build the rare forced transition on a copy so
-      // an exception cannot leave the live Board half-advanced.
-      {
-        CSPLENDOR_PERF_INC(BoardSnapshotCopies);
-        Board next = board;
-        next.begin_unchecked_mutation();
-        csplendor::detail::end_turn(next);
-        // If neither player can act, no future state change is possible.
-        // Resolve the stalemate as a draw instead of allowing an infinite
-        // pass cycle. A final-round result produced by end_turn() takes
-        // precedence.
-        if (!next.is_game_over() && MoveGenerator::requires_forced_pass(
-                                        next, simple_payment_mode))
-          next.winner = -2;
-        board = std::move(next);
-      }
-      if (record_history) {
-#ifdef CSPLENDOR_VERIFY_DELTA_UNDO
-        assert(delta_previous.restores_snapshot(board, previous));
-#endif
-        board_history.push_back(std::move(previous));
-        history.push_back(action);
-      }
-      return true;
+      return false;
     default:
       return false;
     }
@@ -284,7 +297,8 @@ private:
 
     // Standard turn processing (Take Gems, Reserve, Purchase), including
     // automatic or deferred noble visits.
-    csplendor::detail::finish_standard_action(board);
+    csplendor::detail::finish_standard_action(board, mutation);
+    mutation.commit();
 
     if (record_history) {
 #ifdef CSPLENDOR_VERIFY_DELTA_UNDO
@@ -432,17 +446,21 @@ private:
     }
   }
 
-  bool apply_take_gems(const Action &a) {
-    auto &p = board.players[board.current_player];
+  template <typename Mutator>
+  bool apply_take_gems(const Action &a, Mutator &mutation) {
+    const int player_index = board.current_player;
+    auto &p = board.players[player_index];
     for (int i = 0; i < 5; ++i) {
-      p.gems[i] += a.take[i];
-      board.bank[i] -= a.take[i];
+      mutation.set_player_gem(player_index, i,
+                              static_cast<uint8_t>(p.gems[i] + a.take[i]));
+      mutation.set_bank(i, static_cast<uint8_t>(board.bank[i] - a.take[i]));
     }
-    apply_gem_return(a);
+    apply_gem_return(a, mutation);
     return true;
   }
 
-  bool apply_reserve_visible(const Action &a) {
+  template <typename Mutator>
+  bool apply_reserve_visible(const Action &a, Mutator &mutation) {
     // Find and remove from board
     const auto source =
         csplendor::rules::find_visible_card_source(board, a.card_id);
@@ -451,39 +469,42 @@ private:
     const int found_level = source.level;
     const int found_slot = source.slot;
 
-    csplendor::detail::reserve_card_unchecked(board, a.card_id, false);
+    csplendor::detail::reserve_card_unchecked(board, mutation, a.card_id,
+                                              false);
     if (!board.decks[found_level].empty()) {
       // Blank refill mode: consume the card but keep the slot unknown.
       if (blank_refill_mode) {
-        board.decks[found_level].pop_back();
-        board.visible[found_level][found_slot] = -1;
+        mutation.pop_deck(found_level);
+        mutation.set_visible(found_level, found_slot, -1);
       } else {
-        board.visible[found_level][found_slot] = board.decks[found_level].back();
-        board.decks[found_level].pop_back();
+        const uint8_t refill = mutation.pop_deck(found_level);
+        mutation.set_visible(found_level, found_slot,
+                             static_cast<int8_t>(refill));
       }
     } else {
-      board.visible[found_level][found_slot] = -1;
+      mutation.set_visible(found_level, found_slot, -1);
     }
 
-    csplendor::detail::grant_reserve_gold(board);
-    apply_gem_return(a);
+    csplendor::detail::grant_reserve_gold(board, mutation);
+    apply_gem_return(a, mutation);
     return true;
   }
 
-  bool apply_reserve_deck(const Action &a) {
+  template <typename Mutator>
+  bool apply_reserve_deck(const Action &a, Mutator &mutation) {
     if (a.deck_level < 0 || a.deck_level >= 3 ||
         board.decks[a.deck_level].empty())
       return false;
 
-    uint8_t card_id = board.decks[a.deck_level].back();
-    board.decks[a.deck_level].pop_back();
-    csplendor::detail::reserve_card_unchecked(board, card_id, true);
-    csplendor::detail::grant_reserve_gold(board);
-    apply_gem_return(a);
+    const uint8_t card_id = mutation.pop_deck(a.deck_level);
+    csplendor::detail::reserve_card_unchecked(board, mutation, card_id, true);
+    csplendor::detail::grant_reserve_gold(board, mutation);
+    apply_gem_return(a, mutation);
     return true;
   }
 
-  bool apply_purchase(const Action &a) {
+  template <typename Mutator>
+  bool apply_purchase(const Action &a, Mutator &mutation) {
     auto &p = board.players[board.current_player];
     const auto &card = get_card(a.card_id);
 
@@ -503,42 +524,47 @@ private:
 
     // Payment and card gains are common to visible, reserved, and oracle
     // purchases. Validation remains at the caller boundary for trusted moves.
-    csplendor::detail::purchase_card<false>(board, card, a.gold_as);
+    csplendor::detail::purchase_card<false>(board, mutation, card, a.gold_as);
 
     // Remove from source
     if (a.from_reserved) {
       for (int j = reserved_slot; j < 2; ++j) {
-        p.reserved[j] = p.reserved[j + 1];
-        p.reserved_is_hidden[j] = p.reserved_is_hidden[j + 1];
+        mutation.set_player_reserved(board.current_player, j,
+                                     p.reserved[j + 1]);
+        mutation.set_player_reserved_hidden(board.current_player, j,
+                                            p.reserved_is_hidden[j + 1]);
       }
-      p.reserved[2] = -1;
-      p.reserved_is_hidden[2] = false;
-      p.reserved_count--;
+      mutation.set_player_reserved(board.current_player, 2, -1);
+      mutation.set_player_reserved_hidden(board.current_player, 2, false);
+      mutation.set_player_reserved_count(
+          board.current_player, static_cast<uint8_t>(p.reserved_count - 1));
     } else {
       const int visible_level = visible_source.level;
       const int visible_slot = visible_source.slot;
       if (!board.decks[visible_level].empty()) {
         // Blank refill mode: consume the card but keep the slot unknown.
         if (blank_refill_mode) {
-          board.decks[visible_level].pop_back();
-          board.visible[visible_level][visible_slot] = -1;
+          mutation.pop_deck(visible_level);
+          mutation.set_visible(visible_level, visible_slot, -1);
         } else {
-          board.visible[visible_level][visible_slot] =
-              board.decks[visible_level].back();
-          board.decks[visible_level].pop_back();
+          const uint8_t refill = mutation.pop_deck(visible_level);
+          mutation.set_visible(visible_level, visible_slot,
+                               static_cast<int8_t>(refill));
         }
       } else {
-        board.visible[visible_level][visible_slot] = -1;
+        mutation.set_visible(visible_level, visible_slot, -1);
       }
     }
     return true;
   }
 
-  void apply_gem_return(const Action &a) {
-    csplendor::detail::return_gems_unchecked(board, a.return_gems);
+  template <typename Mutator>
+  void apply_gem_return(const Action &a, Mutator &mutation) {
+    csplendor::detail::return_gems_unchecked(board, mutation, a.return_gems);
   }
 
-  bool apply_noble_visit(const Action &a) {
+  template <typename Mutator>
+  bool apply_noble_visit(const Action &a, Mutator &mutation) {
     auto eligible =
         csplendor::rules::eligible_nobles(board, board.current_player);
     if (eligible.empty())
@@ -563,7 +589,7 @@ private:
       noble_id = eligible[0];
     }
 
-    csplendor::detail::acquire_noble_unchecked(board, noble_id);
+    csplendor::detail::acquire_noble_unchecked(board, mutation, noble_id);
     return true;
   }
 };

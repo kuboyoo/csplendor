@@ -339,6 +339,45 @@ def test_counter_contract_separates_correctness_and_measurement():
     with pytest.raises(runner.BenchmarkContractError, match="root_visit_digest"):
         runner.validate_record_pair(parallel_a, parallel_b)
 
+    # Root-parallel workers own independent deterministic trees, so their
+    # merged root result remains an exact correctness contract even above 1T.
+    root_a = _record(
+        workload="root_parallel",
+        counters={"instrumentation_enabled": False, "root_visit_digest": "aaaa"},
+        semantics={"correct": True, "threads": 4},
+    )
+    root_b = _record(
+        workload="root_parallel",
+        counters={"instrumentation_enabled": False, "root_visit_digest": "bbbb"},
+        semantics={"correct": True, "threads": 4},
+    )
+    with pytest.raises(runner.BenchmarkContractError, match="root_visit_digest"):
+        runner.validate_record_pair(root_a, root_b)
+
+
+def test_root_parallel_selected_action_is_exact_ab_semantics():
+    semantics = {
+        "correct": True,
+        "threads": 8,
+        "tree_domain": "exact",
+        "selected_action_index": 17,
+        "selected_action_code": "530",
+        "selected_action_legal": True,
+        "worker_result_digest": "0123456789abcdef",
+    }
+    baseline = _record(workload="root_parallel", semantics=semantics)
+    runner.validate_record_pair(baseline, deepcopy(baseline))
+
+    for field, value in (
+        ("selected_action_index", 18),
+        ("selected_action_code", "648"),
+        ("worker_result_digest", "fedcba9876543210"),
+    ):
+        candidate = deepcopy(baseline)
+        candidate["semantics"][field] = value
+        with pytest.raises(runner.BenchmarkContractError, match="metadata mismatch"):
+            runner.validate_record_pair(baseline, candidate)
+
 
 def test_trace_and_solver_order_digests_are_exact_ab_semantics():
     trace_digest_fields = {
@@ -489,6 +528,8 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
         "CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/c++\n"
         "CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -DPRIVATE_VALUE=hidden\n"
         "CSPLENDOR_CPU_TARGET:STRING=portable\n"
+        "CSPLENDOR_INCREMENTAL_EXACT_HASH:BOOL=OFF\n"
+        "CSPLENDOR_VERIFY_INCREMENTAL_HASH:BOOL=OFF\n"
         "UNRELATED_API_TOKEN:STRING=do-not-read-or-emit\n",
         encoding="utf-8",
     )
@@ -498,11 +539,45 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
     assert "UNRELATED_API_TOKEN" not in rendered
     assert "do-not-read-or-emit" not in rendered
     assert "PRIVATE_VALUE" not in rendered
+    assert metadata["allowlisted_entries"]["CSPLENDOR_INCREMENTAL_EXACT_HASH"] == "OFF"
+    assert metadata["allowlisted_entries"]["CSPLENDOR_VERIFY_INCREMENTAL_HASH"] == "OFF"
     assert (
         metadata["allowlisted_entries"]["CMAKE_CXX_FLAGS_RELEASE"][
             "redacted_token_count"
         ]
         == 1
+    )
+
+    candidate_cache = tmp_path / "candidate-CMakeCache.txt"
+    candidate_cache.write_text(
+        cache.read_text(encoding="utf-8").replace(
+            "CSPLENDOR_INCREMENTAL_EXACT_HASH:BOOL=OFF",
+            "CSPLENDOR_INCREMENTAL_EXACT_HASH:BOOL=ON",
+        ),
+        encoding="utf-8",
+    )
+    candidate_metadata, _ = manifest_tool._cmake_build_metadata(candidate_cache)
+    assert (
+        candidate_metadata["allowlisted_entries"]["CSPLENDOR_INCREMENTAL_EXACT_HASH"]
+        == "ON"
+    )
+    assert (
+        candidate_metadata["benchmark_build_fingerprint_sha256"]
+        == metadata["benchmark_build_fingerprint_sha256"]
+    )
+
+    verify_cache = tmp_path / "verify-CMakeCache.txt"
+    verify_cache.write_text(
+        cache.read_text(encoding="utf-8").replace(
+            "CSPLENDOR_VERIFY_INCREMENTAL_HASH:BOOL=OFF",
+            "CSPLENDOR_VERIFY_INCREMENTAL_HASH:BOOL=ON",
+        ),
+        encoding="utf-8",
+    )
+    verify_metadata, _ = manifest_tool._cmake_build_metadata(verify_cache)
+    assert (
+        verify_metadata["benchmark_build_fingerprint_sha256"]
+        != metadata["benchmark_build_fingerprint_sha256"]
     )
 
     baseline = _manifest()

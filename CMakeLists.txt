@@ -12,6 +12,10 @@ option(CSPLENDOR_BUILD_ENGINE_BENCHMARK
        "Build native rule/search/solver hotpath benchmark" OFF)
 option(CSPLENDOR_PERF_INSTRUMENTATION
        "Enable internal performance counters for diagnostic builds" OFF)
+option(CSPLENDOR_INCREMENTAL_EXACT_HASH
+       "Maintain the exact Zobrist hash across trusted game transitions" ON)
+option(CSPLENDOR_VERIFY_INCREMENTAL_HASH
+       "Verify trusted-transition hashes against the uncached oracle" OFF)
 set(CSPLENDOR_CPU_TARGET "portable" CACHE STRING
     "CPU target: portable or native")
 set_property(CACHE CSPLENDOR_CPU_TARGET PROPERTY STRINGS portable native)
@@ -52,6 +56,16 @@ endif()
 if(CSPLENDOR_PERF_INSTRUMENTATION)
   target_compile_definitions(
       csplendor_core_config INTERFACE CSPLENDOR_PERF_INSTRUMENTATION=1)
+endif()
+
+if(CSPLENDOR_INCREMENTAL_EXACT_HASH)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_INCREMENTAL_EXACT_HASH=1)
+endif()
+
+if(CSPLENDOR_VERIFY_INCREMENTAL_HASH)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_VERIFY_INCREMENTAL_HASH=1)
 endif()
 
 if(CSPLENDOR_CPU_TARGET STREQUAL "portable")
