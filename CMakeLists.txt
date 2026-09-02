@@ -18,6 +18,8 @@ option(CSPLENDOR_VERIFY_INCREMENTAL_HASH
        "Verify trusted-transition hashes against the uncached oracle" OFF)
 option(CSPLENDOR_NOBLE_ELIGIBILITY_TABLE
        "Use the constexpr per-colour noble eligibility mask table" ON)
+option(CSPLENDOR_SINGLE_PASS_LEGAL_CODES
+       "Materialize legal action codes with one fixed-scratch enumeration" ON)
 set(CSPLENDOR_CPU_TARGET "portable" CACHE STRING
     "CPU target: portable or native")
 set_property(CACHE CSPLENDOR_CPU_TARGET PROPERTY STRINGS portable native)
@@ -73,6 +75,11 @@ endif()
 if(CSPLENDOR_NOBLE_ELIGIBILITY_TABLE)
   target_compile_definitions(
       csplendor_core_config INTERFACE CSPLENDOR_NOBLE_ELIGIBILITY_TABLE=1)
+endif()
+
+if(CSPLENDOR_SINGLE_PASS_LEGAL_CODES)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_SINGLE_PASS_LEGAL_CODES=1)
 endif()
 
 if(CSPLENDOR_CPU_TARGET STREQUAL "portable")

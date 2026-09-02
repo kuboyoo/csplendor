@@ -70,6 +70,16 @@ public:
   }
 
   std::vector<uint64_t> legal_action_codes() const {
+#ifdef CSPLENDOR_SINGLE_PASS_LEGAL_CODES
+    std::array<uint64_t, MAX_MOVES> scratch;
+    uint16_t count = 0;
+    auto sink = [&scratch, &count](const Action &action) {
+      scratch[count++] = action.pack();
+      return true;
+    };
+    MoveGenerator::consume_all_capped(board, simple_payment_mode, sink);
+    return std::vector<uint64_t>(scratch.begin(), scratch.begin() + count);
+#else
     std::vector<uint64_t> codes;
     codes.reserve(MoveGenerator::count_all_fixed(board, simple_payment_mode));
     auto sink = [&codes](const Action &action) {
@@ -85,6 +95,7 @@ public:
     };
     MoveGenerator::consume_all_capped(board, simple_payment_mode, sink);
     return codes;
+#endif
   }
 
   uint64_t legal_action_code_at(uint16_t index) const {

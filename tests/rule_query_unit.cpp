@@ -235,6 +235,46 @@ void test_reachable_differential_and_golden() {
   check(digest == REACHABLE_ACTION_DIGEST);
 }
 
+void test_large_reachable_move_generation_corpus() {
+  uint64_t state_count = 0;
+  uint64_t action_count = 0;
+
+  for (uint32_t seed = 0; seed < 144; ++seed) {
+    Game game(10'000 + seed);
+    game.simple_payment_mode = (seed & 1U) != 0;
+    for (uint32_t ply = 0; ply < 96; ++ply) {
+      const auto actions = game.legal_actions();
+      const auto codes = game.legal_action_codes();
+      check(actions.size() == codes.size());
+      check(codes.size() == game.legal_action_count());
+
+      for (size_t index = 0; index < actions.size(); ++index) {
+        check(actions[index].pack() == codes[index]);
+        check(game.is_legal(actions[index]));
+
+        Game by_action = game.clone_light();
+        Game by_code = game.clone_light();
+        check(by_action.apply(actions[index], false));
+        check(by_code.apply_action_code(codes[index], false));
+        check(csplendor::snapshot::serialize(by_action) ==
+              csplendor::snapshot::serialize(by_code));
+      }
+
+      ++state_count;
+      action_count += codes.size();
+      if (codes.empty())
+        break;
+      const size_t selected =
+          (static_cast<size_t>(seed) * 257 + static_cast<size_t>(ply) * 29) %
+          codes.size();
+      check(game.apply_action_code_trusted(codes[selected], false));
+    }
+  }
+
+  check(state_count >= 10'000);
+  check(action_count >= 100'000);
+}
+
 void test_editor_edges_and_rejections() {
   Game game(7);
   Board &board = game.board.begin_editor_mutation();
@@ -271,6 +311,7 @@ void test_editor_edges_and_rejections() {
 
 int main() {
   test_reachable_differential_and_golden();
+  test_large_reachable_move_generation_corpus();
   test_editor_edges_and_rejections();
   return 0;
 }
