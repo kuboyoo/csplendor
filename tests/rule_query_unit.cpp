@@ -114,6 +114,30 @@ uint16_t brute_return_count(const std::array<uint8_t, 6> &available,
   return count;
 }
 
+void test_packed_return_code_helper() {
+  constexpr std::array<ActionType, 4> RETURN_TYPES = {
+      TAKE_DIFFERENT, TAKE_SAME, RESERVE_VISIBLE, RESERVE_DECK};
+  constexpr uint32_t CASES = 4 * 4 * 4 * 4 * 4 * 4;
+  for (ActionType type : RETURN_TYPES) {
+    Action base;
+    base.type = type;
+    base.take = {1, 0, 2, 0, 1};
+    base.card_id = 37;
+    base.deck_level = 2;
+    const uint64_t base_code = base.pack();
+    for (uint32_t encoded = 0; encoded < CASES; ++encoded) {
+      Action expected = base;
+      uint32_t remainder = encoded;
+      for (uint8_t &amount : expected.return_gems) {
+        amount = static_cast<uint8_t>(remainder % 4);
+        remainder /= 4;
+      }
+      check(Action::pack_return_gems(base_code, type, expected.return_gems) ==
+            expected.pack());
+    }
+  }
+}
+
 void test_small_return_pattern_table() {
   using Pattern = std::array<uint8_t, 6>;
   constexpr uint32_t CASES = 4 * 4 * 4 * 4 * 4 * 4;
@@ -397,6 +421,7 @@ void test_editor_edges_and_rejections() {
 } // namespace
 
 int main() {
+  test_packed_return_code_helper();
   test_small_return_pattern_table();
   test_small_return_count_closed_form();
   test_reachable_differential_and_golden();

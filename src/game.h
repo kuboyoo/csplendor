@@ -73,6 +73,15 @@ public:
 #ifdef CSPLENDOR_SINGLE_PASS_LEGAL_CODES
     std::array<uint64_t, MAX_MOVES> scratch;
     uint16_t count = 0;
+    if (use_packed_code_sink()) {
+      auto code_sink = [&scratch, &count](uint64_t code) {
+        scratch[count++] = code;
+        return true;
+      };
+      MoveGenerator::consume_all_codes_capped(board, simple_payment_mode,
+                                              code_sink);
+      return std::vector<uint64_t>(scratch.begin(), scratch.begin() + count);
+    }
     auto sink = [&scratch, &count](const Action &action) {
       scratch[count++] = action.pack();
       return true;
@@ -82,6 +91,22 @@ public:
 #else
     std::vector<uint64_t> codes;
     codes.reserve(MoveGenerator::count_all_fixed(board, simple_payment_mode));
+    if (use_packed_code_sink()) {
+      auto code_sink = [&codes](uint64_t code) {
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+        const size_t capacity = codes.capacity();
+#endif
+        codes.push_back(code);
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+        if (codes.capacity() != capacity)
+          CSPLENDOR_PERF_INC(ActionVectorReallocations);
+#endif
+        return true;
+      };
+      MoveGenerator::consume_all_codes_capped(board, simple_payment_mode,
+                                              code_sink);
+      return codes;
+    }
     auto sink = [&codes](const Action &action) {
 #ifdef CSPLENDOR_PERF_INSTRUMENTATION
       const size_t capacity = codes.capacity();
@@ -101,6 +126,17 @@ public:
   uint64_t legal_action_code_at(uint16_t index) const {
     uint16_t current = 0;
     uint64_t code = 0;
+    if (use_packed_code_sink()) {
+      auto code_sink = [&current, &code, index](uint64_t candidate) {
+        if (current++ != index)
+          return true;
+        code = candidate;
+        return false;
+      };
+      MoveGenerator::consume_all_codes_capped(board, simple_payment_mode,
+                                              code_sink);
+      return code;
+    }
     auto sink = [&current, &code, index](const Action &action) {
       if (current++ != index)
         return true;
@@ -206,6 +242,19 @@ public:
 
 private:
   explicit Game(NoInit) {}
+
+  bool use_packed_code_sink() const noexcept {
+    if (!csplendor::move_generation_detail::packed_code_sink_enabled ||
+        board.current_player >= Board::NUM_PLAYERS)
+      return false;
+
+    // Saturated reserve slots remove up to fifteen cheap base actions and are
+    // common in low-mobility late positions. The legacy Action sink has less
+    // fixed overhead there; all rule constraints and output order remain in
+    // the shared generator implementation.
+    return board.players[board.current_player].reserved_count <
+           Board::MAX_RESERVED;
+  }
 
   Game copy_current_state() const {
     Game copy(NoInit{});

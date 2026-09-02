@@ -541,6 +541,7 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
         "CSPLENDOR_CLOSED_FORM_RETURN_COUNT:BOOL=OFF\n"
         "CSPLENDOR_INCREMENTAL_EXACT_HASH:BOOL=OFF\n"
         "CSPLENDOR_NOBLE_ELIGIBILITY_TABLE:BOOL=OFF\n"
+        "CSPLENDOR_PACKED_CODE_SINK:BOOL=OFF\n"
         "CSPLENDOR_RETURN_PATTERN_TABLE:BOOL=OFF\n"
         "CSPLENDOR_SINGLE_PASS_LEGAL_CODES:BOOL=OFF\n"
         "CSPLENDOR_VERIFY_INCREMENTAL_HASH:BOOL=OFF\n"
@@ -668,6 +669,28 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
     )
     assert (
         return_pattern_metadata["benchmark_build_fingerprint_sha256"]
+        == metadata["benchmark_build_fingerprint_sha256"]
+    )
+
+    packed_code_cache = tmp_path / "packed-code-CMakeCache.txt"
+    packed_code_cache.write_text(
+        cache.read_text(encoding="utf-8").replace(
+            "CSPLENDOR_PACKED_CODE_SINK:BOOL=OFF",
+            "CSPLENDOR_PACKED_CODE_SINK:BOOL=ON",
+        ),
+        encoding="utf-8",
+    )
+    packed_code_metadata, _ = manifest_tool._cmake_build_metadata(
+        packed_code_cache
+    )
+    assert (
+        packed_code_metadata["allowlisted_entries"][
+            "CSPLENDOR_PACKED_CODE_SINK"
+        ]
+        == "ON"
+    )
+    assert (
+        packed_code_metadata["benchmark_build_fingerprint_sha256"]
         == metadata["benchmark_build_fingerprint_sha256"]
     )
 

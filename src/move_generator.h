@@ -28,6 +28,12 @@ inline const volatile bool return_pattern_table_enabled = true;
 inline const volatile bool return_pattern_table_enabled = false;
 #endif
 
+#ifdef CSPLENDOR_PACKED_CODE_SINK
+inline const volatile bool packed_code_sink_enabled = true;
+#else
+inline const volatile bool packed_code_sink_enabled = false;
+#endif
+
 struct SmallReturnPatternTable {
   std::array<std::array<std::array<uint8_t, 6>, 56>, 4> patterns{};
   std::array<uint8_t, 4> counts{};
@@ -207,19 +213,39 @@ private:
   template <typename Sink>
   static bool consume_all_capped(const Board &board, bool simple_payment_mode,
                                  Sink &sink) {
+    return consume_all_capped_impl<false>(board, simple_payment_mode, sink);
+  }
+
+  template <typename Sink>
+  static bool consume_all_codes_capped(const Board &board,
+                                       bool simple_payment_mode, Sink &sink) {
+    return consume_all_capped_impl<true>(board, simple_payment_mode, sink);
+  }
+
+  template <bool PackedCodes, typename Sink>
+  static bool consume_all_capped_impl(const Board &board,
+                                      bool simple_payment_mode, Sink &sink) {
     if (board.current_player >= Board::NUM_PLAYERS || board.is_game_over())
       return true;
 
     uint16_t emitted_count = 0;
-    auto final_sink = [&sink, &emitted_count](const Action &action) {
+    auto final_sink = [&sink, &emitted_count](const auto &move) {
       if (emitted_count >= MAX_MOVES)
         return false;
       ++emitted_count;
-      return sink(action) && emitted_count < MAX_MOVES;
+      return sink(move) && emitted_count < MAX_MOVES;
     };
 
-    if (board.waiting_noble)
-      return emit_noble_visit_choices(board, final_sink);
+    if (board.waiting_noble) {
+      if constexpr (PackedCodes) {
+        auto code_sink = [&final_sink](const Action &action) {
+          return final_sink(action.pack());
+        };
+        return emit_noble_visit_choices(board, code_sink);
+      } else {
+        return emit_noble_visit_choices(board, final_sink);
+      }
+    }
 
     validate_purchase_source_ids(board);
 
@@ -228,16 +254,25 @@ private:
       if (base_count >= MAX_MOVES)
         return false;
       ++base_count;
-      if (!emit_with_returns(board, action, final_sink))
-        return false;
+      if constexpr (PackedCodes) {
+        if (!emit_codes_with_returns(board, action, final_sink))
+          return false;
+      } else {
+        if (!emit_with_returns(board, action, final_sink))
+          return false;
+      }
       return base_count < MAX_MOVES;
     };
     const bool completed =
         emit_base_actions(board, simple_payment_mode, base_sink);
     if (completed && base_count == 0) {
-      Action pass;
-      pass.type = PASS;
-      return final_sink(pass);
+      if constexpr (PackedCodes) {
+        return final_sink(static_cast<uint64_t>(PASS));
+      } else {
+        Action pass;
+        pass.type = PASS;
+        return final_sink(pass);
+      }
     }
     return completed;
   }
@@ -438,17 +473,41 @@ private:
   template <typename Sink>
   static bool emit_with_returns(const Board &board, const Action &action,
                                 Sink &sink) {
+    return emit_with_returns_impl<false>(board, action, sink);
+  }
+
+  template <typename Sink>
+  static bool emit_codes_with_returns(const Board &board, const Action &action,
+                                      Sink &sink) {
+    return emit_with_returns_impl<true>(board, action, sink);
+  }
+
+  template <bool PackedCodes, typename Sink>
+  static bool emit_with_returns_impl(const Board &board, const Action &action,
+                                     Sink &sink) {
+    uint64_t base_code = 0;
+    if constexpr (PackedCodes)
+      base_code = action.pack();
+
     // Purchases can only spend gems; unlike take/reserve actions they never
     // permit an explicit token return.  This also keeps generator/apply
     // parity for public editor states that start above the ten-token limit.
-    if (action.type == PURCHASE)
-      return sink(action);
+    if (action.type == PURCHASE) {
+      if constexpr (PackedCodes)
+        return sink(base_code);
+      else
+        return sink(action);
+    }
 
     const auto next_gems =
         csplendor::rules::gems_after_token_action(board, action);
     const int excess = csplendor::rules::required_token_return(next_gems);
-    if (excess <= 0)
-      return sink(action);
+    if (excess <= 0) {
+      if constexpr (PackedCodes)
+        return sink(base_code);
+      else
+        return sink(action);
+    }
 
     if (excess <= 3 &&
         csplendor::move_generation_detail::return_pattern_table_enabled) {
@@ -464,18 +523,24 @@ private:
           }
         }
         if (available) {
-          Action with_return = action;
-          with_return.return_gems = pattern;
-          if (!sink(with_return))
-            return false;
+          if constexpr (PackedCodes) {
+            if (!sink(Action::pack_return_gems(base_code, action.type,
+                                               pattern)))
+              return false;
+          } else {
+            Action with_return = action;
+            with_return.return_gems = pattern;
+            if (!sink(with_return))
+              return false;
+          }
         }
       }
       return true;
     }
 
     std::array<uint8_t, 6> current_return = {0, 0, 0, 0, 0, 0};
-    return emit_return_combinations(next_gems, excess, 0, current_return,
-                                    action, sink);
+    return emit_return_combinations<PackedCodes>(
+        next_gems, excess, 0, current_return, action, base_code, sink);
   }
 
   static uint16_t count_with_returns(const Board &board, const Action &action,
@@ -519,15 +584,20 @@ private:
     return count;
   }
 
-  template <typename Sink>
-  static bool emit_return_combinations(const std::array<uint8_t, 6> &available,
-                                       int remaining, int color_idx,
-                                       std::array<uint8_t, 6> current_return,
-                                       const Action &base_action, Sink &sink) {
+  template <bool PackedCodes, typename Sink>
+  static bool emit_return_combinations(
+      const std::array<uint8_t, 6> &available, int remaining, int color_idx,
+      std::array<uint8_t, 6> current_return, const Action &base_action,
+      uint64_t base_code, Sink &sink) {
     if (remaining == 0) {
-      Action action = base_action;
-      action.return_gems = current_return;
-      return sink(action);
+      if constexpr (PackedCodes) {
+        return sink(Action::pack_return_gems(base_code, base_action.type,
+                                             current_return));
+      } else {
+        Action action = base_action;
+        action.return_gems = current_return;
+        return sink(action);
+      }
     }
     if (color_idx == 6)
       return true;
@@ -536,9 +606,9 @@ private:
         std::min(remaining, static_cast<int>(available[color_idx]));
     for (int amount = 0; amount <= max_return; ++amount) {
       current_return[color_idx] = static_cast<uint8_t>(amount);
-      if (!emit_return_combinations(available, remaining - amount,
-                                    color_idx + 1, current_return, base_action,
-                                    sink)) {
+      if (!emit_return_combinations<PackedCodes>(
+              available, remaining - amount, color_idx + 1, current_return,
+              base_action, base_code, sink)) {
         return false;
       }
     }

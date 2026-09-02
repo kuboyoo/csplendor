@@ -24,6 +24,8 @@ option(CSPLENDOR_CLOSED_FORM_RETURN_COUNT
        "Count token returns of excess zero through three in closed form" ON)
 option(CSPLENDOR_RETURN_PATTERN_TABLE
        "Emit small token-return combinations from a constexpr table" ON)
+option(CSPLENDOR_PACKED_CODE_SINK
+       "Emit token-return action codes without materializing wide actions" ON)
 set(CSPLENDOR_CPU_TARGET "portable" CACHE STRING
     "CPU target: portable or native")
 set_property(CACHE CSPLENDOR_CPU_TARGET PROPERTY STRINGS portable native)
@@ -94,6 +96,11 @@ endif()
 if(CSPLENDOR_RETURN_PATTERN_TABLE)
   target_compile_definitions(
       csplendor_core_config INTERFACE CSPLENDOR_RETURN_PATTERN_TABLE=1)
+endif()
+
+if(CSPLENDOR_PACKED_CODE_SINK)
+  target_compile_definitions(csplendor_core_config
+                             INTERFACE CSPLENDOR_PACKED_CODE_SINK=1)
 endif()
 
 if(CSPLENDOR_CPU_TARGET STREQUAL "portable")
