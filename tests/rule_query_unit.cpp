@@ -114,6 +114,51 @@ uint16_t brute_return_count(const std::array<uint8_t, 6> &available,
   return count;
 }
 
+void test_small_return_pattern_table() {
+  using Pattern = std::array<uint8_t, 6>;
+  constexpr uint32_t CASES = 4 * 4 * 4 * 4 * 4 * 4;
+  const auto &table = csplendor::move_generation_detail::SMALL_RETURN_PATTERNS;
+
+  for (uint32_t encoded = 0; encoded < CASES; ++encoded) {
+    std::array<uint8_t, 6> available{};
+    uint32_t remainder = encoded;
+    for (uint8_t &amount : available) {
+      amount = static_cast<uint8_t>(remainder % 4);
+      remainder /= 4;
+    }
+
+    for (int excess = 1; excess <= 3; ++excess) {
+      std::array<Pattern, 56> oracle{};
+      uint8_t oracle_count = 0;
+      for (int a0 = 0; a0 <= std::min<int>(excess, available[0]); ++a0)
+        for (int a1 = 0; a1 <= std::min<int>(excess, available[1]); ++a1)
+          for (int a2 = 0; a2 <= std::min<int>(excess, available[2]); ++a2)
+            for (int a3 = 0; a3 <= std::min<int>(excess, available[3]); ++a3)
+              for (int a4 = 0; a4 <= std::min<int>(excess, available[4]); ++a4)
+                for (int a5 = 0; a5 <= std::min<int>(excess, available[5]);
+                     ++a5) {
+                  if (a0 + a1 + a2 + a3 + a4 + a5 == excess) {
+                    oracle[oracle_count++] = {
+                        static_cast<uint8_t>(a0), static_cast<uint8_t>(a1),
+                        static_cast<uint8_t>(a2), static_cast<uint8_t>(a3),
+                        static_cast<uint8_t>(a4), static_cast<uint8_t>(a5)};
+                  }
+                }
+
+      uint8_t actual_count = 0;
+      for (uint8_t index = 0; index < table.counts[excess]; ++index) {
+        const Pattern &pattern = table.patterns[excess][index];
+        bool valid = true;
+        for (int color = 0; color < 6; ++color)
+          valid = valid && pattern[color] <= available[color];
+        if (valid)
+          check(pattern == oracle[actual_count++]);
+      }
+      check(actual_count == oracle_count);
+    }
+  }
+}
+
 void test_small_return_count_closed_form() {
   constexpr std::array<uint16_t, 9> limits = {0,  1,  2,  3,        7,
                                               17, 31, 56, MAX_MOVES};
@@ -352,6 +397,7 @@ void test_editor_edges_and_rejections() {
 } // namespace
 
 int main() {
+  test_small_return_pattern_table();
   test_small_return_count_closed_form();
   test_reachable_differential_and_golden();
   test_large_reachable_move_generation_corpus();

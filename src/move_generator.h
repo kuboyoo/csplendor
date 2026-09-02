@@ -22,6 +22,46 @@ inline const volatile bool closed_form_return_count_enabled = true;
 inline const volatile bool closed_form_return_count_enabled = false;
 #endif
 
+#ifdef CSPLENDOR_RETURN_PATTERN_TABLE
+inline const volatile bool return_pattern_table_enabled = true;
+#else
+inline const volatile bool return_pattern_table_enabled = false;
+#endif
+
+struct SmallReturnPatternTable {
+  std::array<std::array<std::array<uint8_t, 6>, 56>, 4> patterns{};
+  std::array<uint8_t, 4> counts{};
+};
+
+constexpr void append_return_patterns(SmallReturnPatternTable &table,
+                                      int excess, int remaining, int color_idx,
+                                      std::array<uint8_t, 6> pattern) {
+  if (remaining == 0) {
+    table.patterns[excess][table.counts[excess]++] = pattern;
+    return;
+  }
+  if (color_idx == 6)
+    return;
+  for (int amount = 0; amount <= remaining; ++amount) {
+    pattern[color_idx] = static_cast<uint8_t>(amount);
+    append_return_patterns(table, excess, remaining - amount, color_idx + 1,
+                           pattern);
+  }
+}
+
+constexpr SmallReturnPatternTable make_small_return_pattern_table() {
+  SmallReturnPatternTable table{};
+  for (int excess = 1; excess <= 3; ++excess)
+    append_return_patterns(table, excess, excess, 0, {});
+  return table;
+}
+
+inline constexpr SmallReturnPatternTable SMALL_RETURN_PATTERNS =
+    make_small_return_pattern_table();
+static_assert(SMALL_RETURN_PATTERNS.counts[1] == 6);
+static_assert(SMALL_RETURN_PATTERNS.counts[2] == 21);
+static_assert(SMALL_RETURN_PATTERNS.counts[3] == 56);
+
 inline uint16_t
 count_small_token_returns(const std::array<uint8_t, 6> &available, int excess,
                           uint16_t limit) {
@@ -409,6 +449,29 @@ private:
     const int excess = csplendor::rules::required_token_return(next_gems);
     if (excess <= 0)
       return sink(action);
+
+    if (excess <= 3 &&
+        csplendor::move_generation_detail::return_pattern_table_enabled) {
+      const auto &table =
+          csplendor::move_generation_detail::SMALL_RETURN_PATTERNS;
+      for (uint8_t index = 0; index < table.counts[excess]; ++index) {
+        const auto &pattern = table.patterns[excess][index];
+        bool available = true;
+        for (int color = 0; color < 6; ++color) {
+          if (pattern[color] > next_gems[color]) {
+            available = false;
+            break;
+          }
+        }
+        if (available) {
+          Action with_return = action;
+          with_return.return_gems = pattern;
+          if (!sink(with_return))
+            return false;
+        }
+      }
+      return true;
+    }
 
     std::array<uint8_t, 6> current_return = {0, 0, 0, 0, 0, 0};
     return emit_return_combinations(next_gems, excess, 0, current_return,

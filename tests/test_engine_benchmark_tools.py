@@ -541,6 +541,7 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
         "CSPLENDOR_CLOSED_FORM_RETURN_COUNT:BOOL=OFF\n"
         "CSPLENDOR_INCREMENTAL_EXACT_HASH:BOOL=OFF\n"
         "CSPLENDOR_NOBLE_ELIGIBILITY_TABLE:BOOL=OFF\n"
+        "CSPLENDOR_RETURN_PATTERN_TABLE:BOOL=OFF\n"
         "CSPLENDOR_SINGLE_PASS_LEGAL_CODES:BOOL=OFF\n"
         "CSPLENDOR_VERIFY_INCREMENTAL_HASH:BOOL=OFF\n"
         "UNRELATED_API_TOKEN:STRING=do-not-read-or-emit\n",
@@ -645,6 +646,28 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
     )
     assert (
         return_count_metadata["benchmark_build_fingerprint_sha256"]
+        == metadata["benchmark_build_fingerprint_sha256"]
+    )
+
+    return_pattern_cache = tmp_path / "return-pattern-CMakeCache.txt"
+    return_pattern_cache.write_text(
+        cache.read_text(encoding="utf-8").replace(
+            "CSPLENDOR_RETURN_PATTERN_TABLE:BOOL=OFF",
+            "CSPLENDOR_RETURN_PATTERN_TABLE:BOOL=ON",
+        ),
+        encoding="utf-8",
+    )
+    return_pattern_metadata, _ = manifest_tool._cmake_build_metadata(
+        return_pattern_cache
+    )
+    assert (
+        return_pattern_metadata["allowlisted_entries"][
+            "CSPLENDOR_RETURN_PATTERN_TABLE"
+        ]
+        == "ON"
+    )
+    assert (
+        return_pattern_metadata["benchmark_build_fingerprint_sha256"]
         == metadata["benchmark_build_fingerprint_sha256"]
     )
 
