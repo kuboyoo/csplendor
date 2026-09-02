@@ -7,8 +7,8 @@
 - `phase2b_single_pass_codes_20260902.csv`: 正式6 workloadと境界6 fixtureの集計
 - `phase2b_single_pass_codes_evidence_20260902.json`: 全pair、固定slot、build identity、
   semantic recordを含むcompact evidence
-- `/tmp/phase2b-h1-formal-standard-20260902.json`: 正式22-pair raw artifact
-- `/tmp/phase2b-h1-exact-reveal-semantic-20260902.json`: exact reveal raw artifact
+- `raw/phase2b/phase2b-h1-formal-standard-20260902.json.gz`: 正式22-pair raw artifact
+- `raw/phase2b/phase2b-h1-exact-reveal-semantic-20260902.json.gz`: exact reveal raw artifact
 
 ## 24.1 状態
 

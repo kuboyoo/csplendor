@@ -7,7 +7,7 @@
 - `phase2b_payment_pattern_table_rejected_20260902.csv`: 正式4 workloadの22-pair集計
 - `phase2b_payment_pattern_table_rejected_evidence_20260902.json`: 全pair、固定slot、
   build identity、semantic recordを含むcompact evidence
-- `/tmp/phase2b-h4-payment-formal-rejected-*-20260902.json`: 作業時raw artifact
+- `raw/phase2b/phase2b-h4-payment-formal-rejected-*-20260902.json.gz`: 作業時raw artifact
 
 ## 24.1 状態
 

@@ -7,8 +7,8 @@
 - `phase2b_return_pattern_table_20260902.csv`: 正式23 workloadと境界4 fixtureの集計
 - `phase2b_return_pattern_table_evidence_20260902.json`: 全正式pair、固定slot、
   build identity、semantic recordを含むcompact evidence
-- `/tmp/phase2b-h4-return-formal-20260902.json`: 正式raw artifact
-- `/tmp/phase2b-h4-return-extra-*-20260902.json`: 境界fixture raw artifact
+- `raw/phase2b/phase2b-h4-return-formal-20260902.json.gz`: 正式raw artifact
+- `raw/phase2b/phase2b-h4-return-extra-*-20260902.json.gz`: 境界fixture raw artifact
 
 ## 24.1 状態
 

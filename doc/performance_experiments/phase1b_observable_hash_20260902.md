@@ -7,7 +7,7 @@
 - `phase1b_paired_20260902.csv`: 正式22-pairの集計
 - `phase1b_paired_evidence_20260902.json`: build identity、全pair比、counter、
   correctness digest、作業時raw artifactのSHA-256
-- `/tmp/phase1b-*.json`: 全pairを含む作業時原本。巨大ログのため非commit
+- `raw/phase1b/phase1b-*.json.gz`: 全pairを含む圧縮済み作業時原本
 
 本Phaseの実装試作はcorrectnessを満たしたが、end-to-endの採用基準を満たさなかった。
 そのため、コード、テスト、benchmark harnessの変更は全てrevertし、この報告とcompact

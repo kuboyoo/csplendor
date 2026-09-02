@@ -43,11 +43,13 @@
     "whole_binary_differences": "3 bytes, all at or after the .strtab file offset"
   },
   "raw_full_run": {
-    "ephemeral_path": "/tmp/phase0_baseline_slot_final_20260902.json",
+    "original_ephemeral_path": "/tmp/phase0_baseline_slot_final_20260902.json",
+    "archive_path": "doc/performance_experiments/raw/phase0/phase0_baseline_slot_final_20260902.json.gz",
+    "archive_sha256": "cb22a24b33c0ca6c2b0daebe52a584c913f023f29545666dea7ca80a298ee646",
     "sha256": "8b73a50e70144ea9c0472914de04d9fcec6887a9d939c2689cf89d6a6c61d694",
     "size_bytes": 4901469,
-    "committed": false,
-    "reason_not_committed": "full process manifests and duplicate per-sample payloads are retained in the compact evidence artifact",
+    "committed": true,
+    "storage": "deterministic_gzip",
     "semantic_digest_mismatches": 0
   },
   "committed_csv": {

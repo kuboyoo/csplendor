@@ -96,12 +96,22 @@ venv/
 *.gcno
 *.egg-info/
 __pycache__/
-測定時の巨大ログ
+未圧縮の測定時巨大ログ（確定raw記録は下記の永続化規約に従う）
 モデル重み
 大量棋譜
 ```
 
 **pushは、この作業セッションでユーザーから明示承認がある場合だけ行うこと。**
+
+## 0.4 計測記録の永続化
+
+- 一意なbenchmark・診断・差分検証記録を`/tmp`だけに置かない。
+- build directoryと再生成可能なbinaryは`/tmp`でよいが、計測出力は最初から
+  `doc/performance_experiments/raw/<phase>/`へ保存する。
+- 大きな確定済みraw記録は`gzip -n -9`で決定論的に圧縮し、
+  `doc/performance_experiments/raw/manifest.tsv`へ元内容と圧縮後のSHA-256を記録する。
+- Phase報告と後続作業は`/tmp`上の一時名ではなく、上記の永続パスを参照する。
+- raw内容は計測後に書き換えず、要約や解釈は別のMarkdown・CSVへ記録する。
 
 ---
 

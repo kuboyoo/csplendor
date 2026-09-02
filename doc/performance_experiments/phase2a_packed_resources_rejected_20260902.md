@@ -7,7 +7,7 @@
 - `phase2a_packed_resources_rejected_20260902.csv`: 正式8 workloadの22-pair集計
 - `phase2a_packed_resources_rejected_evidence_20260902.json`: 全pair、固定slot、
   build identity、semantic recordを含むcompact evidence
-- `/tmp/phase2a2-formal-mask-20260902.json`: 作業時raw artifact
+- `raw/phase2a/phase2a2-formal-mask-20260902.json.gz`: 作業時raw artifact
 
 ## 24.1 状態
 

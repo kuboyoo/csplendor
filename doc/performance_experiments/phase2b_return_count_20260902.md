@@ -7,8 +7,8 @@
 - `phase2b_return_count_20260902.csv`: 正式23 workloadの22-pair集計
 - `phase2b_return_count_evidence_20260902.json`: 全pair、固定slot、build identity、
   semantic recordを含むcompact evidence
-- `/tmp/phase2b-h2-formal-codeident-20260902.json`: 正式raw artifact
-- `/tmp/phase2b-h2-formal-extra-*.json`: 境界fixtureと再測定のraw artifact
+- `raw/phase2b/phase2b-h2-formal-codeident-20260902.json.gz`: 正式raw artifact
+- `raw/phase2b/phase2b-h2-formal-extra-*.json.gz`: 境界fixtureと再測定のraw artifact
 
 ## 24.1 状態
 

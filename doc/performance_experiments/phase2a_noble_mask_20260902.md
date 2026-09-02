@@ -7,8 +7,8 @@
 - `phase2a_noble_mask_paired_20260902.csv`: 正式8 workloadの22-pair集計
 - `phase2a_noble_mask_paired_evidence_20260902.json`: 全pair、固定slot、build
   identity、semantic recordを含むcompact evidence
-- `/tmp/phase2a1-formal-v3-20260902.json`: 作業時raw artifact
-- `/tmp/phase2a1-differential-final-1000-20260902.json`: 1,000局面差分検証原本
+- `raw/phase2a/phase2a1-formal-v3-20260902.json.gz`: 作業時raw artifact
+- `raw/phase2a/phase2a1-differential-final-1000-20260902.json.gz`: 1,000局面差分検証原本
 
 ## 24.1 状態
 

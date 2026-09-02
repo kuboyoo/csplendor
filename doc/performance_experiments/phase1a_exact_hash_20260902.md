@@ -7,8 +7,8 @@
 - `phase1a_paired_20260902.csv`: 15 workloadの正式paired A/B集計
 - `phase1a_paired_evidence_20260902.json`: 全pair比、crossover block比、
   binary/build identity、実行command、代表semantic record
-- `/tmp/csplendor-phase1a-release-off-on-differential-1000.json`: 1,000局面の
-  作業時差分検証原本（巨大な一時証跡のため非commit）
+- `raw/phase1a/csplendor-phase1a-release-off-on-differential-1000.json.gz`:
+  1,000局面の作業時差分検証原本
 
 ## 24.1 状態
 
@@ -182,8 +182,8 @@ python scripts/run_phase0_baseline.py \
   --candidate-binary /tmp/csplendor-phase1a-release-on/benchmark_engine_hotpaths \
   --baseline-repo-root /tmp/csplendor-codex56-phase0 \
   --candidate-repo-root /tmp/csplendor-codex56-phase0 \
-  --output-json /tmp/phase1a_primary_guards_final_20260902.json \
-  --output-csv /tmp/phase1a_primary_guards_final_20260902.csv \
+  --output-json doc/performance_experiments/raw/phase1a/phase1a_primary_guards_rerun.json \
+  --output-csv doc/performance_experiments/raw/phase1a/phase1a_primary_guards_rerun.csv \
   --pairs 22 --warmups 3 --bootstrap-iterations 10000 \
   --cpu-set 4 --timeout 300 \
   --case legal_count --case random_selfplay_apply --case apply_only \

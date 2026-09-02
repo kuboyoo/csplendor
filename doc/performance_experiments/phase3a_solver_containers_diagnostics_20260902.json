@@ -9,30 +9,39 @@
   },
   "raw_sources": {
     "formal": {
+      "archive_path": "doc/performance_experiments/raw/phase3a/phase3a_solver_containers_final_20260902.json.gz",
       "sha256": "3cff09fcd7b6828f1084545f8260fe0cf73809697f08e0b39fb20e35c903000a"
     },
     "path_stack": {
+      "archive_path": "doc/performance_experiments/raw/phase3a/phase3a_path_stack_targeted_20260902.json.gz",
       "sha256": "e41c79bd889262c74efb2d5c467ce991c1aadae6a67c61ebc1097495067433b4"
     },
     "card_classes": {
+      "archive_path": "doc/performance_experiments/raw/phase3a/phase3a_card_classes_targeted_20260902.json.gz",
       "sha256": "7353c2a059b43b36eddb73917c2e8e9d62f81845ddaeca305ac0fd799c51b304"
     },
     "compact_actions": {
+      "archive_path": "doc/performance_experiments/raw/phase3a/phase3a_compact_actions_targeted_20260902.json.gz",
       "sha256": "7a835209f17797fa6b9298431441737693151638989b4ff01a491a81d7ebda72"
     },
     "compact_reasons": {
+      "archive_path": "doc/performance_experiments/raw/phase3a/phase3a_compact_reasons_targeted_20260902.json.gz",
       "sha256": "74b096d1c86e19b451c8d4b4ebce24f7c6ea79aafcc140f605ec698dd971fc3b"
     },
     "preadaptive_combined_forced_pass": {
+      "archive_path": "doc/performance_experiments/raw/phase3a/phase3a_combined_forced_pass_20260902.json.gz",
       "sha256": "d5d7a93fafff485eb26c16f30638b36bed19537f007db5a7f9ae6f2735933733"
     },
     "adaptive_combined_forced_pass": {
+      "archive_path": "doc/performance_experiments/raw/phase3a/phase3a_adaptive_forced_pass_20260902.json.gz",
       "sha256": "8bffb354df0f7ccabe6692017e85dee52304ccfb767772544ec819ff148592d3"
     },
     "single_lookup_rejected": {
+      "archive_path": "doc/performance_experiments/raw/phase3a/phase3a_single_lookup_targeted_20260902.json.gz",
       "sha256": "373ba18a840bc1014feeaba4988cb618156ae578f6b3631b63dd1591f0aeb960"
     },
     "shared_tree_recheck": {
+      "archive_path": "doc/performance_experiments/raw/phase3a/phase3a_shared_tree_recheck_20260902.json.gz",
       "sha256": "7c2ebf20beb303cbe9a12a5abef3cd51d2515537ce2bcc3323e01892e84a985a"
     }
   },

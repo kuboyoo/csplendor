@@ -442,8 +442,9 @@
     ],
     "output_sha256": "40b26dccda750cd27858d2a03f95d93e42db3a3b058817b3836c646965f53281",
     "binary_sha256": "55604c61a187ef8b58206ff3727f66e5bbc6ea8f544637b42f4bb0fa18c53320",
-    "ephemeral_jsonl": {
-      "path": "/tmp/mcts_retained_final_all.jsonl",
+    "raw_jsonl": {
+      "archive_path": "doc/performance_experiments/raw/phase0/mcts_retained_final_all.jsonl.gz",
+      "original_ephemeral_path": "/tmp/mcts_retained_final_all.jsonl",
       "sha256": "9f948e66d7787a7f47005ae732e21df85e9fe23737b98ebcf7aa8bff2277815d"
     }
   },
@@ -514,6 +515,7 @@
         {
           "name": "rules",
           "cwd": "/tmp/csplendor-phase0-gprof-final-evidence/rules",
+          "gmon_archive_path": "doc/performance_experiments/raw/phase0/csplendor-phase0-gprof-final-evidence__rules__gmon.out.gz",
           "command": [
             "taskset",
             "-c",
@@ -539,6 +541,7 @@
         {
           "name": "legacy_mcts",
           "cwd": "/tmp/csplendor-phase0-gprof-final-evidence/legacy_mcts",
+          "gmon_archive_path": "doc/performance_experiments/raw/phase0/csplendor-phase0-gprof-final-evidence__legacy_mcts__gmon.out.gz",
           "command": [
             "taskset",
             "-c",
@@ -564,6 +567,7 @@
         {
           "name": "shared_tree",
           "cwd": "/tmp/csplendor-phase0-gprof-final-evidence/shared_tree",
+          "gmon_archive_path": "doc/performance_experiments/raw/phase0/csplendor-phase0-gprof-final-evidence__shared_tree__gmon.out.gz",
           "command": [
             "taskset",
             "-c",
@@ -587,6 +591,7 @@
         {
           "name": "parallel_scheduler",
           "cwd": "/tmp/csplendor-phase0-gprof-final-evidence/parallel_scheduler",
+          "gmon_archive_path": "doc/performance_experiments/raw/phase0/csplendor-phase0-gprof-final-evidence__parallel_scheduler__gmon.out.gz",
           "command": [
             "taskset",
             "-c",
@@ -617,6 +622,7 @@
         {
           "name": "solver_state_key",
           "cwd": "/tmp/csplendor-phase0-gprof-final-evidence/solver_state_key",
+          "gmon_archive_path": "doc/performance_experiments/raw/phase0/csplendor-phase0-gprof-final-evidence__solver_state_key__gmon.out.gz",
           "command": [
             "taskset",
             "-c",
@@ -640,6 +646,7 @@
         {
           "name": "solver_tt",
           "cwd": "/tmp/csplendor-phase0-gprof-final-evidence/solver_tt",
+          "gmon_archive_path": "doc/performance_experiments/raw/phase0/csplendor-phase0-gprof-final-evidence__solver_tt__gmon.out.gz",
           "command": [
             "taskset",
             "-c",
@@ -663,6 +670,7 @@
         {
           "name": "visible_solver",
           "cwd": "/tmp/csplendor-phase0-gprof-final-evidence/visible_solver",
+          "gmon_archive_path": "doc/performance_experiments/raw/phase0/csplendor-phase0-gprof-final-evidence__visible_solver__gmon.out.gz",
           "command": [
             "taskset",
             "-c",
@@ -684,6 +692,7 @@
         {
           "name": "exact_reveal",
           "cwd": "/tmp/csplendor-phase0-gprof-final-evidence/exact_reveal",
+          "gmon_archive_path": "doc/performance_experiments/raw/phase0/csplendor-phase0-gprof-final-evidence__exact_reveal__gmon.out.gz",
           "command": [
             "taskset",
             "-c",
@@ -726,12 +735,16 @@
         "/tmp/csplendor-phase0-gprof-final-evidence/exact_reveal/gmon.out"
       ],
       "combined": {
+        "gmon_sum_archive_path": "doc/performance_experiments/raw/phase0/csplendor-phase0-gprof-final-evidence__combined__gmon.sum.gz",
         "gmon_sum_sha256": "c996901c6788765846c411ba04570bb2a7551d966a00370a965899ec638ffb23",
         "gmon_sum_size_bytes": 387193,
+        "gprof_txt_archive_path": "doc/performance_experiments/raw/phase0/csplendor-phase0-gprof-final-evidence__combined__gprof.txt.gz",
         "gprof_txt_sha256": "d95e5b449bb0551aae119651b8712d0f0a5853463a984fe3e000bb02b298d5a7",
         "gprof_txt_size_bytes": 633441,
+        "flat_top20_archive_path": "doc/performance_experiments/raw/phase0/csplendor-phase0-gprof-final-evidence__combined__flat_top20.txt.gz",
         "flat_top20_sha256": "ec1caf813f5616e5d2025b5a0f25fcc0b5b5df58e9e10a3e9facdd4d0c410b80",
         "flat_top20_size_bytes": 5835,
+        "hotspots_top20_csv_archive_path": "doc/performance_experiments/raw/phase0/csplendor-phase0-gprof-final-evidence__combined__hotspots_top20.csv.gz",
         "hotspots_top20_csv_sha256": "6ad7627126877084f4f02efdec81960529fcb31e11fb3a5804465cafe6438f06",
         "hotspots_top20_csv_rows": 20,
         "sample_period_seconds": 0.01,

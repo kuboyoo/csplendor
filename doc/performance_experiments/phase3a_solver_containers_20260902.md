@@ -9,7 +9,7 @@
   固定slot、build identity、semantic recordを含むcompact evidence
 - `phase3a_solver_containers_diagnostics_20260902.json`: allocation、path深さ、
   適応方式およびraw artifact SHAの要約
-- `/tmp/phase3a_solver_containers_final_20260902.json`: 正式raw artifact
+- `raw/phase3a/phase3a_solver_containers_final_20260902.json.gz`: 正式raw artifact
 
 ## 1. 状態
 
