@@ -59,7 +59,10 @@ _SAFE_CMAKE_CACHE_KEYS = frozenset(
         "CSPLENDOR_BUILD_NATIVE_TESTS",
         "CSPLENDOR_BUILD_PARALLEL_BENCHMARK",
         "CSPLENDOR_BUILD_PYTHON_MODULE",
+        "CSPLENDOR_CARD_EQUIVALENCE_CLASSES",
         "CSPLENDOR_CLOSED_FORM_RETURN_COUNT",
+        "CSPLENDOR_COMPACT_FORCED_ACTIONS",
+        "CSPLENDOR_COMPACT_SOLVER_REASONS",
         "CSPLENDOR_CPU_TARGET",
         "CSPLENDOR_INCREMENTAL_EXACT_HASH",
         "CSPLENDOR_NOBLE_ELIGIBILITY_TABLE",
@@ -68,6 +71,7 @@ _SAFE_CMAKE_CACHE_KEYS = frozenset(
         "CSPLENDOR_RETURN_PATTERN_TABLE",
         "CSPLENDOR_SANITIZER",
         "CSPLENDOR_SINGLE_PASS_LEGAL_CODES",
+        "CSPLENDOR_SOLVER_PATH_STACK",
         "CSPLENDOR_VERIFY_INCREMENTAL_HASH",
     }
 )
@@ -98,6 +102,14 @@ _BENCHMARK_BUILD_KEYS = _SAFE_CMAKE_CACHE_KEYS - {
     "CSPLENDOR_RETURN_PATTERN_TABLE",
     # Phase-2B packed legal-code sink experiment axis.
     "CSPLENDOR_PACKED_CODE_SINK",
+    # Phase-3A recursive path-container experiment axis.
+    "CSPLENDOR_SOLVER_PATH_STACK",
+    # Phase-3A reveal-card equivalence experiment axis.
+    "CSPLENDOR_CARD_EQUIVALENCE_CLASSES",
+    # Phase-3A attacker-action scratch experiment axis.
+    "CSPLENDOR_COMPACT_FORCED_ACTIONS",
+    # Phase-3A visible-solver TT metadata experiment axis.
+    "CSPLENDOR_COMPACT_SOLVER_REASONS",
 }
 _SAFE_FLAG_PREFIXES = (
     "-march=",

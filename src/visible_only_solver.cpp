@@ -1,6 +1,8 @@
 #include "visible_only_solver.h"
 #include "action.h"
 #include "perf_counters.h"
+#include "solver_action_filter.h"
+#include "solver_path.h"
 #include <algorithm>
 #include <chrono>
 #include <limits>
@@ -12,6 +14,7 @@ using csplendor::solver_internal::ActionOrderKey;
 using csplendor::solver_internal::ForceStatus;
 using csplendor::solver_internal::SearchLimit;
 using csplendor::solver_internal::SearchLimitExceeded;
+using csplendor::solver_internal::ScopedPathEntry;
 using csplendor::solver_internal::StateKeyCore;
 using csplendor::solver_internal::TerminalResult;
 using csplendor::solver_internal::ZeroSumScore;
@@ -40,8 +43,7 @@ public:
     try {
       const int attacker = game.current_player();
       for (int depth = 1; depth <= FORCED_WIN_MAX_DEPTH; ++depth) {
-        CSPLENDOR_PERF_INC(SolverTemporarySetAllocations);
-        std::unordered_set<DepthStateKey, DepthStateKeyHash> forced_path;
+        DepthPath forced_path(path_reserve_capacity(depth));
         if (forced_win(game, forced_path, known_card_count(game), attacker,
                        depth) == ForceStatus::PROVEN) {
           result.winner = attacker;
@@ -55,17 +57,21 @@ public:
         }
       }
 
-      CSPLENDOR_PERF_INC(SolverTemporarySetAllocations);
-      std::unordered_set<StateKey, StateKeyHash> path;
-      result.winner =
-          winner_from_score(minimax(game, path, known_card_count(game), -2, 2));
+      const int known_cards = known_card_count(game);
+      // Unlike forced mate depth, full visible minimax can traverse long
+      // token-cycle paths (over 100 plies in the diagnostic corpus). Keep its
+      // O(1) hash membership while bounded forced searches use the stack.
+      StatePath path(path_reserve_capacity(known_cards), false);
+      result.winner = winner_from_score(
+          minimax(game, path, known_cards, -2, 2));
       CSPLENDOR_PERF_TT_PROBE_SCOPE(root_memo_probe);
       auto it = memo_.find(state_key(game));
       CSPLENDOR_PERF_TT_PROBE_FINISH(root_memo_probe);
       if (it != memo_.end())
         CSPLENDOR_PERF_INC(SolverTtHits);
-      result.winner_reason =
-          it == memo_.end() ? terminal_reason(game) : it->second.reason;
+      result.winner_reason = it == memo_.end()
+                                 ? terminal_reason(game)
+                                 : materialize_reason(it->second.reason);
       result.line = principal_line();
     } catch (const SearchLimitExceeded &exc) {
       result.winner = -1;
@@ -97,12 +103,25 @@ private:
     }
   };
 
+  enum class EntryReason : uint8_t {
+    NoVisibleAction,
+    CurrentPlayerWin,
+    CurrentPlayerDraw,
+    AllResponsesLose,
+  };
+
+#ifdef CSPLENDOR_COMPACT_SOLVER_REASONS
+  using EntryReasonStorage = EntryReason;
+#else
+  using EntryReasonStorage = std::string;
+#endif
+
   struct Entry {
     enum class Bound : uint8_t { EXACT, LOWER, UPPER };
 
     int score = 0;
     Bound bound = Bound::EXACT;
-    std::string reason;
+    EntryReasonStorage reason{};
     uint64_t action_code = 0;
     bool has_action = false;
     size_t action_count = 0;
@@ -123,6 +142,11 @@ private:
              (std::hash<int>{}(key.depth) * 0x9e3779b9U);
     }
   };
+
+  using StatePath =
+      csplendor::solver_internal::RecursionPath<StateKey, StateKeyHash>;
+  using DepthPath = csplendor::solver_internal::RecursionPath<
+      DepthStateKey, DepthStateKeyHash>;
 
   struct ForceEntry {
     ForceStatus status = ForceStatus::UNKNOWN;
@@ -150,10 +174,14 @@ private:
   static constexpr size_t ATTACKER_TAKE_LIMIT = 6;
   static constexpr size_t ATTACKER_RESERVE_LIMIT = 3;
 
-  ForceStatus
-  forced_win(Game &game,
-             std::unordered_set<DepthStateKey, DepthStateKeyHash> &path,
-             int known_cards, int attacker, int depth) {
+  static size_t path_reserve_capacity(int remaining_depth) noexcept {
+    const size_t depth =
+        static_cast<size_t>(std::max(remaining_depth, 1));
+    return depth * 4 + 4;
+  }
+
+  ForceStatus forced_win(Game &game, DepthPath &path, int known_cards,
+                         int attacker, int depth) {
     check_limits();
     ++stats_.nodes;
 
@@ -198,8 +226,7 @@ private:
         return ForceStatus::REFUTED;
       }
     }
-    CSPLENDOR_PERF_INC(SolverPathFinds);
-    if (path.find(key) != path.end()) {
+    if (path.contains(key)) {
       ++stats_.terminal_nodes;
       return ForceStatus::UNKNOWN;
     }
@@ -217,8 +244,7 @@ private:
     }
 
     const int current_player = game.current_player();
-    CSPLENDOR_PERF_INC(SolverPathInserts);
-    path.insert(key);
+    ScopedPathEntry<DepthPath> path_entry(path, key);
     bool has_unknown = false;
     uint64_t first_action = 0;
     bool has_first_action = false;
@@ -243,16 +269,12 @@ private:
         has_first_action = true;
       }
       if (current_player == attacker && child == ForceStatus::PROVEN) {
-        CSPLENDOR_PERF_INC(SolverPathErases);
-        path.erase(key);
         store_force_entry(
             key, ForceEntry{ForceStatus::PROVEN, ordered.code, true,
                             actions.size()});
         return ForceStatus::PROVEN;
       }
       if (current_player != attacker && child == ForceStatus::REFUTED) {
-        CSPLENDOR_PERF_INC(SolverPathErases);
-        path.erase(key);
         store_force_entry(
             key, ForceEntry{ForceStatus::REFUTED, ordered.code, true,
                             actions.size()});
@@ -260,8 +282,6 @@ private:
       }
       has_unknown = has_unknown || child == ForceStatus::UNKNOWN;
     }
-    CSPLENDOR_PERF_INC(SolverPathErases);
-    path.erase(key);
 
     if (has_unknown)
       return ForceStatus::UNKNOWN;
@@ -288,8 +308,8 @@ private:
     }
   }
 
-  int minimax(Game &game, std::unordered_set<StateKey, StateKeyHash> &path,
-              int known_cards, int alpha, int beta) {
+  int minimax(Game &game, StatePath &path, int known_cards, int alpha,
+              int beta) {
     check_limits();
     ++stats_.nodes;
 
@@ -318,8 +338,7 @@ private:
       if (alpha >= beta)
         return memo_it->second.score;
     }
-    CSPLENDOR_PERF_INC(SolverPathFinds);
-    if (path.find(key) != path.end()) {
+    if (path.contains(key)) {
       ++stats_.terminal_nodes;
       return score_from_winner(adjudicate_by_score(game));
     }
@@ -332,7 +351,7 @@ private:
       const int score = score_from_winner(adjudicate_by_score(game));
       memo_[key] = Entry{score,
                          Entry::Bound::EXACT,
-                         "no_visible_only_action_adjudicated_by_score",
+                         store_reason(EntryReason::NoVisibleAction),
                          0,
                          false,
                          0};
@@ -343,8 +362,7 @@ private:
     const int current_player = game.current_player();
     const int original_alpha = alpha;
     const int original_beta = beta;
-    CSPLENDOR_PERF_INC(SolverPathInserts);
-    path.insert(key);
+    ScopedPathEntry<StatePath> path_entry(path, key);
     int best_score = current_player == 0 ? -2 : 2;
     uint64_t best_action = 0;
     bool has_best_action = false;
@@ -375,9 +393,6 @@ private:
       if (alpha >= beta)
         break;
     }
-    CSPLENDOR_PERF_INC(SolverPathErases);
-    path.erase(key);
-
     Entry::Bound bound = Entry::Bound::EXACT;
     if (best_score <= original_alpha)
       bound = Entry::Bound::UPPER;
@@ -423,6 +438,13 @@ private:
   static std::vector<OrderedAction>
   forced_attacker_actions(const Game &game,
                           const std::vector<OrderedAction> &actions) {
+    if (csplendor::solver_internal::compact_forced_actions_enabled) {
+      return csplendor::solver_internal::compact_forced_attacker_actions<
+          ATTACKER_TAKE_LIMIT, ATTACKER_RESERVE_LIMIT>(
+          actions,
+          [&](const Action &action) { return attacker_take_score(game, action); });
+    }
+
     std::vector<OrderedAction> purchases;
     std::vector<std::pair<int, OrderedAction>> takes;
     std::vector<OrderedAction> reserves;
@@ -572,12 +594,42 @@ private:
     return ZeroSumScore::winner(score);
   }
 
-  static std::string score_reason(int score, int current_player) {
-    if (winner_from_score(score) == current_player)
+  static const char *reason_text(EntryReason reason) noexcept {
+    switch (reason) {
+    case EntryReason::NoVisibleAction:
+      return "no_visible_only_action_adjudicated_by_score";
+    case EntryReason::CurrentPlayerWin:
       return "current_player_can_force_visible_only_win";
-    if (score == 0)
+    case EntryReason::CurrentPlayerDraw:
       return "current_player_can_force_visible_only_draw";
-    return "all_visible_only_responses_lose_for_current_player";
+    case EntryReason::AllResponsesLose:
+      return "all_visible_only_responses_lose_for_current_player";
+    }
+    return "";
+  }
+
+  static EntryReasonStorage store_reason(EntryReason reason) {
+#ifdef CSPLENDOR_COMPACT_SOLVER_REASONS
+    return reason;
+#else
+    return reason_text(reason);
+#endif
+  }
+
+  static std::string materialize_reason(const EntryReasonStorage &reason) {
+#ifdef CSPLENDOR_COMPACT_SOLVER_REASONS
+    return reason_text(reason);
+#else
+    return reason;
+#endif
+  }
+
+  static EntryReasonStorage score_reason(int score, int current_player) {
+    if (winner_from_score(score) == current_player)
+      return store_reason(EntryReason::CurrentPlayerWin);
+    if (score == 0)
+      return store_reason(EntryReason::CurrentPlayerDraw);
+    return store_reason(EntryReason::AllResponsesLose);
   }
 
   static StateKey state_key(const Game &game) {
@@ -670,7 +722,7 @@ private:
         break;
       line.push_back(VisibleOnlyLineEntry{
           it->second.action_code, winner_from_score(it->second.score),
-          it->second.reason, it->second.action_count});
+          materialize_reason(it->second.reason), it->second.action_count});
     }
     return line;
   }

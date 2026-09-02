@@ -537,6 +537,9 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
         "CMAKE_BUILD_TYPE:STRING=Release\n"
         "CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/c++\n"
         "CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -DPRIVATE_VALUE=hidden\n"
+        "CSPLENDOR_CARD_EQUIVALENCE_CLASSES:BOOL=OFF\n"
+        "CSPLENDOR_COMPACT_FORCED_ACTIONS:BOOL=OFF\n"
+        "CSPLENDOR_COMPACT_SOLVER_REASONS:BOOL=OFF\n"
         "CSPLENDOR_CPU_TARGET:STRING=portable\n"
         "CSPLENDOR_CLOSED_FORM_RETURN_COUNT:BOOL=OFF\n"
         "CSPLENDOR_INCREMENTAL_EXACT_HASH:BOOL=OFF\n"
@@ -544,6 +547,7 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
         "CSPLENDOR_PACKED_CODE_SINK:BOOL=OFF\n"
         "CSPLENDOR_RETURN_PATTERN_TABLE:BOOL=OFF\n"
         "CSPLENDOR_SINGLE_PASS_LEGAL_CODES:BOOL=OFF\n"
+        "CSPLENDOR_SOLVER_PATH_STACK:BOOL=OFF\n"
         "CSPLENDOR_VERIFY_INCREMENTAL_HASH:BOOL=OFF\n"
         "UNRELATED_API_TOKEN:STRING=do-not-read-or-emit\n",
         encoding="utf-8",
@@ -563,6 +567,13 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
         == "OFF"
     )
     assert metadata["allowlisted_entries"]["CSPLENDOR_VERIFY_INCREMENTAL_HASH"] == "OFF"
+    assert metadata["allowlisted_entries"]["CSPLENDOR_SOLVER_PATH_STACK"] == "OFF"
+    assert (
+        metadata["allowlisted_entries"]["CSPLENDOR_CARD_EQUIVALENCE_CLASSES"]
+        == "OFF"
+    )
+    assert metadata["allowlisted_entries"]["CSPLENDOR_COMPACT_FORCED_ACTIONS"] == "OFF"
+    assert metadata["allowlisted_entries"]["CSPLENDOR_COMPACT_SOLVER_REASONS"] == "OFF"
     assert (
         metadata["allowlisted_entries"]["CMAKE_CXX_FLAGS_RELEASE"][
             "redacted_token_count"
@@ -691,6 +702,94 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
     )
     assert (
         packed_code_metadata["benchmark_build_fingerprint_sha256"]
+        == metadata["benchmark_build_fingerprint_sha256"]
+    )
+
+    solver_path_cache = tmp_path / "solver-path-CMakeCache.txt"
+    solver_path_cache.write_text(
+        cache.read_text(encoding="utf-8").replace(
+            "CSPLENDOR_SOLVER_PATH_STACK:BOOL=OFF",
+            "CSPLENDOR_SOLVER_PATH_STACK:BOOL=ON",
+        ),
+        encoding="utf-8",
+    )
+    solver_path_metadata, _ = manifest_tool._cmake_build_metadata(
+        solver_path_cache
+    )
+    assert (
+        solver_path_metadata["allowlisted_entries"][
+            "CSPLENDOR_SOLVER_PATH_STACK"
+        ]
+        == "ON"
+    )
+    assert (
+        solver_path_metadata["benchmark_build_fingerprint_sha256"]
+        == metadata["benchmark_build_fingerprint_sha256"]
+    )
+
+    card_classes_cache = tmp_path / "card-classes-CMakeCache.txt"
+    card_classes_cache.write_text(
+        cache.read_text(encoding="utf-8").replace(
+            "CSPLENDOR_CARD_EQUIVALENCE_CLASSES:BOOL=OFF",
+            "CSPLENDOR_CARD_EQUIVALENCE_CLASSES:BOOL=ON",
+        ),
+        encoding="utf-8",
+    )
+    card_classes_metadata, _ = manifest_tool._cmake_build_metadata(
+        card_classes_cache
+    )
+    assert (
+        card_classes_metadata["allowlisted_entries"][
+            "CSPLENDOR_CARD_EQUIVALENCE_CLASSES"
+        ]
+        == "ON"
+    )
+    assert (
+        card_classes_metadata["benchmark_build_fingerprint_sha256"]
+        == metadata["benchmark_build_fingerprint_sha256"]
+    )
+
+    compact_actions_cache = tmp_path / "compact-actions-CMakeCache.txt"
+    compact_actions_cache.write_text(
+        cache.read_text(encoding="utf-8").replace(
+            "CSPLENDOR_COMPACT_FORCED_ACTIONS:BOOL=OFF",
+            "CSPLENDOR_COMPACT_FORCED_ACTIONS:BOOL=ON",
+        ),
+        encoding="utf-8",
+    )
+    compact_actions_metadata, _ = manifest_tool._cmake_build_metadata(
+        compact_actions_cache
+    )
+    assert (
+        compact_actions_metadata["allowlisted_entries"][
+            "CSPLENDOR_COMPACT_FORCED_ACTIONS"
+        ]
+        == "ON"
+    )
+    assert (
+        compact_actions_metadata["benchmark_build_fingerprint_sha256"]
+        == metadata["benchmark_build_fingerprint_sha256"]
+    )
+
+    compact_reasons_cache = tmp_path / "compact-reasons-CMakeCache.txt"
+    compact_reasons_cache.write_text(
+        cache.read_text(encoding="utf-8").replace(
+            "CSPLENDOR_COMPACT_SOLVER_REASONS:BOOL=OFF",
+            "CSPLENDOR_COMPACT_SOLVER_REASONS:BOOL=ON",
+        ),
+        encoding="utf-8",
+    )
+    compact_reasons_metadata, _ = manifest_tool._cmake_build_metadata(
+        compact_reasons_cache
+    )
+    assert (
+        compact_reasons_metadata["allowlisted_entries"][
+            "CSPLENDOR_COMPACT_SOLVER_REASONS"
+        ]
+        == "ON"
+    )
+    assert (
+        compact_reasons_metadata["benchmark_build_fingerprint_sha256"]
         == metadata["benchmark_build_fingerprint_sha256"]
     )
 

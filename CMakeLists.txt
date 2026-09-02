@@ -26,6 +26,14 @@ option(CSPLENDOR_RETURN_PATTERN_TABLE
        "Emit small token-return combinations from a constexpr table" ON)
 option(CSPLENDOR_PACKED_CODE_SINK
        "Emit token-return action codes without materializing wide actions" ON)
+option(CSPLENDOR_SOLVER_PATH_STACK
+       "Track shallow recursive solver paths in a contiguous stack" ON)
+option(CSPLENDOR_CARD_EQUIVALENCE_CLASSES
+       "Deduplicate solver reveal cards with constexpr class masks" ON)
+option(CSPLENDOR_COMPACT_FORCED_ACTIONS
+       "Filter solver attacker actions with bounded contiguous scratch" ON)
+option(CSPLENDOR_COMPACT_SOLVER_REASONS
+       "Store visible-solver TT reasons as compact enums" ON)
 set(CSPLENDOR_CPU_TARGET "portable" CACHE STRING
     "CPU target: portable or native")
 set_property(CACHE CSPLENDOR_CPU_TARGET PROPERTY STRINGS portable native)
@@ -101,6 +109,26 @@ endif()
 if(CSPLENDOR_PACKED_CODE_SINK)
   target_compile_definitions(csplendor_core_config
                              INTERFACE CSPLENDOR_PACKED_CODE_SINK=1)
+endif()
+
+if(CSPLENDOR_SOLVER_PATH_STACK)
+  target_compile_definitions(csplendor_core_config
+                             INTERFACE CSPLENDOR_SOLVER_PATH_STACK=1)
+endif()
+
+if(CSPLENDOR_CARD_EQUIVALENCE_CLASSES)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_CARD_EQUIVALENCE_CLASSES=1)
+endif()
+
+if(CSPLENDOR_COMPACT_FORCED_ACTIONS)
+  target_compile_definitions(csplendor_core_config
+                             INTERFACE CSPLENDOR_COMPACT_FORCED_ACTIONS=1)
+endif()
+
+if(CSPLENDOR_COMPACT_SOLVER_REASONS)
+  target_compile_definitions(csplendor_core_config
+                             INTERFACE CSPLENDOR_COMPACT_SOLVER_REASONS=1)
 endif()
 
 if(CSPLENDOR_CPU_TARGET STREQUAL "portable")
