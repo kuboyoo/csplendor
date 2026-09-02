@@ -19,7 +19,7 @@ Working commit: このreportを含むH1 commit（SHAは最終回答に記載）
 Branch: perf/codex56-engine-hotpaths
 Working tree status: commit後にcleanを確認予定。元checkoutの未commit変更には触れず、独立worktreeで作業
 Compiler: g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0 / CMake 4.2.3 / Python 3.12.1
-Build flags: Release, -O3 -DNDEBUG, C++17, native, exact hash=ON,
+Build flags: Release, -O3 -DNDEBUG, C++17, portable, exact hash=ON,
              noble table=ON, instrumentation=OFF, hash verify=OFF
 CPU affinity: CPU 4（SMT siblingなし、governor=performance）
 ```

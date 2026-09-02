@@ -20,6 +20,8 @@ option(CSPLENDOR_NOBLE_ELIGIBILITY_TABLE
        "Use the constexpr per-colour noble eligibility mask table" ON)
 option(CSPLENDOR_SINGLE_PASS_LEGAL_CODES
        "Materialize legal action codes with one fixed-scratch enumeration" ON)
+option(CSPLENDOR_CLOSED_FORM_RETURN_COUNT
+       "Count token returns of excess zero through three in closed form" ON)
 set(CSPLENDOR_CPU_TARGET "portable" CACHE STRING
     "CPU target: portable or native")
 set_property(CACHE CSPLENDOR_CPU_TARGET PROPERTY STRINGS portable native)
@@ -80,6 +82,11 @@ endif()
 if(CSPLENDOR_SINGLE_PASS_LEGAL_CODES)
   target_compile_definitions(
       csplendor_core_config INTERFACE CSPLENDOR_SINGLE_PASS_LEGAL_CODES=1)
+endif()
+
+if(CSPLENDOR_CLOSED_FORM_RETURN_COUNT)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_CLOSED_FORM_RETURN_COUNT=1)
 endif()
 
 if(CSPLENDOR_CPU_TARGET STREQUAL "portable")

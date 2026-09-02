@@ -12,6 +12,47 @@ class ActionEncoderCpp;
 class ActionEncoderV2;
 class ActionEncoderV3;
 
+namespace csplendor::move_generation_detail {
+
+// Keep OFF/ON benchmark builds code-identical so unrelated header-inline hot
+// paths are not moved solely by the experiment axis.
+#ifdef CSPLENDOR_CLOSED_FORM_RETURN_COUNT
+inline const volatile bool closed_form_return_count_enabled = true;
+#else
+inline const volatile bool closed_form_return_count_enabled = false;
+#endif
+
+inline uint16_t
+count_small_token_returns(const std::array<uint8_t, 6> &available, int excess,
+                          uint16_t limit) {
+  if (limit == 0)
+    return 0;
+  if (excess == 0)
+    return 1;
+
+  uint16_t n1 = 0;
+  uint16_t n2 = 0;
+  uint16_t n3 = 0;
+  for (uint8_t amount : available) {
+    n1 += amount >= 1;
+    n2 += amount >= 2;
+    n3 += amount >= 3;
+  }
+
+  uint16_t count = 0;
+  if (excess == 1) {
+    count = n1;
+  } else if (excess == 2) {
+    count = static_cast<uint16_t>(n1 * (n1 - 1) / 2 + n2);
+  } else if (excess == 3) {
+    count = static_cast<uint16_t>(n1 * (n1 - 1) * (n1 - 2) / 6 + n2 * (n1 - 1) +
+                                  n3);
+  }
+  return std::min(count, limit);
+}
+
+} // namespace csplendor::move_generation_detail
+
 class MoveGenerator {
 public:
   using EligibleNobles = csplendor::rules::EligibleNobles;
@@ -384,6 +425,11 @@ private:
     const int excess = csplendor::rules::required_token_return(next_gems);
     if (excess <= 0)
       return std::min<uint16_t>(1, limit);
+    if (excess <= 3 &&
+        csplendor::move_generation_detail::closed_form_return_count_enabled) {
+      return csplendor::move_generation_detail::count_small_token_returns(
+          next_gems, excess, limit);
+    }
     return count_return_combinations(next_gems, excess, 0, limit);
   }
 

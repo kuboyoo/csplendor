@@ -96,6 +96,48 @@ bool legacy_validate_payment(const PlayerState &player, const Card &card,
   return gold_used <= player.gems[GOLD];
 }
 
+uint16_t brute_return_count(const std::array<uint8_t, 6> &available,
+                            int remaining, int color_idx) {
+  if (remaining == 0)
+    return 1;
+  if (color_idx == 6)
+    return 0;
+
+  uint16_t count = 0;
+  const int maximum =
+      std::min(remaining, static_cast<int>(available[color_idx]));
+  for (int amount = 0; amount <= maximum; ++amount) {
+    count = static_cast<uint16_t>(count + brute_return_count(available,
+                                                             remaining - amount,
+                                                             color_idx + 1));
+  }
+  return count;
+}
+
+void test_small_return_count_closed_form() {
+  constexpr std::array<uint16_t, 9> limits = {0,  1,  2,  3,        7,
+                                              17, 31, 56, MAX_MOVES};
+  constexpr uint32_t RADIX = 5;
+  constexpr uint32_t CASES = RADIX * RADIX * RADIX * RADIX * RADIX * RADIX;
+
+  for (uint32_t encoded = 0; encoded < CASES; ++encoded) {
+    std::array<uint8_t, 6> available{};
+    uint32_t remainder = encoded;
+    for (uint8_t &amount : available) {
+      amount = static_cast<uint8_t>(remainder % RADIX);
+      remainder /= RADIX;
+    }
+    for (int excess = 0; excess <= 3; ++excess) {
+      const uint16_t oracle = brute_return_count(available, excess, 0);
+      for (uint16_t limit : limits) {
+        const uint16_t expected = std::min(oracle, limit);
+        check(csplendor::move_generation_detail::count_small_token_returns(
+                  available, excess, limit) == expected);
+      }
+    }
+  }
+}
+
 csplendor::rules::EligibleNobles legacy_eligible_nobles(const Board &board,
                                                         int player_index) {
   csplendor::rules::EligibleNobles result;
@@ -310,6 +352,7 @@ void test_editor_edges_and_rejections() {
 } // namespace
 
 int main() {
+  test_small_return_count_closed_form();
   test_reachable_differential_and_golden();
   test_large_reachable_move_generation_corpus();
   test_editor_edges_and_rejections();
