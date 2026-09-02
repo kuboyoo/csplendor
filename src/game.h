@@ -32,17 +32,22 @@ public:
   Game clone() const { return *this; }
 
   // Current-state copy for search. Action and undo journals are excluded.
-  Game clone_light() const { return copy_current_state(); }
+  Game clone_light() const {
+    CSPLENDOR_PERF_INC(CloneLightCalls);
+    return copy_current_state();
+  }
 
   // Shuffled clone for MCTS determinization - randomizes hidden information
   // from the perspective of observer_player to combat "clairvoyance"
   Game shuffled_clone(uint8_t observer_player, uint64_t seed) const {
+    CSPLENDOR_PERF_INC(DeterminizationCloneCalls);
     Game g = copy_current_state();
     g.board.randomize_hidden_information(observer_player, seed);
     return g;
   }
 
   Game shuffled_clone_portable(uint8_t observer_player, uint64_t seed) const {
+    CSPLENDOR_PERF_INC(DeterminizationCloneCalls);
     Game g = copy_current_state();
     g.board.randomize_hidden_information_portable(observer_player, seed);
     return g;
@@ -68,7 +73,14 @@ public:
     std::vector<uint64_t> codes;
     codes.reserve(MoveGenerator::count_all_fixed(board, simple_payment_mode));
     auto sink = [&codes](const Action &action) {
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+      const size_t capacity = codes.capacity();
+#endif
       codes.push_back(action.pack());
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+      if (codes.capacity() != capacity)
+        CSPLENDOR_PERF_INC(ActionVectorReallocations);
+#endif
       return true;
     };
     MoveGenerator::consume_all_capped(board, simple_payment_mode, sink);
@@ -186,6 +198,7 @@ private:
 
   Game copy_current_state() const {
     Game copy(NoInit{});
+    CSPLENDOR_PERF_INC(BoardSnapshotCopies);
     copy.board = board;
     copy.simple_payment_mode = simple_payment_mode;
     copy.blank_refill_mode = blank_refill_mode;
@@ -194,8 +207,10 @@ private:
 
   bool apply_unchecked(const Action &action, bool record_history) {
     Board previous;
-    if (record_history)
+    if (record_history) {
+      CSPLENDOR_PERF_INC(BoardSnapshotCopies);
       previous = board;
+    }
 #ifdef CSPLENDOR_VERIFY_DELTA_UNDO
     csplendor::detail::UndoRecord delta_previous;
     if (record_history)
@@ -239,6 +254,7 @@ private:
       // editor state and throw. Build the rare forced transition on a copy so
       // an exception cannot leave the live Board half-advanced.
       {
+        CSPLENDOR_PERF_INC(BoardSnapshotCopies);
         Board next = board;
         next.begin_unchecked_mutation();
         csplendor::detail::end_turn(next);

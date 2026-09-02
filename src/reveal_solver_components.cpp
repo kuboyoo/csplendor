@@ -1,6 +1,7 @@
 #include "reveal_solver_components.h"
 
 #include "card_data.h"
+#include "perf_counters.h"
 #include <algorithm>
 #include <tuple>
 #include <utility>
@@ -55,22 +56,33 @@ bool HiddenOutcomeCatalog::is_initially_hidden(int card_id) const noexcept {
 
 bool HiddenOutcomeCatalog::is_claimed(const Board &board,
                                       int card_id) noexcept {
+  CSPLENDOR_PERF_INC(SolverIsClaimedCalls);
   if (card_id < 0 || card_id >= CARD_COUNT)
     return false;
   for (int player = 0; player < Board::NUM_PLAYERS; ++player) {
     const auto &cards = board.players[player].purchased_cards;
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    for (uint8_t purchased : cards) {
+      CSPLENDOR_PERF_INC(SolverIsClaimedComparisons);
+      if (purchased == static_cast<uint8_t>(card_id))
+        return true;
+    }
+#else
     if (std::find(cards.begin(), cards.end(), static_cast<uint8_t>(card_id)) !=
         cards.end())
       return true;
+#endif
   }
   for (int level = 0; level < 3; ++level) {
     for (int slot = 0; slot < Board::CARDS_PER_LEVEL; ++slot) {
+      CSPLENDOR_PERF_INC(SolverIsClaimedComparisons);
       if (board.visible[level][slot] == card_id)
         return true;
     }
   }
   for (int player = 0; player < Board::NUM_PLAYERS; ++player) {
     for (int slot = 0; slot < Board::MAX_RESERVED; ++slot) {
+      CSPLENDOR_PERF_INC(SolverIsClaimedComparisons);
       if (board.players[player].reserved[slot] == card_id)
         return true;
     }
@@ -82,8 +94,10 @@ CardIdSet
 HiddenOutcomeCatalog::unseen_cards(const Board &board) const noexcept {
   CardIdSet result;
   for (int level = 0; level < 3; ++level) {
-    for (uint8_t card_id : board.decks[level])
+    for (uint8_t card_id : board.decks[level]) {
+      CSPLENDOR_PERF_INC(SolverScannedDeckCards);
       result.add(card_id);
+    }
   }
   return result;
 }
@@ -93,6 +107,7 @@ HiddenOutcomeCatalog::acquired_hidden_cards(const Board &board) const noexcept {
   CardIdSet result;
   for (int player = 0; player < Board::NUM_PLAYERS; ++player) {
     for (uint8_t card_id : board.players[player].purchased_cards) {
+      CSPLENDOR_PERF_INC(SolverScannedPurchasedIds);
       if (is_initially_hidden(card_id))
         result.add(card_id);
     }

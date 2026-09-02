@@ -1,6 +1,8 @@
 #ifndef CSPLENDOR_MCTS_BOUNDED_QUEUE_H
 #define CSPLENDOR_MCTS_BOUNDED_QUEUE_H
 
+#include "perf_counters.h"
+
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -25,7 +27,20 @@ public:
 
   bool push(T value) {
     std::unique_lock<std::mutex> lock(mutex_);
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    const bool waited = !closed_ && queue_.size() >= capacity_;
+    const auto wait_started = std::chrono::steady_clock::now();
+    if (waited)
+      CSPLENDOR_PERF_INC(ParallelQueueFullWaits);
+#endif
     not_full_.wait(lock, [&] { return closed_ || queue_.size() < capacity_; });
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    if (waited)
+      CSPLENDOR_PERF_ADD(ParallelQueueWaitNanoseconds,
+                         std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::steady_clock::now() - wait_started)
+                             .count());
+#endif
     if (closed_)
       return false;
     queue_.push_back(std::move(value));
@@ -36,7 +51,20 @@ public:
 
   bool pop(T &value) {
     std::unique_lock<std::mutex> lock(mutex_);
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    const bool waited = !closed_ && queue_.empty();
+    const auto wait_started = std::chrono::steady_clock::now();
+    if (waited)
+      CSPLENDOR_PERF_INC(ParallelQueueEmptyWaits);
+#endif
     not_empty_.wait(lock, [&] { return closed_ || !queue_.empty(); });
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    if (waited)
+      CSPLENDOR_PERF_ADD(ParallelQueueWaitNanoseconds,
+                         std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::steady_clock::now() - wait_started)
+                             .count());
+#endif
     if (queue_.empty())
       return false;
     value = std::move(queue_.front());
@@ -49,9 +77,30 @@ public:
   template <typename Rep, typename Period>
   bool pop_for(T &value, const std::chrono::duration<Rep, Period> &timeout) {
     std::unique_lock<std::mutex> lock(mutex_);
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    const bool waited = !closed_ && queue_.empty();
+    const auto wait_started = std::chrono::steady_clock::now();
+    if (waited)
+      CSPLENDOR_PERF_INC(ParallelQueueEmptyWaits);
+#endif
     if (!not_empty_.wait_for(lock, timeout,
-                             [&] { return closed_ || !queue_.empty(); }))
+                             [&] { return closed_ || !queue_.empty(); })) {
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+      if (waited)
+        CSPLENDOR_PERF_ADD(ParallelQueueWaitNanoseconds,
+                           std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               std::chrono::steady_clock::now() - wait_started)
+                               .count());
+#endif
       return false;
+    }
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    if (waited)
+      CSPLENDOR_PERF_ADD(ParallelQueueWaitNanoseconds,
+                         std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::steady_clock::now() - wait_started)
+                             .count());
+#endif
     if (queue_.empty())
       return false;
     value = std::move(queue_.front());

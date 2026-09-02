@@ -101,6 +101,7 @@
       "mcts_tree.h",
       "mcts_tree_key.h",
       "mcts_types.h",
+      "perf_counters.h",
       "portable_rng.h",
       "resource_bundle.h",
       "reveal_solver_components.h",

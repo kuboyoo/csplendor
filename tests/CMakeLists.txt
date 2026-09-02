@@ -88,6 +88,8 @@ csplendor_add_native_test(domain_state_unit domain_state_unit.cpp
                           "unit;state;editor;mutation;fixed-capacity" 30)
 csplendor_add_native_test(state_copy_unit state_copy_unit.cpp
                           "unit;state;copy;snapshot;undo" 30)
+csplendor_add_native_test(perf_counters_unit perf_counters_unit.cpp
+                          "unit;performance;instrumentation" 30)
 csplendor_add_native_test(rule_query_unit rule_query_unit.cpp
                           "unit;rules;query;validation;transition;equivalence" 90)
 csplendor_add_native_test(encoding_schema_unit encoding_schema_unit.cpp

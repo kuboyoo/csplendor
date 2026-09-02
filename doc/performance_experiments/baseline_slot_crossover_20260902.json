@@ -1,0 +1,574 @@
+{
+  "schema": "csplendor.phase0_baseline.slot_crossover.summary.v1",
+  "complete": true,
+  "measurement_date": "2026-09-02",
+  "baseline_commit": "7835f642b23251d0cb91de180006084521c74aa6",
+  "candidate_note": "Phase 0 measurement-only tree; no game algorithm or data-structure optimization",
+  "settings": {
+    "binary_slot_policy": "two_private_fixed_inodes_crossed_every_pair",
+    "bootstrap_iterations": 10000,
+    "cpu_set": [
+      4
+    ],
+    "order": "ABBA",
+    "pairs": 22,
+    "rotate_binary_slots": true,
+    "statistical_unit": "two_pair_crossover_block",
+    "timeout_seconds": 300.0,
+    "warmups_per_side": 3,
+    "crossover_blocks": 11,
+    "throughput_build": "Release, portable, CSPLENDOR_PERF_INSTRUMENTATION=OFF",
+    "binary_slot_policy_description": "two private fixed inodes, A/B placement crossed every pair"
+  },
+  "environment": {
+    "cpu": "AMD Ryzen 9 7900X 12-Core Processor",
+    "logical_cpus": 24,
+    "selected_cpu_smt_sibling": 16,
+    "selected_set_contains_smt_siblings": false,
+    "governor": "performance",
+    "frequency_boost": "enabled",
+    "os": "Linux 7.0.0-30-generic x86_64",
+    "compiler": "GCC 15.2.0",
+    "cmake": "4.2.3",
+    "python": "3.12.1"
+  },
+  "build_identity": {
+    "baseline_binary_sha256": "647975ba50b0610064bed2d74724b4815d4e934e8005616c613f7ab76c97f3ba",
+    "candidate_binary_sha256": "55604c61a187ef8b58206ff3727f66e5bbc6ea8f544637b42f4bb0fa18c53320",
+    "binary_size_bytes_A": 975088,
+    "binary_size_bytes_B": 975088,
+    "text_section_sha256_A": "7f7d4f12de84bad205aa5733888b73c97716c0a65800bcf9ed81837e2f4178d2",
+    "text_section_sha256_B": "7f7d4f12de84bad205aa5733888b73c97716c0a65800bcf9ed81837e2f4178d2",
+    "text_section_identical": true,
+    "whole_binary_differences": "3 bytes, all at or after the .strtab file offset"
+  },
+  "raw_full_run": {
+    "ephemeral_path": "/tmp/phase0_baseline_slot_final_20260902.json",
+    "sha256": "8b73a50e70144ea9c0472914de04d9fcec6887a9d939c2689cf89d6a6c61d694",
+    "size_bytes": 4901469,
+    "committed": false,
+    "reason_not_committed": "full process manifests and duplicate per-sample payloads are retained in the compact evidence artifact",
+    "semantic_digest_mismatches": 0
+  },
+  "committed_csv": {
+    "path": "doc/performance_experiments/baseline_slot_crossover_20260902.csv",
+    "sha256": "341658e0893a2775cf887afc007b3cf7d6557a700a151d830404c7d1f7c04c8a",
+    "line_endings": "LF"
+  },
+  "results": [
+    {
+      "workload": "legal_count",
+      "fixture": "midgame_250",
+      "operations": 100000,
+      "A_rate": 1152363.291546998,
+      "A_p50_rate": 1152363.291546998,
+      "A_p95_rate": 1159437.161656912,
+      "B_rate": 1156408.5848358478,
+      "B_p50_rate": 1156408.5848358478,
+      "B_p95_rate": 1162458.6914374526,
+      "B_over_A": 1.0047463756348907,
+      "ci95": [
+        1.0021724133279506,
+        1.0292389500480068
+      ],
+      "rss_A_kib": 5508.0,
+      "rss_A_p95_kib": 5683.799999999999,
+      "rss_B_kib": 5528.0,
+      "rss_B_p95_kib": 5678.400000000001,
+      "digest": "6d9802c2ed236f83"
+    },
+    {
+      "workload": "legal_codes",
+      "fixture": "midgame_250",
+      "operations": 20000,
+      "A_rate": 123114.03370545243,
+      "A_p50_rate": 123114.03370545243,
+      "A_p95_rate": 165976.213434399,
+      "B_rate": 123051.58827507653,
+      "B_p50_rate": 123051.58827507653,
+      "B_p95_rate": 165948.56940132933,
+      "B_over_A": 0.9968136610845669,
+      "ci95": [
+        0.9843218156812477,
+        1.0026719061108873
+      ],
+      "rss_A_kib": 5532.0,
+      "rss_A_p95_kib": 5687.8,
+      "rss_B_kib": 5524.0,
+      "rss_B_p95_kib": 5706.599999999999,
+      "digest": "9e5be642d05486c3"
+    },
+    {
+      "workload": "legal_actions",
+      "fixture": "midgame_250",
+      "operations": 20000,
+      "A_rate": 128823.87635703941,
+      "A_p50_rate": 128823.87635703941,
+      "A_p95_rate": 167949.58572261044,
+      "B_rate": 128912.60834529567,
+      "B_p50_rate": 128912.60834529567,
+      "B_p95_rate": 170279.42184521037,
+      "B_over_A": 0.9996959970010436,
+      "ci95": [
+        0.9928759738229431,
+        1.0070411642157815
+      ],
+      "rss_A_kib": 5540.0,
+      "rss_A_p95_kib": 5688.0,
+      "rss_B_kib": 5508.0,
+      "rss_B_p95_kib": 5683.799999999999,
+      "digest": "9e5be642d05486c3"
+    },
+    {
+      "workload": "random_selfplay_apply",
+      "fixture": "initial",
+      "operations": 250000,
+      "A_rate": 1652473.2787718175,
+      "A_p50_rate": 1652473.2787718175,
+      "A_p95_rate": 1672381.3605073448,
+      "B_rate": 1589093.0475944676,
+      "B_p50_rate": 1589093.0475944676,
+      "B_p95_rate": 1676543.4478712936,
+      "B_over_A": 0.9716553043239273,
+      "ci95": [
+        0.9184274034749732,
+        0.9987713899765174
+      ],
+      "rss_A_kib": 5528.0,
+      "rss_A_p95_kib": 5684.0,
+      "rss_B_kib": 5526.0,
+      "rss_B_p95_kib": 5684.0,
+      "digest": "3c120106773c3dee"
+    },
+    {
+      "workload": "apply_only",
+      "fixture": "midgame_250",
+      "operations": 2000000,
+      "A_rate": 21369695.009412553,
+      "A_p50_rate": 21369695.009412553,
+      "A_p95_rate": 21758769.264014352,
+      "B_rate": 21237473.78339579,
+      "B_p50_rate": 21237473.78339579,
+      "B_p95_rate": 21840635.090967335,
+      "B_over_A": 1.0005121757770987,
+      "ci95": [
+        0.9945399196160649,
+        1.01273401647807
+      ],
+      "rss_A_kib": 7484.0,
+      "rss_A_p95_kib": 7635.8,
+      "rss_B_kib": 7482.0,
+      "rss_B_p95_kib": 7626.599999999999,
+      "digest": "764674ab4e988569"
+    },
+    {
+      "workload": "apply_exact_hash",
+      "fixture": "midgame_250",
+      "operations": 2000000,
+      "A_rate": 10919251.844102332,
+      "A_p50_rate": 10919251.844102332,
+      "A_p95_rate": 11096050.158812236,
+      "B_rate": 10890955.630627744,
+      "B_p50_rate": 10890955.630627744,
+      "B_p95_rate": 11083864.35291858,
+      "B_over_A": 1.0085197124350431,
+      "ci95": [
+        0.9937420334741621,
+        1.061992771610758
+      ],
+      "rss_A_kib": 7490.0,
+      "rss_A_p95_kib": 7635.8,
+      "rss_B_kib": 7482.0,
+      "rss_B_p95_kib": 7639.8,
+      "digest": "7b64b5d73134d9fc"
+    },
+    {
+      "workload": "apply_observable_hash",
+      "fixture": "midgame_250",
+      "operations": 2000000,
+      "A_rate": 16025574.748936277,
+      "A_p50_rate": 16025574.748936277,
+      "A_p95_rate": 16312209.825135285,
+      "B_rate": 16194871.254228484,
+      "B_p50_rate": 16194871.254228484,
+      "B_p95_rate": 16434130.040730318,
+      "B_over_A": 1.0083938213884616,
+      "ci95": [
+        0.9992322165197607,
+        1.0149140004542558
+      ],
+      "rss_A_kib": 7460.0,
+      "rss_A_p95_kib": 7631.799999999999,
+      "rss_B_kib": 7482.0,
+      "rss_B_p95_kib": 7656.4,
+      "digest": "ea9d89797e52b140"
+    },
+    {
+      "workload": "cold_hash",
+      "fixture": "midgame_250",
+      "operations": 5000000,
+      "A_rate": 16795667.165213898,
+      "A_p50_rate": 16795667.165213898,
+      "A_p95_rate": 17179106.871813312,
+      "B_rate": 16780464.08499108,
+      "B_p50_rate": 16780464.08499108,
+      "B_p95_rate": 17173525.551877208,
+      "B_over_A": 0.9993689637955863,
+      "ci95": [
+        0.9973722171015115,
+        1.0109516956207776
+      ],
+      "rss_A_kib": 5524.0,
+      "rss_A_p95_kib": 5675.0,
+      "rss_B_kib": 5504.0,
+      "rss_B_p95_kib": 5675.8,
+      "digest": "554005299989d381"
+    },
+    {
+      "workload": "cached_hash",
+      "fixture": "midgame_250",
+      "operations": 20000000,
+      "A_rate": 165439878.23194364,
+      "A_p50_rate": 165439878.23194364,
+      "A_p95_rate": 166530683.70460364,
+      "B_rate": 165158761.07514113,
+      "B_p50_rate": 165158761.07514113,
+      "B_p95_rate": 166273840.91966155,
+      "B_over_A": 0.9985245907950796,
+      "ci95": [
+        0.9962170802569421,
+        1.0018817848162507
+      ],
+      "rss_A_kib": 5538.0,
+      "rss_A_p95_kib": 5687.8,
+      "rss_B_kib": 5506.0,
+      "rss_B_p95_kib": 5559.6,
+      "digest": "82de78b61e73ba4b"
+    },
+    {
+      "workload": "clone_light",
+      "fixture": "midgame_250",
+      "operations": 2000000,
+      "A_rate": 29796561.486202404,
+      "A_p50_rate": 29796561.486202404,
+      "A_p95_rate": 30105754.14707219,
+      "B_rate": 29773578.548386052,
+      "B_p50_rate": 29773578.548386052,
+      "B_p95_rate": 30050557.33692209,
+      "B_over_A": 0.9975731550153804,
+      "ci95": [
+        0.9888231051120019,
+        1.002832672438213
+      ],
+      "rss_A_kib": 5528.0,
+      "rss_A_p95_kib": 5688.0,
+      "rss_B_kib": 5532.0,
+      "rss_B_p95_kib": 5684.0,
+      "digest": "89d2d5e057edcb83"
+    },
+    {
+      "workload": "determinization_clone",
+      "fixture": "hidden_reserve",
+      "operations": 200000,
+      "A_rate": 2989006.2678898354,
+      "A_p50_rate": 2989006.2678898354,
+      "A_p95_rate": 3021762.8246309455,
+      "B_rate": 3000049.3905817275,
+      "B_p50_rate": 3000049.3905817275,
+      "B_p95_rate": 3020079.6932723247,
+      "B_over_A": 0.9996759659295111,
+      "ci95": [
+        0.9989284515421452,
+        1.0114244841986575
+      ],
+      "rss_A_kib": 5496.0,
+      "rss_A_p95_kib": 5677.799999999999,
+      "rss_B_kib": 5502.0,
+      "rss_B_p95_kib": 5687.8,
+      "digest": "a7376a5c694d3bcc"
+    },
+    {
+      "workload": "state_encoder",
+      "fixture": "midgame_250",
+      "operations": 500000,
+      "A_rate": 1575816.3158189007,
+      "A_p50_rate": 1575816.3158189007,
+      "A_p95_rate": 1590677.6484712353,
+      "B_rate": 1569853.8636199473,
+      "B_p50_rate": 1569853.8636199473,
+      "B_p95_rate": 1587358.4826057593,
+      "B_over_A": 1.000108102984193,
+      "ci95": [
+        0.9940440421185428,
+        1.0028207920874412
+      ],
+      "rss_A_kib": 5534.0,
+      "rss_A_p95_kib": 5683.799999999999,
+      "rss_B_kib": 5500.0,
+      "rss_B_p95_kib": 5674.8,
+      "digest": "5751a7c432f052c3"
+    },
+    {
+      "workload": "action_mask",
+      "fixture": "midgame_250",
+      "operations": 20000000,
+      "A_rate": 25559757.932722207,
+      "A_p50_rate": 25559757.932722207,
+      "A_p95_rate": 25809814.663300924,
+      "B_rate": 25540421.186192676,
+      "B_p50_rate": 25540421.186192676,
+      "B_p95_rate": 25848917.392291844,
+      "B_over_A": 0.9962379491079528,
+      "ci95": [
+        0.9265552654036626,
+        1.0475778972063818
+      ],
+      "rss_A_kib": 5504.0,
+      "rss_A_p95_kib": 5710.8,
+      "rss_B_kib": 5524.0,
+      "rss_B_p95_kib": 5684.0,
+      "digest": "3606c9ab74d7af83"
+    },
+    {
+      "workload": "decode_apply",
+      "fixture": "midgame_250",
+      "operations": 2000000,
+      "A_rate": 15320687.014683299,
+      "A_p50_rate": 15320687.014683299,
+      "A_p95_rate": 15670656.145133132,
+      "B_rate": 15291324.145062424,
+      "B_p50_rate": 15291324.145062424,
+      "B_p95_rate": 15707746.65891907,
+      "B_over_A": 1.0044124375749974,
+      "ci95": [
+        0.981584663286144,
+        1.014255949692881
+      ],
+      "rss_A_kib": 7596.0,
+      "rss_A_p95_kib": 7766.2,
+      "rss_B_kib": 7584.0,
+      "rss_B_p95_kib": 7631.799999999999,
+      "digest": "727eb52ac11074e6"
+    },
+    {
+      "workload": "legacy_mcts",
+      "fixture": "midgame_250",
+      "operations": 65536,
+      "A_rate": 255854.98265795957,
+      "A_p50_rate": 255854.98265795957,
+      "A_p95_rate": 279213.31160538306,
+      "B_rate": 253248.74826969375,
+      "B_p50_rate": 253248.74826969375,
+      "B_p95_rate": 273428.05819611374,
+      "B_over_A": 1.0109912864989954,
+      "ci95": [
+        0.954935249090877,
+        1.0378343118915518
+      ],
+      "rss_A_kib": 102994.0,
+      "rss_A_p95_kib": 103151.4,
+      "rss_B_kib": 102986.0,
+      "rss_B_p95_kib": 103159.8,
+      "digest": "0ab37fc767a05581"
+    },
+    {
+      "workload": "shared_tree",
+      "fixture": "midgame_250",
+      "operations": 2000000,
+      "A_rate": 3451651.429881607,
+      "A_p50_rate": 3451651.429881607,
+      "A_p95_rate": 3558022.715110196,
+      "B_rate": 3449003.2236399683,
+      "B_p50_rate": 3449003.2236399683,
+      "B_p95_rate": 3506988.1777034146,
+      "B_over_A": 0.9888649248315199,
+      "ci95": [
+        0.9807926250382437,
+        1.0068680018261533
+      ],
+      "rss_A_kib": 5538.0,
+      "rss_A_p95_kib": 5746.4,
+      "rss_B_kib": 5532.0,
+      "rss_B_p95_kib": 5696.0,
+      "digest": "a8e81331dcb0c399"
+    },
+    {
+      "workload": "parallel_scheduler",
+      "fixture": "midgame_250",
+      "operations": 4096,
+      "A_rate": 257448.08253390001,
+      "A_p50_rate": 257448.08253390001,
+      "A_p95_rate": 268656.7443472373,
+      "B_rate": 253916.47669410732,
+      "B_p50_rate": 253916.47669410732,
+      "B_p95_rate": 267020.84852771554,
+      "B_over_A": 0.9952201337026332,
+      "ci95": [
+        0.9624700640497142,
+        1.0197149439525046
+      ],
+      "rss_A_kib": 10956.0,
+      "rss_A_p95_kib": 10972.0,
+      "rss_B_kib": 10966.0,
+      "rss_B_p95_kib": 10972.0,
+      "digest": "f2563dd286296a84"
+    },
+    {
+      "workload": "board_copy_restore",
+      "fixture": "midgame_250",
+      "operations": 2000000,
+      "A_rate": 17398623.501196153,
+      "A_p50_rate": 17398623.501196153,
+      "A_p95_rate": 17601436.26173093,
+      "B_rate": 17235775.905982018,
+      "B_p50_rate": 17235775.905982018,
+      "B_p95_rate": 17641205.76762887,
+      "B_over_A": 0.9907079696271127,
+      "ci95": [
+        0.9811244462672677,
+        1.0336962786478314
+      ],
+      "rss_A_kib": 5518.0,
+      "rss_A_p95_kib": 5682.2,
+      "rss_B_kib": 5532.0,
+      "rss_B_p95_kib": 5684.0,
+      "digest": "c35f3a2d19cd3783"
+    },
+    {
+      "workload": "solver_state_key",
+      "fixture": "reveal_heavy",
+      "operations": 2000000,
+      "A_rate": 6750749.6681223,
+      "A_p50_rate": 6750749.6681223,
+      "A_p95_rate": 6969802.004655703,
+      "B_rate": 6820108.58258093,
+      "B_p50_rate": 6820108.58258093,
+      "B_p95_rate": 6959675.89161796,
+      "B_over_A": 0.9997137391499411,
+      "ci95": [
+        0.9644693729252714,
+        1.0332428885906486
+      ],
+      "rss_A_kib": 5678.0,
+      "rss_A_p95_kib": 5767.6,
+      "rss_B_kib": 5596.0,
+      "rss_B_p95_kib": 5752.0,
+      "digest": "09fabd6c0473eb83"
+    },
+    {
+      "workload": "solver_tt",
+      "fixture": "midgame_250",
+      "operations": 20000000,
+      "A_rate": 36576503.37321607,
+      "A_p50_rate": 36576503.37321607,
+      "A_p95_rate": 36886488.477996126,
+      "B_rate": 36559677.55431302,
+      "B_p50_rate": 36559677.55431302,
+      "B_p95_rate": 36887864.57275399,
+      "B_over_A": 1.0028026749438197,
+      "ci95": [
+        1.0000080614202511,
+        1.008918847578926
+      ],
+      "rss_A_kib": 5680.0,
+      "rss_A_p95_kib": 5751.8,
+      "rss_B_kib": 5718.0,
+      "rss_B_p95_kib": 5767.2,
+      "digest": "575c26bfdff10f4a"
+    },
+    {
+      "workload": "visible_solver",
+      "fixture": "five_moves",
+      "operations": 100000,
+      "A_rate": 661745.8649824725,
+      "A_p50_rate": 661745.8649824725,
+      "A_p95_rate": 668928.7167905616,
+      "B_rate": 664985.928427144,
+      "B_p50_rate": 664985.928427144,
+      "B_p95_rate": 669744.8173070272,
+      "B_over_A": 1.0044182347375958,
+      "ci95": [
+        0.9971753465937467,
+        1.0109326134368193
+      ],
+      "rss_A_kib": 12992.0,
+      "rss_A_p95_kib": 13056.0,
+      "rss_B_kib": 12852.0,
+      "rss_B_p95_kib": 13055.8,
+      "digest": "b6cdbdc80156e463"
+    },
+    {
+      "workload": "exact_reveal",
+      "fixture": "five_moves",
+      "operations": 139868,
+      "A_rate": 492942.0496448636,
+      "A_p50_rate": 492942.0496448636,
+      "A_p95_rate": 497596.14555955597,
+      "B_rate": 493950.53675966215,
+      "B_p50_rate": 493950.53675966215,
+      "B_p95_rate": 498162.74326772394,
+      "B_over_A": 1.0003709839447217,
+      "ci95": [
+        0.9942012331897679,
+        1.0061680707197083
+      ],
+      "rss_A_kib": 16236.0,
+      "rss_A_p95_kib": 16267.4,
+      "rss_B_kib": 16214.0,
+      "rss_B_p95_kib": 16248.0,
+      "digest": "9dd9c11919a4581a"
+    }
+  ],
+  "compact_paired_evidence": {
+    "path": "doc/performance_experiments/phase0_paired_evidence_20260902.json",
+    "sha256": "d088be4f790be0e733a2e6c39f09f096793432b286dba52daf3fb11849f27841",
+    "size_bytes": 1336924,
+    "formal_cases": 22,
+    "pairs_per_case": 22,
+    "historical_shared_tree_audits": 3,
+    "preserves_all_pair_rates_elapsed_rss_slot_identity_sha_semantics_and_counters": true
+  },
+  "historical_shared_tree_audits": {
+    "note": "These pre-final harness runs diagnose placement and run-to-run instability; they are not substituted for the preregistered final table.",
+    "old_full_run_outlier": {
+      "pairs": 22,
+      "B_over_A": 0.960675,
+      "ci95": [
+        0.954804,
+        0.970037
+      ],
+      "raw_sha256": "f19dc4bf855d161e98e4fa64b9192a9ccce53e954231284accec7942c184ec98"
+    },
+    "isolated_before_old_full_run": {
+      "pairs": 22,
+      "B_over_A": 0.992414,
+      "ci95": [
+        0.988277,
+        1.001901
+      ],
+      "raw_sha256": "8abafd4f444e8ae6f234c783967437ad6ed811f60851539e2ca558a9e045863b"
+    },
+    "identical_binary_control": {
+      "pairs": 22,
+      "B_over_A": 1.005822,
+      "ci95": [
+        0.990145,
+        1.017134
+      ],
+      "raw_sha256": "10ab38559a5337fbe2082d2a9bcc147ccf7d0b712b1a3d84778830b911647364"
+    },
+    "isolated_after_old_full_run": {
+      "pairs": 30,
+      "crossover_blocks": 15,
+      "warmups_per_side": 5,
+      "B_over_A": 1.004102,
+      "ci95": [
+        0.998519,
+        1.007276
+      ],
+      "raw_sha256": "2c1002bd1f6bb89da02f22fff5b4af0f5015c963b1e77a924237e5dea754faad"
+    },
+    "conclusion": "The final formal shared_tree result is 0.988865 with CI [0.980793, 1.006868]; the earlier outlier did not reproduce."
+  },
+  "interpretation": "A and B have identical .text. Apparent non-unity intervals, including random_selfplay_apply and solver_tt, therefore quantify residual measurement instability rather than an optimization effect."
+}

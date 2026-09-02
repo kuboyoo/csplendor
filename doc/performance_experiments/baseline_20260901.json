@@ -1,0 +1,67 @@
+{
+  "schema": "csplendor.phase0_baseline.summary.v1",
+  "complete": true,
+  "measurement_date": "2026-09-01",
+  "baseline_commit": "7835f642b23251d0cb91de180006084521c74aa6",
+  "candidate_note": "Phase 0 measurement-only tree; no game algorithm or data-structure optimization",
+  "settings": {
+    "order": "ABBA",
+    "pairs": 21,
+    "warmups_per_side": 3,
+    "bootstrap_iterations": 10000,
+    "cpu_set": [4],
+    "timeout_seconds": 300,
+    "throughput_build": "Release, portable, CSPLENDOR_PERF_INSTRUMENTATION=OFF"
+  },
+  "environment": {
+    "cpu": "AMD Ryzen 9 7900X 12-Core Processor",
+    "logical_cpus": 24,
+    "selected_cpu_smt_sibling": 16,
+    "selected_set_contains_smt_siblings": false,
+    "governor": "performance",
+    "frequency_boost": "enabled",
+    "os": "Linux 7.0.0-30-generic x86_64",
+    "compiler": "GCC 15.2.0",
+    "cmake": "4.2.3",
+    "python": "3.12.1"
+  },
+  "build_identity": {
+    "benchmark_build_fingerprint_sha256": "5bcc4597ab17c7ce29f08bcb970a657d1fcb83cce4507c3b6efd2f4bb1f374f2",
+    "baseline_binary_sha256": "85d45329851804e6c99d8b8f26dc8d880c73abb300670d5057031feded0ba7d0",
+    "candidate_binary_sha256": "c9e6aff33a3d4cec3117001e5f7067927923fda65d0deba2f1f1b46cdde52c8d",
+    "loadable_text_sha256_A": "9684bbfb13ac8a6aac36a03bde9edcc0d97948e7a02ac95fda93aafabdec8a90",
+    "loadable_text_sha256_B": "9684bbfb13ac8a6aac36a03bde9edcc0d97948e7a02ac95fda93aafabdec8a90",
+    "loadable_text_identical": true
+  },
+  "results": [
+    {"workload":"legal_count","fixture":"midgame_250","operations":100000,"A_rate":1164903.399,"B_rate":1170679.019,"B_over_A":1.005675,"ci95":[0.997383,1.009671],"rss_A_kib":5496,"rss_B_kib":5500,"digest":"6d9802c2ed236f83"},
+    {"workload":"legal_codes","fixture":"midgame_250","operations":20000,"A_rate":156948.269,"B_rate":157040.810,"B_over_A":1.000264,"ci95":[0.999969,1.001732],"rss_A_kib":5504,"rss_B_kib":5504,"digest":"9e5be642d05486c3"},
+    {"workload":"legal_actions","fixture":"midgame_250","operations":20000,"A_rate":170006.133,"B_rate":170391.693,"B_over_A":1.001585,"ci95":[1.000605,1.003921],"rss_A_kib":5504,"rss_B_kib":5504,"digest":"9e5be642d05486c3"},
+    {"workload":"random_selfplay_apply","fixture":"initial","operations":250000,"A_rate":1687481.982,"B_rate":1687220.237,"B_over_A":1.000030,"ci95":[0.999125,1.000554],"rss_A_kib":5504,"rss_B_kib":5500,"digest":"3c120106773c3dee"},
+    {"workload":"apply_only","fixture":"midgame_250","operations":2000000,"A_rate":22452686.576,"B_rate":22492634.168,"B_over_A":1.003205,"ci95":[0.998273,1.014612],"rss_A_kib":7452,"rss_B_kib":7448,"digest":"764674ab4e988569"},
+    {"workload":"apply_exact_hash","fixture":"midgame_250","operations":2000000,"A_rate":11158894.738,"B_rate":11118674.095,"B_over_A":0.996389,"ci95":[0.992371,0.999725],"rss_A_kib":7456,"rss_B_kib":7448,"digest":"7b64b5d73134d9fc"},
+    {"workload":"apply_observable_hash","fixture":"midgame_250","operations":2000000,"A_rate":16450931.076,"B_rate":16414527.352,"B_over_A":0.996651,"ci95":[0.992042,1.003436],"rss_A_kib":7456,"rss_B_kib":7456,"digest":"ea9d89797e52b140"},
+    {"workload":"cold_hash","fixture":"midgame_250","operations":5000000,"A_rate":17194977.005,"B_rate":17308840.636,"B_over_A":0.998561,"ci95":[0.997468,1.003502],"rss_A_kib":5500,"rss_B_kib":5504,"digest":"554005299989d381"},
+    {"workload":"cached_hash","fixture":"midgame_250","operations":20000000,"A_rate":166653396.890,"B_rate":166647763.255,"B_over_A":1.000537,"ci95":[0.995963,1.004745],"rss_A_kib":5500,"rss_B_kib":5500,"digest":"82de78b61e73ba4b"},
+    {"workload":"clone_light","fixture":"midgame_250","operations":2000000,"A_rate":29944517.301,"B_rate":29760453.497,"B_over_A":0.999056,"ci95":[0.980953,1.000659],"rss_A_kib":5504,"rss_B_kib":5500,"digest":"89d2d5e057edcb83"},
+    {"workload":"determinization_clone","fixture":"hidden_reserve","operations":200000,"A_rate":3030497.946,"B_rate":3034124.786,"B_over_A":1.000428,"ci95":[0.994601,1.006517],"rss_A_kib":5504,"rss_B_kib":5504,"digest":"a7376a5c694d3bcc"},
+    {"workload":"state_encoder","fixture":"midgame_250","operations":500000,"A_rate":1597945.982,"B_rate":1600821.700,"B_over_A":1.000359,"ci95":[0.998968,1.001885],"rss_A_kib":5488,"rss_B_kib":5504,"digest":"5751a7c432f052c3"},
+    {"workload":"action_mask","fixture":"midgame_250","operations":20000000,"A_rate":26105702.118,"B_rate":26099624.587,"B_over_A":0.999603,"ci95":[0.998056,1.001707],"rss_A_kib":5504,"rss_B_kib":5500,"digest":"3606c9ab74d7af83"},
+    {"workload":"decode_apply","fixture":"midgame_250","operations":2000000,"A_rate":15850174.765,"B_rate":15802383.108,"B_over_A":0.996308,"ci95":[0.993000,1.003592],"rss_A_kib":7588,"rss_B_kib":7588,"digest":"727eb52ac11074e6"},
+    {"workload":"legacy_mcts","fixture":"midgame_250","operations":65536,"A_rate":292981.068,"B_rate":299284.906,"B_over_A":1.015469,"ci95":[0.998875,1.020779],"rss_A_kib":102784,"rss_B_kib":102780,"digest":"0ab37fc767a05581"},
+    {"workload":"shared_tree","fixture":"midgame_250","operations":2000000,"A_rate":3605720.252,"B_rate":3468449.759,"B_over_A":0.965097,"ci95":[0.952531,0.971558],"rss_A_kib":5504,"rss_B_kib":5504,"digest":"a8e81331dcb0c399"},
+    {"workload":"parallel_scheduler","fixture":"midgame_250","operations":4096,"A_rate":269910.246,"B_rate":268832.554,"B_over_A":0.995193,"ci95":[0.992175,0.999357],"rss_A_kib":10716,"rss_B_kib":10724,"digest":"f2563dd286296a84"},
+    {"workload":"board_copy_restore","fixture":"midgame_250","operations":2000000,"A_rate":18258556.405,"B_rate":18381896.604,"B_over_A":1.004920,"ci95":[0.995766,1.019942],"rss_A_kib":5504,"rss_B_kib":5504,"digest":"c35f3a2d19cd3783"},
+    {"workload":"solver_state_key","fixture":"reveal_heavy","operations":2000000,"A_rate":7028712.978,"B_rate":7030402.688,"B_over_A":1.001295,"ci95":[1.000025,1.002105],"rss_A_kib":5536,"rss_B_kib":5528,"digest":"09fabd6c0473eb83"},
+    {"workload":"solver_tt","fixture":"midgame_250","operations":20000000,"A_rate":37146402.305,"B_rate":37155725.981,"B_over_A":0.999174,"ci95":[0.997254,1.001807],"rss_A_kib":5536,"rss_B_kib":5656,"digest":"575c26bfdff10f4a"},
+    {"workload":"visible_solver","fixture":"five_moves","operations":100000,"A_rate":667390.950,"B_rate":665810.377,"B_over_A":0.995845,"ci95":[0.992589,1.002389],"rss_A_kib":12996,"rss_B_kib":12948,"digest":"b6cdbdc80156e463"},
+    {"workload":"exact_reveal","fixture":"five_moves","operations":139868,"A_rate":499832.445,"B_rate":500305.752,"B_over_A":1.001013,"ci95":[0.996739,1.008076],"rss_A_kib":16188,"rss_B_kib":16188,"digest":"9dd9c11919a4581a"}
+  ],
+  "reverse_label_audit": {
+    "workload": "shared_tree",
+    "reason": "A significant result was impossible for identical loadable text and was audited before interpretation",
+    "repeat_reference_A_candidate_B": {"A_rate":3638280,"B_rate":3535418,"B_over_A":0.969145,"ci95":[0.966670,0.974433]},
+    "swapped_candidate_A_reference_B": {"A_rate":3540864,"B_rate":3665994,"B_over_A":1.030358,"ci95":[1.026063,1.037063]},
+    "conclusion": "The difference follows binary identity/path/page placement, not code. It is a measurement artifact."
+  }
+}

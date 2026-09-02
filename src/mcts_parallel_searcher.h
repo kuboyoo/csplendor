@@ -466,7 +466,12 @@ public:
               active_tickets.emplace(simulation_id, ticket);
           if (!inserted)
             throw std::logic_error("parallel ticket identifier was reused");
-          if (!work_queue.push(ticket)) {
+          bool pushed = false;
+          {
+            CSPLENDOR_PERF_BLOCKING_SCOPE(coordinator_work_push, Coordinator);
+            pushed = work_queue.push(ticket);
+          }
+          if (!pushed) {
             // A cooperative stop may close the queue while this producer is
             // blocked. The ticket was never issued, so it must not enter the
             // shutdown ledger as a cancelled ticket.
@@ -474,6 +479,7 @@ public:
             break;
           }
           ++issued;
+          CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerIssuanceAtomicIncrements, 1);
           ledger->issued.fetch_add(1, std::memory_order_relaxed);
           SearchLedger::update_max(ledger->max_inflight_observed,
                                    active_tickets.size());
@@ -489,7 +495,13 @@ public:
             std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 std::chrono::milliseconds(10)),
             deadline - std::chrono::steady_clock::now());
-        if (!event_queue.pop_for(first, first_wait)) {
+        bool received_first = false;
+        {
+          CSPLENDOR_PERF_BLOCKING_SCOPE(coordinator_first_event_pop,
+                                        Coordinator);
+          received_first = event_queue.pop_for(first, first_wait);
+        }
+        if (!received_first) {
           if (options.cancellation_requested())
             throw detail::CancellationReached{};
           if (stop_requested.load(std::memory_order_acquire)) {
@@ -514,7 +526,13 @@ public:
             break;
           const auto slice_deadline =
               std::min(batch_deadline, now + std::chrono::milliseconds(10));
-          if (!event_queue.pop_for(next, slice_deadline - now)) {
+          bool received_next = false;
+          {
+            CSPLENDOR_PERF_BLOCKING_SCOPE(coordinator_batch_event_pop,
+                                          Coordinator);
+            received_next = event_queue.pop_for(next, slice_deadline - now);
+          }
+          if (!received_next) {
             throw_if_cancelled_or_timed_out(options, deadline);
             if (stop_requested.load(std::memory_order_acquire)) {
               if (auto worker_error = worker_failure.snapshot())
@@ -536,6 +554,8 @@ public:
 
           // No tree, node, pending, or queue lock is held across this call.
           throw_if_cancelled_or_timed_out(options, deadline);
+          CSPLENDOR_PERF_INC(ParallelBatchCount);
+          CSPLENDOR_PERF_ADD(ParallelBatchItems, requests.size());
           auto results = detail::call_inference_callback(inference, requests);
           throw_if_cancelled_or_timed_out(options, deadline);
           if (results.size() != requests.size())
@@ -589,7 +609,17 @@ public:
     }
 
     session.request_stop(failure != nullptr || partial);
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    const auto coordinator_join_started = std::chrono::steady_clock::now();
+#endif
     session.join_workers();
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    CSPLENDOR_PERF_ADD(
+        ParallelCoordinatorIdleNanoseconds,
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - coordinator_join_started)
+            .count());
+#endif
 
     cleanup_pending(tree, registry);
     cleanup_tickets(active_tickets, failure != nullptr, *ledger);
@@ -776,6 +806,8 @@ private:
       throw std::logic_error("root bootstrap did not own expansion");
     try {
       std::vector<ParallelInferenceRequest> requests{claim.pending->request};
+      CSPLENDOR_PERF_INC(ParallelBatchCount);
+      CSPLENDOR_PERF_ADD(ParallelBatchItems, requests.size());
       auto results = detail::call_inference_callback(inference, requests);
       if (results.size() != 1)
         throw std::invalid_argument(
@@ -814,7 +846,14 @@ private:
       const ParallelSearchOptions &options, std::atomic<bool> &stop_requested,
       detail::WorkerFailureState &worker_failure) noexcept {
     std::shared_ptr<detail::SimulationTicket> ticket;
-    while (work_queue.pop(ticket)) {
+    for (;;) {
+      bool received_work = false;
+      {
+        CSPLENDOR_PERF_BLOCKING_SCOPE(worker_work_pop, Worker);
+        received_work = work_queue.pop(ticket);
+      }
+      if (!received_work)
+        break;
       if (stop_requested.load(std::memory_order_acquire) ||
           options.cancellation_requested()) {
         stop_requested.store(true, std::memory_order_release);
@@ -912,7 +951,12 @@ private:
           event.ticket = ticket;
           event.node = std::move(node);
           event.pending = std::move(claim.pending);
-          if (!event_queue.push(std::move(event)))
+          bool pushed = false;
+          {
+            CSPLENDOR_PERF_BLOCKING_SCOPE(worker_owner_event_push, Worker);
+            pushed = event_queue.push(std::move(event));
+          }
+          if (!pushed)
             return;
           return;
         }
@@ -957,6 +1001,7 @@ private:
       const int action = reservation->action();
       ticket->path.append(std::move(*reservation));
       if (!mcts_internal::GameAdapter::decode_and_apply_native(game, action)) {
+        CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerErrorAtomicIncrements, 1);
         ledger->invalid_replay.fetch_add(1, std::memory_order_relaxed);
         throw std::runtime_error(
             "parallel selection produced an unavailable action");
@@ -1091,6 +1136,7 @@ private:
       const int action = reservation->action();
       ticket->path.append(std::move(*reservation));
       if (!mcts_internal::GameAdapter::decode_and_apply_native(game, action)) {
+        CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerErrorAtomicIncrements, 1);
         ledger->invalid_replay.fetch_add(1, std::memory_order_relaxed);
         throw std::runtime_error(
             "deterministic selection produced an unavailable action");
@@ -1116,7 +1162,10 @@ private:
     event.ticket = ticket;
     event.value = value;
     event.completion = completion;
-    event_queue.push(std::move(event));
+    {
+      CSPLENDOR_PERF_BLOCKING_SCOPE(worker_completion_event_push, Worker);
+      event_queue.push(std::move(event));
+    }
   }
 
   static std::shared_ptr<detail::SimulationTicket>
@@ -1139,6 +1188,7 @@ private:
     if (previous == TicketState::Completed ||
         previous == TicketState::Cancelled || previous == TicketState::Failed ||
         previous == TicketState::Committing) {
+      CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerErrorAtomicIncrements, 1);
       ledger.duplicate_result.fetch_add(1, std::memory_order_relaxed);
       throw std::logic_error("parallel ticket was completed twice");
     }
@@ -1147,12 +1197,15 @@ private:
     ticket->state.store(TicketState::Completed, std::memory_order_release);
     switch (completion) {
     case CompletionKind::EvaluatedLeaf:
+      CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerCompletionAtomicIncrements, 1);
       ledger.completed_evaluated.fetch_add(1, std::memory_order_relaxed);
       break;
     case CompletionKind::Terminal:
+      CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerCompletionAtomicIncrements, 1);
       ledger.completed_terminal.fetch_add(1, std::memory_order_relaxed);
       break;
     case CompletionKind::MaxDepth:
+      CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerCompletionAtomicIncrements, 1);
       ledger.completed_max_depth.fetch_add(1, std::memory_order_relaxed);
       break;
     case CompletionKind::None:
@@ -1215,10 +1268,12 @@ private:
         if (ticket->path.state() == ReservedPathState::Open)
           ticket->path.abort();
       } catch (...) {
+        CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerErrorAtomicIncrements, 1);
         ledger.integrity_errors.fetch_add(1, std::memory_order_relaxed);
       }
       ticket->state.store(failed ? TicketState::Failed : TicketState::Cancelled,
                           std::memory_order_release);
+      CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerErrorAtomicIncrements, 1);
       if (failed)
         ledger.failed.fetch_add(1, std::memory_order_relaxed);
       else
@@ -1240,10 +1295,12 @@ private:
         if (ticket->path.state() == ReservedPathState::Open)
           ticket->path.abort();
       } catch (...) {
+        CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerErrorAtomicIncrements, 1);
         ledger.integrity_errors.fetch_add(1, std::memory_order_relaxed);
       }
       ticket->state.store(failed ? TicketState::Failed : TicketState::Cancelled,
                           std::memory_order_release);
+      CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerErrorAtomicIncrements, 1);
       if (failed)
         ledger.failed.fetch_add(1, std::memory_order_relaxed);
       else
@@ -1409,6 +1466,7 @@ private:
               simulation_id, root.tree_generation);
           epoch_tickets[static_cast<size_t>(offset)] = ticket;
           ++issued;
+          CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerIssuanceAtomicIncrements, 1);
           ledger->issued.fetch_add(1, std::memory_order_relaxed);
           SearchLedger::update_max(ledger->max_inflight_observed, offset + 1);
           auto event = traverse_ticket_synchronously(root, tree, ticket,
@@ -1439,6 +1497,8 @@ private:
           for (size_t index = begin; index < end; ++index)
             requests.push_back(owners[index].pending->request);
           throw_if_cancelled_or_timed_out(options, deadline);
+          CSPLENDOR_PERF_INC(ParallelBatchCount);
+          CSPLENDOR_PERF_ADD(ParallelBatchItems, requests.size());
           auto batch = detail::call_inference_callback(inference, requests);
           throw_if_cancelled_or_timed_out(options, deadline);
           if (batch.size() != requests.size())

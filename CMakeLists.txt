@@ -8,6 +8,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(CSPLENDOR_BUILD_PYTHON_MODULE "Build the pybind11 extension" ON)
 option(CSPLENDOR_BUILD_NATIVE_TESTS "Build native C++ tests" OFF)
 option(CSPLENDOR_BUILD_PARALLEL_BENCHMARK "Build native MCTS benchmark" OFF)
+option(CSPLENDOR_BUILD_ENGINE_BENCHMARK
+       "Build native rule/search/solver hotpath benchmark" OFF)
+option(CSPLENDOR_PERF_INSTRUMENTATION
+       "Enable internal performance counters for diagnostic builds" OFF)
 set(CSPLENDOR_CPU_TARGET "portable" CACHE STRING
     "CPU target: portable or native")
 set_property(CACHE CSPLENDOR_CPU_TARGET PROPERTY STRINGS portable native)
@@ -27,6 +31,7 @@ target_compile_features(csplendor_core_config INTERFACE cxx_std_17)
 set(CSPLENDOR_PYTHON_CORE_SOURCES
     src/game_snapshot.cpp
     src/mcts_parallel_trace.cpp
+    src/perf_counters.cpp
     src/reveal_solver_components.cpp
     src/reveal_verified_solver.cpp
     src/visible_only_solver.cpp)
@@ -42,6 +47,11 @@ if(MSVC)
 else()
   target_compile_options(csplendor_warnings INTERFACE
                          -Wall -Wextra -Wpedantic -Werror)
+endif()
+
+if(CSPLENDOR_PERF_INSTRUMENTATION)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_PERF_INSTRUMENTATION=1)
 endif()
 
 if(CSPLENDOR_CPU_TARGET STREQUAL "portable")
@@ -147,4 +157,12 @@ if(CSPLENDOR_BUILD_PARALLEL_BENCHMARK)
       benchmark_mcts_optimizations
       PRIVATE csplendor_core csplendor_sanitizer csplendor_warnings
               Threads::Threads)
+endif()
+
+if(CSPLENDOR_BUILD_ENGINE_BENCHMARK)
+  add_executable(benchmark_engine_hotpaths
+                 scripts/benchmark_engine_hotpaths.cpp)
+  target_link_libraries(
+      benchmark_engine_hotpaths PRIVATE csplendor_core csplendor_sanitizer
+                                        csplendor_warnings Threads::Threads)
 endif()

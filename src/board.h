@@ -4,6 +4,7 @@
 #include "card_data.h"
 #include "fixed_stack.h"
 #include "noble_data.h"
+#include "perf_counters.h"
 #include "player.h"
 #include "portable_rng.h"
 #include "types.h"
@@ -173,10 +174,13 @@ public:
   }
 
   uint64_t hash() const {
+    CSPLENDOR_PERF_INC(ExactHashCalls);
     if (hash_valid) {
+      CSPLENDOR_PERF_INC(ExactHashCacheHits);
       return cached_hash;
     }
 
+    CSPLENDOR_PERF_INC(ExactHashCacheMisses);
     cached_hash = compute_hash_uncached();
     hash_valid = true;
     return cached_hash;
@@ -193,6 +197,7 @@ public:
   // deck order and the absolute turn lets equivalent reveal histories share
   // a transposition while retaining every field that affects legal play.
   uint64_t compute_set_deck_search_hash() const {
+    CSPLENDOR_PERF_INC(SolverSetDeckHashCalls);
     return compute_hash_impl<false, false>();
   }
 
@@ -204,6 +209,7 @@ private:
 
     // Bank
     for (int i = 0; i < 6; ++i) {
+      CSPLENDOR_PERF_HASH_FIELDS(IncludeDeckOrder, 1);
       if (bank[i] < 13)
         h ^= z.bank_gems[i][bank[i]];
       else
@@ -213,6 +219,7 @@ private:
     // Visible cards
     for (int l = 0; l < 3; ++l) {
       for (int s = 0; s < 4; ++s) {
+        CSPLENDOR_PERF_HASH_FIELDS(IncludeDeckOrder, 1);
         int card_idx = static_cast<int>(visible[l][s]) + 1;
         if (card_idx >= 0 && card_idx <= CARD_COUNT)
           h ^= z.cards_board[l][s][card_idx];
@@ -221,6 +228,7 @@ private:
 
     // Nobles
     for (size_t slot = 0; slot < nobles.size(); ++slot) {
+      CSPLENDOR_PERF_HASH_FIELDS(IncludeDeckOrder, 1);
       const uint8_t n_id = nobles[slot];
       if (is_valid_noble_id(n_id))
         h ^= z.nobles_on_board[slot][n_id];
@@ -231,6 +239,7 @@ private:
       // occupied stack position, rather than only the deck size.
       for (int l = 0; l < 3; ++l) {
         for (size_t s = 0; s < decks[l].size(); ++s) {
+          CSPLENDOR_PERF_INC(ExactDeckCardSaltsVisited);
           const uint8_t card_id = decks[l][s];
           if (is_valid_card_id(card_id))
             h ^= z.deck_cards[l][s][card_id];
@@ -241,6 +250,7 @@ private:
     // Players
     for (int i = 0; i < 2; ++i) {
       const auto &p = players[i];
+      CSPLENDOR_PERF_HASH_FIELDS(IncludeDeckOrder, 3);
       h ^= z.player_points[i][p.points];
       if (p.reserved_count <= MAX_RESERVED)
         h ^= z.player_reserved_count[i][p.reserved_count];
@@ -251,18 +261,21 @@ private:
       else
         h ^= hash_out_of_range_value(0x210 + i, p.purchased_count);
       for (int g = 0; g < 6; ++g) {
+        CSPLENDOR_PERF_HASH_FIELDS(IncludeDeckOrder, 1);
         if (p.gems[g] < 13)
           h ^= z.player_gems[i][g][p.gems[g]];
         else
           h ^= hash_out_of_range_value(0x300 + i * 8 + g, p.gems[g]);
       }
       for (int b = 0; b < 5; ++b) {
+        CSPLENDOR_PERF_HASH_FIELDS(IncludeDeckOrder, 1);
         if (p.bonuses[b] < 16)
           h ^= z.player_bonuses[i][b][p.bonuses[b]];
         else
           h ^= hash_out_of_range_value(0x400 + i * 8 + b, p.bonuses[b]);
       }
       for (int r = 0; r < 3; ++r) {
+        CSPLENDOR_PERF_HASH_FIELDS(IncludeDeckOrder, 2);
         int card_idx = static_cast<int>(p.reserved[r]) + 1;
         if (card_idx >= 0 && card_idx <= CARD_COUNT)
           h ^= z.cards_reserved[i][r][card_idx];
@@ -274,6 +287,7 @@ private:
     }
 
     // Current player & states
+    CSPLENDOR_PERF_HASH_FIELDS(IncludeDeckOrder, IncludeTurn ? 5 : 4);
     if (current_player < NUM_PLAYERS)
       h ^= z.current_player[current_player];
     if (waiting_noble && current_player < NUM_PLAYERS)
@@ -291,7 +305,15 @@ public:
 
   // Compute hash from scratch (for debugging/validation)
   uint64_t recompute_hash() const {
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    const bool had_cached_hash = hash_valid;
+    const uint64_t previous_hash = cached_hash;
+#endif
     const uint64_t recomputed = compute_hash_uncached();
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    if (had_cached_hash && previous_hash != recomputed)
+      CSPLENDOR_PERF_INC(HashOracleFailures);
+#endif
     cached_hash = recomputed;
     hash_valid = true;
     return recomputed;
@@ -300,11 +322,13 @@ public:
   // Observable hash - only includes information visible to the observer
   // Used for MCTS determinization to avoid different hashes for same observable state
   uint64_t observable_hash(uint8_t observer) const {
+    CSPLENDOR_PERF_INC(ObservableHashCalls);
     const auto &z = Zobrist::get_instance();
     uint64_t h = 0;
 
     // Bank - always visible
     for (int i = 0; i < 6; ++i) {
+      CSPLENDOR_PERF_INC(ObservableHashFieldsVisited);
       if (bank[i] < 13)
         h ^= z.bank_gems[i][bank[i]];
       else
@@ -314,6 +338,7 @@ public:
     // Visible cards - always visible
     for (int l = 0; l < 3; ++l) {
       for (int s = 0; s < 4; ++s) {
+        CSPLENDOR_PERF_INC(ObservableHashFieldsVisited);
         int card_idx = static_cast<int>(visible[l][s]) + 1;
         if (card_idx >= 0 && card_idx <= CARD_COUNT)
           h ^= z.cards_board[l][s][card_idx];
@@ -322,11 +347,13 @@ public:
 
     // Deck sizes only (not contents) - visible information
     for (int l = 0; l < 3; ++l) {
+      CSPLENDOR_PERF_INC(ObservableHashFieldsVisited);
       h ^= z.deck_sizes[l][decks[l].size()];
     }
 
     // Nobles - always visible
     for (size_t slot = 0; slot < nobles.size(); ++slot) {
+      CSPLENDOR_PERF_INC(ObservableHashFieldsVisited);
       const uint8_t n_id = nobles[slot];
       if (is_valid_noble_id(n_id))
         h ^= z.nobles_on_board[slot][n_id];
@@ -335,6 +362,7 @@ public:
     // Players
     for (int i = 0; i < 2; ++i) {
       const auto &p = players[i];
+      CSPLENDOR_PERF_ADD(ObservableHashFieldsVisited, 3);
       h ^= z.player_points[i][p.points];
       if (p.reserved_count <= MAX_RESERVED)
         h ^= z.player_reserved_count[i][p.reserved_count];
@@ -345,12 +373,14 @@ public:
       else
         h ^= hash_out_of_range_value(0x210 + i, p.purchased_count);
       for (int g = 0; g < 6; ++g) {
+        CSPLENDOR_PERF_INC(ObservableHashFieldsVisited);
         if (p.gems[g] < 13)
           h ^= z.player_gems[i][g][p.gems[g]];
         else
           h ^= hash_out_of_range_value(0x300 + i * 8 + g, p.gems[g]);
       }
       for (int b = 0; b < 5; ++b) {
+        CSPLENDOR_PERF_INC(ObservableHashFieldsVisited);
         if (p.bonuses[b] < 16)
           h ^= z.player_bonuses[i][b][p.bonuses[b]];
         else
@@ -358,6 +388,7 @@ public:
       }
       // Reserved cards - only include if visible to observer
       for (int r = 0; r < 3; ++r) {
+        CSPLENDOR_PERF_ADD(ObservableHashFieldsVisited, 2);
         if (i == observer || !p.reserved_is_hidden[r]) {
           // Observer can see their own reserved cards
           int card_idx = static_cast<int>(p.reserved[r]) + 1;
@@ -383,6 +414,7 @@ public:
     }
 
     // Current player & states
+    CSPLENDOR_PERF_ADD(ObservableHashFieldsVisited, 5);
     if (current_player < NUM_PLAYERS)
       h ^= z.current_player[current_player];
     if (waiting_noble && current_player < NUM_PLAYERS)
