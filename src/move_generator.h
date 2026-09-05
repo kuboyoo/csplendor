@@ -206,6 +206,48 @@ private:
   friend class ActionEncoderV2;
   friend class ActionEncoderV3;
 
+  // Select within the SAME base/final capped prefix as consume_all_capped.
+  // Count preceding return subtrees, then materialize just the selected one.
+  static bool select_all_capped(const Board &board, bool simple_payment_mode,
+                                uint16_t index, Action &selected) {
+    bool found = false;
+    auto selected_sink = [&index, &selected, &found](const Action &action) {
+      if (index) { --index; return true; }
+      selected = action;
+      found = true;
+      return false;
+    };
+    if (board.current_player >= Board::NUM_PLAYERS || board.is_game_over())
+      return false;
+    int total = 0;
+    for (auto gem : board.players[board.current_player].gems) total += gem;
+    if (board.waiting_noble || total > 10) {
+      // Preserve noncanonical overflow, excess>3 and noble behavior verbatim.
+      consume_all_capped(board, simple_payment_mode, selected_sink);
+      return found;
+    }
+    validate_purchase_source_ids(board);
+    if (index >= MAX_MOVES) return false;
+    uint16_t base_count = 0;
+    auto base_sink = [&](const Action &action) {
+      ++base_count;
+      const uint16_t count = count_with_returns(board, action, index + 1);
+      if (count <= index) {
+        index -= count;
+        return base_count < MAX_MOVES;
+      }
+      emit_with_returns(board, action, selected_sink);
+      return false;
+    };
+    const bool completed = emit_base_actions(board, simple_payment_mode, base_sink);
+    if (completed && base_count == 0) {
+      Action pass;
+      pass.type = PASS;
+      selected_sink(pass);
+    }
+    return found;
+  }
+
   // All existing full-action APIs retain both legacy limits: at most the
   // first MAX_MOVES base actions are expanded and at most the first MAX_MOVES
   // final actions are observable. The emitter beneath this wrapper is

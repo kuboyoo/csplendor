@@ -124,6 +124,11 @@ public:
   }
 
   uint64_t legal_action_code_at(uint16_t index) const {
+#ifdef CSPLENDOR_RETURN_RANK_SELECTION
+    Action selected;
+    return MoveGenerator::select_all_capped(board, simple_payment_mode, index, selected)
+               ? selected.pack() : 0;
+#else
     uint16_t current = 0;
     uint64_t code = 0;
     if (use_packed_code_sink()) {
@@ -145,6 +150,7 @@ public:
     };
     MoveGenerator::consume_all_capped(board, simple_payment_mode, sink);
     return code;
+#endif
   }
 
   bool apply_action_code(uint64_t code, bool record_history = true) {
@@ -156,6 +162,11 @@ public:
   }
 
   bool apply_legal_action_index(uint16_t index, bool record_history = false) {
+#ifdef CSPLENDOR_RETURN_RANK_SELECTION
+    Action selected;
+    return MoveGenerator::select_all_capped(board, simple_payment_mode, index, selected) &&
+           apply_trusted(selected, record_history);
+#else
     uint16_t current = 0;
     Action selected;
     bool found = false;
@@ -170,6 +181,7 @@ public:
     if (!found)
       return false;
     return apply_trusted(selected, record_history);
+#endif
   }
 
   bool apply_random_action(uint64_t random_value, bool record_history = false) {
@@ -178,6 +190,9 @@ public:
       return false;
 
     uint16_t target = static_cast<uint16_t>(random_value % count);
+#ifdef CSPLENDOR_RETURN_RANK_SELECTION
+    return apply_legal_action_index(target, record_history);
+#else
     uint16_t current = 0;
     Action selected;
     bool found = false;
@@ -190,6 +205,7 @@ public:
     };
     MoveGenerator::consume_all_capped(board, simple_payment_mode, sink);
     return found && apply_trusted(selected, record_history);
+#endif
   }
 
   bool requires_forced_pass() const {
