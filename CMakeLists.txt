@@ -50,6 +50,8 @@ option(CSPLENDOR_VERIFY_SOLVER_ROLLBACK
        "Verify solver child/parent fields against full snapshots" OFF)
 option(CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER
        "Compare cached reveal scores/order with the original comparator" OFF)
+option(CSPLENDOR_MCTS_LEGACY_TREE_RECORDS
+       "Store legacy MCTS node, auxiliary policy and LRU time in one record" ON)
 if(CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER AND NOT CSPLENDOR_CACHE_REVEAL_SCORES)
   message(FATAL_ERROR "Reveal score verification requires cached scores")
 endif()
@@ -79,6 +81,8 @@ set_property(CACHE CSPLENDOR_SANITIZER PROPERTY STRINGS
 find_package(Threads REQUIRED)
 
 add_library(csplendor_core_config INTERFACE)
+target_compile_definitions(csplendor_core_config INTERFACE
+  CSPLENDOR_MCTS_LEGACY_TREE_RECORDS=$<BOOL:${CSPLENDOR_MCTS_LEGACY_TREE_RECORDS}>)
 target_include_directories(
     csplendor_core_config
     INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)

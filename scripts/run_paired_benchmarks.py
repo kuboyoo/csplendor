@@ -133,6 +133,9 @@ _CORRECTNESS_COUNTERS = frozenset(
 )
 _MEASUREMENT_COUNTERS = frozenset(
     {
+        "mcts_game_scratch_cold_starts",
+        "mcts_game_scratch_resets",
+        "mcts_game_scratch_provenance_capacity_bytes_max",
         "solver_deck_rollback_captures",
         "solver_deck_rollback_saved_cards",
         "solver_visible_purchase_refills",

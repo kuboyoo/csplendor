@@ -101,6 +101,9 @@ csplendor_add_native_test(mcts_parallel_replay mcts_parallel_replay.cpp
                           "unit;replay;deterministic;root-parallel" 90)
 csplendor_add_native_test(mcts_optimization_unit mcts_optimization_unit.cpp
                           "unit;optimization;equivalence" 90)
+csplendor_add_native_test(mcts_legacy_records_unit mcts_legacy_records_unit.cpp
+                          "unit;mcts;ownership;prune;equivalence" 90)
+target_compile_definitions(mcts_legacy_records_unit PRIVATE CSPLENDOR_MCTS_TESTING=1)
 target_compile_definitions(
   mcts_optimization_unit
   PRIVATE CSPLENDOR_MCTS_TESTING=1 CSPLENDOR_ACTION_ENCODER_REFERENCE=1)

@@ -119,6 +119,14 @@ Phase 3D-2/3D-3は採否評価を完了しました。対象山だけを復元�
 既存の高速化を維持し、PERF専用診断と記録のみ追加しています。追加の高速化は主張しません。
 詳細は[Phase 3D-2/3D-3測定記録](doc/performance_experiments/phase3d23_reveal_transactions_20260905.md)を参照してください。
 
+5B-R/4B-1の採否評価も完了しました。Game scratch再利用（5B-R）は独立再測定で1.017倍に
+とどまったため撤去し、legacy MCTSのnode・aux・LRU管理表統合（4B-1）を採用しました。
+3D-2/3評価後の同じ基準に対し、代表legacy探索は1.088倍（独立再測定1.103倍）、
+確保回数は約11.1%減少しました。これはnative 48-action＋模擬評価器での測定であり、
+実NN・V3・並列共有木や詰め問題生成全体の高速化を表す数値ではありません。
+未展開ノードを大量に保持する場合のメモリ増加を含む詳細とreferenceビルド方法は
+[5B-R/4B-1測定記録](doc/performance_experiments/phase5br4b1_mcts_state_records_20260905.md)を参照してください。
+
 ### 実験的な並列MCTS
 
 共有tree並列探索はStage Bのexperimental opt-inです。既定の`num_threads=1`はworker queueを
