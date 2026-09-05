@@ -2656,12 +2656,24 @@ struct SolverBenchmarkKeyHash {
 SolverBenchmarkKey make_solver_benchmark_key(
     const Game &game,
     const csplendor::solver_internal::HiddenOutcomeCatalog &catalog,
-    int depth) {
+    int depth,
+    const csplendor::solver_internal::RevealSearchState *search_state =
+        nullptr) {
   CSPLENDOR_PERF_INC(SolverStateKeyCalls);
   const Board &board = game.board;
-  const auto unseen = catalog.unseen_cards(board);
-  const auto acquired_hidden = catalog.acquired_hidden_cards(board);
-  const uint64_t board_hash = board.compute_set_deck_search_hash();
+  csplendor::solver_internal::CardIdSet unseen;
+  csplendor::solver_internal::CardIdSet acquired_hidden;
+  uint64_t board_hash = 0;
+  if (search_state != nullptr && search_state->active()) {
+    CSPLENDOR_PERF_INC(SolverRevealStateFastKeyReads);
+    unseen = search_state->remaining_all();
+    acquired_hidden = search_state->acquired_hidden();
+    board_hash = search_state->rule_hash();
+  } else {
+    unseen = catalog.unseen_cards(board);
+    acquired_hidden = catalog.acquired_hidden_cards(board);
+    board_hash = board.compute_set_deck_search_hash();
+  }
   return {csplendor::solver_internal::StateKeyCore{
               board_hash, board.players[0].points, board.players[1].points,
               board.players[0].purchased_count,
@@ -2691,17 +2703,21 @@ Result run_solver_state_key(const Arguments &arguments,
                             const Fixture &fixture) {
   csplendor::solver_internal::HiddenOutcomeCatalog catalog;
   catalog.remember_initial_position(fixture.game);
-  const SolverBenchmarkKey oracle =
-      make_solver_benchmark_key(fixture.game, catalog, arguments.depth);
+  csplendor::solver_internal::RevealSearchState search_state;
+  search_state.initialize(fixture.game, catalog);
+  const SolverBenchmarkKey oracle = make_solver_benchmark_key(
+      fixture.game, catalog, arguments.depth, nullptr);
   const SolverBenchmarkKey repeated =
-      make_solver_benchmark_key(fixture.game, catalog, arguments.depth);
+      make_solver_benchmark_key(fixture.game, catalog, arguments.depth,
+                                &search_state);
   if (!(oracle == repeated) ||
       SolverBenchmarkKeyHash{}(oracle) != SolverBenchmarkKeyHash{}(repeated))
     throw std::runtime_error("solver state-key oracle is unstable");
 
   Result result = benchmark_loop(arguments, [&](uint64_t, uint64_t digest) {
     const SolverBenchmarkKey key =
-        make_solver_benchmark_key(fixture.game, catalog, arguments.depth);
+        make_solver_benchmark_key(fixture.game, catalog, arguments.depth,
+                                  &search_state);
     return digest_solver_key(digest, key);
   });
   result.semantics.boolean("state_key_repeatable", true);

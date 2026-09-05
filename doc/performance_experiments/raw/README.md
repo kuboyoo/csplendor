@@ -26,6 +26,7 @@ gzip展開後のSHA-256が元記録と一致することを確認してから、
 | `phase2a/` | rule transition小規模高速化 |
 | `phase2b/` | 合法手生成高速化 |
 | `phase3a/` | solver container/metadata削減 |
+| `phase3b/` | 厳密めくれ探索の増分set-state/key、fallback、oracle検証 |
 | `exploratory/` | Phase分類前のsolver・benchmark探索 |
 
 内容の確認例:

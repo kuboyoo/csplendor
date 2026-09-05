@@ -128,6 +128,7 @@ _CORRECTNESS_COUNTERS = frozenset(
         "virtual_loss_added",
         "virtual_loss_released",
         "hash_oracle_failures",
+        "solver_reveal_state_oracle_failures",
     }
 )
 _MEASUREMENT_COUNTERS = frozenset(
@@ -216,6 +217,12 @@ _MEASUREMENT_COUNTERS = frozenset(
         "solver_path_inserts",
         "solver_path_linear_comparisons",
         "solver_reveal_candidates",
+        "solver_reveal_state_fallback_initializations",
+        "solver_reveal_state_fast_initializations",
+        "solver_reveal_state_fast_key_reads",
+        "solver_reveal_state_oracle_checks",
+        "solver_reveal_state_runtime_fallbacks",
+        "solver_reveal_state_transitions",
         "solver_scanned_deck_cards",
         "solver_scanned_purchased_ids",
         "solver_set_deck_hash_calls",

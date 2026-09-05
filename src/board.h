@@ -17,6 +17,10 @@
 #include <string>
 #include <vector>
 
+namespace csplendor::solver_internal {
+class RevealSearchState;
+}
+
 class Board {
 public:
   static constexpr int NUM_PLAYERS = 2;
@@ -471,6 +475,8 @@ public:
   }
 
 private:
+  friend class csplendor::solver_internal::RevealSearchState;
+
   static uint64_t exact_bank_salt(const Zobrist &z, int color,
                                   uint8_t value) noexcept {
     if (value < 13)

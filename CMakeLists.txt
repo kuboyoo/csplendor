@@ -34,6 +34,25 @@ option(CSPLENDOR_COMPACT_FORCED_ACTIONS
        "Filter solver attacker actions with bounded contiguous scratch" ON)
 option(CSPLENDOR_COMPACT_SOLVER_REASONS
        "Store visible-solver TT reasons as compact enums" ON)
+option(CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE
+       "Maintain reveal-solver set state and rule hash incrementally" ON)
+option(CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE
+       "Verify incremental reveal-solver state against scan oracles" OFF)
+
+if(CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE AND
+   NOT CSPLENDOR_INCREMENTAL_EXACT_HASH)
+  message(WARNING
+          "CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE requires "
+          "CSPLENDOR_INCREMENTAL_EXACT_HASH; the reveal fast path will "
+          "fall back to scan-based state keys")
+endif()
+if(CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE AND
+   (NOT CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE OR
+    NOT CSPLENDOR_INCREMENTAL_EXACT_HASH))
+  message(FATAL_ERROR
+          "CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE requires both incremental "
+          "reveal state and incremental exact hash")
+endif()
 set(CSPLENDOR_CPU_TARGET "portable" CACHE STRING
     "CPU target: portable or native")
 set_property(CACHE CSPLENDOR_CPU_TARGET PROPERTY STRINGS portable native)
@@ -129,6 +148,17 @@ endif()
 if(CSPLENDOR_COMPACT_SOLVER_REASONS)
   target_compile_definitions(csplendor_core_config
                              INTERFACE CSPLENDOR_COMPACT_SOLVER_REASONS=1)
+endif()
+
+if(CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE)
+  target_compile_definitions(
+      csplendor_core_config
+      INTERFACE CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE=1)
+endif()
+
+if(CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE=1)
 endif()
 
 if(CSPLENDOR_CPU_TARGET STREQUAL "portable")

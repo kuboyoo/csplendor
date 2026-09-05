@@ -6,6 +6,7 @@
 #include "solver_types.h"
 #include "visible_only_solver.h"
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <stdexcept>
@@ -19,6 +20,7 @@ using csplendor::solver_internal::HiddenOutcomeCatalog;
 using csplendor::solver_internal::OracleActionMetadata;
 using csplendor::solver_internal::ProofDagBuildAborted;
 using csplendor::solver_internal::RevealProofDagBuilder;
+using csplendor::solver_internal::RevealSearchState;
 using csplendor::solver_internal::RecursionPath;
 using csplendor::solver_internal::SearchLimit;
 using csplendor::solver_internal::SearchLimitExceeded;
@@ -204,6 +206,218 @@ void test_hidden_and_oracle_components() {
           "oracle metadata classification/order changed");
 }
 
+void test_incremental_reveal_search_state_and_fallback() {
+  Game game(20260905);
+  HiddenOutcomeCatalog catalog;
+  catalog.remember_initial_position(game);
+  RevealSearchState state;
+  const bool initialized = state.initialize(game, catalog);
+  if (csplendor::solver_internal::config::
+          incremental_reveal_search_state_enabled) {
+    require(initialized && state.active() &&
+                state.matches_reference(game.board, catalog),
+            "canonical reveal sidecar did not select the fast path");
+  } else {
+    require(!initialized && !state.active(),
+            "disabled reveal sidecar unexpectedly selected the fast path");
+  }
+
+  if (state.active()) {
+    // Exercise ordinary transitions (including concrete visible refills) and
+    // compare every incremental component with the scan oracle.
+    for (int ply = 0; ply < 40 && !game.is_game_over(); ++ply) {
+      const auto codes = game.legal_action_codes();
+      require(!codes.empty(), "reveal sidecar trajectory ran out of actions");
+      auto selected = codes.begin();
+      for (auto it = codes.begin(); it != codes.end(); ++it) {
+        const Action action = Action::unpack(*it);
+        if (action.type == PURCHASE || action.type == VISIT_NOBLE) {
+          selected = it;
+          break;
+        }
+      }
+      const auto before = state.observe_before(game.board);
+      require(game.apply_action_code_trusted(*selected, false),
+              "reveal sidecar trajectory transition failed");
+      state.observe_after(before, game.board, catalog);
+      require(state.active() && state.matches_reference(game.board, catalog),
+              "reveal sidecar diverged after an ordinary transition");
+    }
+
+    // An exact deck-reserve outcome removes an arbitrary card while retaining
+    // the legacy erase order of every other card.
+    Game reserve_game(99);
+    HiddenOutcomeCatalog reserve_catalog;
+    reserve_catalog.remember_initial_position(reserve_game);
+    RevealSearchState reserve_state;
+    require(reserve_state.initialize(reserve_game, reserve_catalog),
+            "deck-reserve sidecar initialization failed");
+    const int level = 0;
+    int selected_card = reserve_game.board.decks[level][0];
+    int selected_cost = 1000;
+    for (uint8_t candidate_id : reserve_game.board.decks[level]) {
+      const Card &candidate = get_card(candidate_id);
+      int cost = 0;
+      for (uint8_t amount : candidate.cost)
+        cost += amount;
+      if (cost < selected_cost) {
+        selected_card = candidate_id;
+        selected_cost = cost;
+      }
+    }
+    std::vector<uint8_t> expected_deck(reserve_game.board.decks[level].begin(),
+                                       reserve_game.board.decks[level].end());
+    expected_deck.erase(std::find(expected_deck.begin(), expected_deck.end(),
+                                  static_cast<uint8_t>(selected_card)));
+    require(reserve_state.move_deck_card_to_back(reserve_game.board, level,
+                                                  selected_card),
+            "exact reveal card could not be moved to the pop position");
+    const auto before = reserve_state.observe_before(reserve_game.board);
+    Action reserve;
+    reserve.type = RESERVE_DECK;
+    reserve.deck_level = level;
+    require(reserve_game.apply_trusted(reserve, false),
+            "exact deck-reserve transition failed");
+    reserve_state.observe_after(before, reserve_game.board, reserve_catalog);
+    require(std::equal(expected_deck.begin(), expected_deck.end(),
+                       reserve_game.board.decks[level].begin()) &&
+                expected_deck.size() ==
+                    reserve_game.board.decks[level].size(),
+            "exact reveal changed the remaining physical deck order");
+    require(reserve_state.matches_reference(reserve_game.board,
+                                            reserve_catalog),
+            "exact deck-reserve sidecar diverged from its oracle");
+
+    // Keep playing until the originally hidden reserved card is purchased.
+    // This covers the acquired-hidden delta as well as its ordinary rollback
+    // representation; selecting the cheapest level-1 outcome keeps the
+    // trajectory short and independent of a specific shuffled deck order.
+    const int reserving_player = 0;
+    bool purchased_hidden = false;
+    for (int ply = 0; ply < 40 && !reserve_game.is_game_over(); ++ply) {
+      const auto codes = reserve_game.legal_action_codes();
+      require(!codes.empty(), "hidden-purchase trajectory ran out of actions");
+      auto selected = codes.begin();
+      int selected_score = -100000;
+      for (auto it = codes.begin(); it != codes.end(); ++it) {
+        const Action candidate = Action::unpack(*it);
+        int score = 0;
+        if (reserve_game.current_player() == reserving_player &&
+            candidate.type == PURCHASE &&
+            candidate.card_id == selected_card) {
+          score = 100000;
+        } else if (candidate.type == TAKE_DIFFERENT ||
+                   candidate.type == TAKE_SAME) {
+          const Card &target = get_card(selected_card);
+          for (int color = 0; color < 5; ++color) {
+            const int deficit = std::max(
+                0, static_cast<int>(target.cost[color]) -
+                       static_cast<int>(reserve_game.board
+                                            .players[reserving_player]
+                                            .bonuses[color]) -
+                       static_cast<int>(reserve_game.board
+                                            .players[reserving_player]
+                                            .gems[color]));
+            const int useful = std::min<int>(candidate.take[color], deficit);
+            score += reserve_game.current_player() == reserving_player
+                         ? useful * 20
+                         : -useful * 20;
+            score -= candidate.return_gems[color] * 30;
+          }
+          score += 10;
+        } else if (candidate.type == PASS) {
+          score = -1000;
+        } else {
+          score = -100;
+        }
+        if (score > selected_score) {
+          selected_score = score;
+          selected = it;
+        }
+      }
+
+      const Action chosen = Action::unpack(*selected);
+      const auto transition = reserve_state.observe_before(reserve_game.board);
+      require(reserve_game.apply_action_code_trusted(*selected, false),
+              "hidden-purchase trajectory transition failed");
+      reserve_state.observe_after(transition, reserve_game.board,
+                                  reserve_catalog);
+      require(reserve_state.active() &&
+                  reserve_state.matches_reference(reserve_game.board,
+                                                  reserve_catalog),
+              "hidden-purchase sidecar diverged from its oracle");
+      if (chosen.type == PURCHASE && chosen.card_id == selected_card) {
+        purchased_hidden = true;
+        break;
+      }
+    }
+    require(purchased_hidden &&
+                reserve_state.acquired_hidden().contains(selected_card),
+            "purchased hidden card was not added to acquired-hidden state");
+  }
+
+  Game duplicate(7);
+  const int duplicated = duplicate.board.visible[0][0];
+  duplicate.board.begin_editor_mutation().decks[0][0] =
+      static_cast<uint8_t>(duplicated);
+  HiddenOutcomeCatalog duplicate_catalog;
+  duplicate_catalog.remember_initial_position(duplicate);
+  RevealSearchState fallback;
+  require(!fallback.initialize(duplicate, duplicate_catalog) &&
+              !fallback.active(),
+          "noncanonical duplicate-card root did not use the fallback path");
+  require(fallback.is_claimed(duplicate.board, duplicated),
+          "fallback claimed-card scan changed semantics");
+}
+
+void test_reveal_solver_sidecar_restores_on_node_limit() {
+  // A canonical root enables the sidecar.  Depth one creates blank visible
+  // slots, so the defender's non-exact search also traverses oracle actions.
+  // The deliberately small limit exits from a nested branch; verify builds
+  // compare the restored root sidecar after the exception is caught.
+  RevealVerifiedSolver solver(0, 1, 20, 0.0);
+  const auto result = solver.solve(Game(0));
+  if (result.unknown_reason != "node limit exceeded") {
+    throw std::runtime_error(
+        "reveal solver did not stop at the nested node limit: reason=" +
+        result.reason + " unknown=" + result.unknown_reason +
+        " nodes=" + std::to_string(result.stats.nodes) +
+        " oracle=" +
+        std::to_string(result.stats.oracle_purchase_actions +
+                       result.stats.oracle_reserve_actions));
+  }
+  require(result.stats.oracle_purchase_actions +
+                  result.stats.oracle_reserve_actions >
+              0,
+          "reveal solver node-limit path did not exercise oracle branches");
+}
+
+void test_incremental_reveal_search_state_random_differential() {
+  if (!csplendor::solver_internal::config::
+          incremental_reveal_search_state_enabled)
+    return;
+  for (uint64_t seed = 0; seed < 1000; ++seed) {
+    Game game(seed);
+    HiddenOutcomeCatalog catalog;
+    catalog.remember_initial_position(game);
+    RevealSearchState state;
+    require(state.initialize(game, catalog),
+            "random canonical root did not select reveal fast path");
+    for (uint64_t ply = 0; ply < 4 && !game.is_game_over(); ++ply) {
+      const auto codes = game.legal_action_codes();
+      require(!codes.empty(), "random reveal differential found no action");
+      const uint64_t code = codes[static_cast<size_t>(
+          (seed * 0x9e3779b97f4a7c15ULL + ply * 17) % codes.size())];
+      const auto before = state.observe_before(game.board);
+      require(game.apply_action_code_trusted(code, false),
+              "random reveal differential transition failed");
+      state.observe_after(before, game.board, catalog);
+      require(state.active() && state.matches_reference(game.board, catalog),
+              "random reveal sidecar differed from scan oracle");
+    }
+  }
+}
+
 void test_proof_dag_builder_owns_limits() {
   RevealProofDagBuilder builder(1, 1);
   RevealVerifiedProofNode root;
@@ -244,6 +458,9 @@ int main() {
     test_card_equivalence_classes_match_tuple_oracle();
     test_compact_forced_action_filter_order_and_caps();
     test_hidden_and_oracle_components();
+    test_incremental_reveal_search_state_and_fallback();
+    test_incremental_reveal_search_state_random_differential();
+    test_reveal_solver_sidecar_restores_on_node_limit();
     test_proof_dag_builder_owns_limits();
   } catch (const std::exception &exc) {
     std::cerr << exc.what() << '\n';

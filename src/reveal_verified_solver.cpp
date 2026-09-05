@@ -25,6 +25,7 @@ using csplendor::solver_internal::HiddenOutcomeCatalog;
 using csplendor::solver_internal::OracleActionMetadata;
 using csplendor::solver_internal::ProofDagBuildAborted;
 using csplendor::solver_internal::RevealProofDagBuilder;
+using csplendor::solver_internal::RevealSearchState;
 using csplendor::solver_internal::RevealSearchCancellationToken;
 using csplendor::solver_internal::SearchLimit;
 using csplendor::solver_internal::SearchLimitExceeded;
@@ -74,6 +75,7 @@ public:
       result.reason = exc.what();
       result.unknown_reason = exc.what();
     }
+    verify_reveal_state(game);
 
     stats_.elapsed_ms = limits_.elapsed_ms();
     result.memoized_states =
@@ -117,6 +119,7 @@ public:
       result.reason = exc.what();
       result.unknown_reason = exc.what();
     }
+    verify_reveal_state(game);
 
     stats_.elapsed_ms = limits_.elapsed_ms();
     trim_exact_cache(max_cache_states);
@@ -197,6 +200,7 @@ public:
       result.reason = "frontier_not_materialized";
       result.unknown_reason = exc.what();
     }
+    verify_reveal_state(game);
 
     stats_.elapsed_ms = limits_.elapsed_ms();
     result.memoized_states = memo_.size();
@@ -266,6 +270,7 @@ public:
         result.unknown_reason = exc.what();
       }
     }
+    verify_reveal_state(game);
 
     stats_.elapsed_ms = limits_.elapsed_ms();
     result.memoized_states = 0;
@@ -295,9 +300,91 @@ private:
     // initially hidden card of a blank level, which dominates every concrete
     // reveal sequence without enumerating deck permutations.
     game.blank_refill_mode = true;
-    root_ = game.clone_light();
     hidden_catalog_.remember_initial_position(game);
+    reveal_state_.initialize(game, hidden_catalog_);
+    // initialize() materializes the exact hash used by the sidecar. Preserve
+    // that root so replay never pairs the cached sidecar with a stale cache.
+    root_ = game.clone_light();
+    root_reveal_state_ = reveal_state_;
     return game;
+  }
+
+  class ScopedBranchRollback {
+  public:
+    ScopedBranchRollback(Impl &owner, Game &game)
+        : owner_(owner), game_(game), previous_board_(game.board),
+          previous_state_(owner.reveal_state_),
+          previous_blank_refill_(game.blank_refill_mode) {
+      CSPLENDOR_PERF_INC(BoardSnapshotCopies);
+    }
+
+    ScopedBranchRollback(const ScopedBranchRollback &) = delete;
+    ScopedBranchRollback &operator=(const ScopedBranchRollback &) = delete;
+
+    ~ScopedBranchRollback() { restore(); }
+
+    void mark_mutated() noexcept { mutated_ = true; }
+
+    void restore() noexcept {
+      if (!mutated_)
+        return;
+      game_.board = previous_board_;
+      game_.blank_refill_mode = previous_blank_refill_;
+      owner_.reveal_state_ = previous_state_;
+      mutated_ = false;
+      CSPLENDOR_PERF_INC(BoardRestores);
+      CSPLENDOR_PERF_INC(SolverBoardRollbacks);
+    }
+
+  private:
+    Impl &owner_;
+    Game &game_;
+    Board previous_board_;
+    RevealSearchState previous_state_;
+    bool previous_blank_refill_ = false;
+    bool mutated_ = false;
+  };
+
+  class ScopedRevealStateRestore {
+  public:
+    explicit ScopedRevealStateRestore(Impl &owner)
+        : owner_(owner), previous_(owner.reveal_state_) {}
+    ScopedRevealStateRestore(const ScopedRevealStateRestore &) = delete;
+    ScopedRevealStateRestore &
+    operator=(const ScopedRevealStateRestore &) = delete;
+    ~ScopedRevealStateRestore() { owner_.reveal_state_ = previous_; }
+
+  private:
+    Impl &owner_;
+    RevealSearchState previous_;
+  };
+
+  template <typename Apply>
+  bool apply_tracked(Game &game, Apply apply) {
+    const RevealSearchState::TransitionObservation before =
+        reveal_state_.observe_before(game.board);
+    if (!apply())
+      return false;
+    reveal_state_.observe_after(before, game.board, hidden_catalog_);
+    return true;
+  }
+
+  bool apply_action_tracked(Game &game, const Action &action) {
+    return apply_tracked(
+        game, [&] { return game.apply_trusted(action, false); });
+  }
+
+  bool apply_action_code_tracked(Game &game, uint64_t code) {
+    return apply_tracked(
+        game, [&] { return game.apply_action_code_trusted(code, false); });
+  }
+
+  void verify_reveal_state(const Game &game) const noexcept {
+#ifdef CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE
+    reveal_state_.verify_or_abort(game.board, hidden_catalog_);
+#else
+    (void)game;
+#endif
   }
 
   void reserve_active_memo() {
@@ -421,6 +508,8 @@ private:
   uint64_t cache_touch_counter_ = 0;
   Game root_{0};
   HiddenOutcomeCatalog hidden_catalog_;
+  RevealSearchState reveal_state_;
+  RevealSearchState root_reveal_state_;
   std::vector<uint64_t> preferred_attacker_actions_;
   bool include_proof_dag_ = false;
   RevealProofDagBuilder proof_builder_;
@@ -606,30 +695,23 @@ private:
   bool for_each_search_outcome(Game &game, const OrderedAction &ordered,
                                Visitor visitor) {
     if (ordered.oracle_card >= 0 || ordered.oracle_reserve) {
-      CSPLENDOR_PERF_INC(BoardSnapshotCopies);
-      const Board previous = game.board;
-      if (!apply_oracle_action(game, ordered))
+      ScopedBranchRollback rollback(*this, game);
+      rollback.mark_mutated();
+      if (!apply_tracked(game,
+                         [&] { return apply_oracle_action(game, ordered); }))
         return false;
-      const bool keep_going = visitor(-1);
-      game.board = previous;
-      CSPLENDOR_PERF_INC(BoardRestores);
-      CSPLENDOR_PERF_INC(SolverBoardRollbacks);
-      return keep_going;
+      return visitor(-1);
     }
 
     const Action action = Action::unpack(ordered.code);
     if (action.type == RESERVE_DECK)
       return for_each_deck_reserve_outcome(game, action, visitor);
 
-    CSPLENDOR_PERF_INC(BoardSnapshotCopies);
-    const Board previous = game.board;
-    if (!game.apply_trusted(action, false))
+    ScopedBranchRollback rollback(*this, game);
+    rollback.mark_mutated();
+    if (!apply_action_tracked(game, action))
       return false;
-    const bool keep_going = visitor(-1);
-    game.board = previous;
-    CSPLENDOR_PERF_INC(BoardRestores);
-    CSPLENDOR_PERF_INC(SolverBoardRollbacks);
-    return keep_going;
+    return visitor(-1);
   }
 
   template <typename Visitor>
@@ -643,15 +725,11 @@ private:
     if (level >= 0 && !game.board.decks[level].empty())
       return for_each_visible_refill_outcome(game, action, visitor);
 
-    CSPLENDOR_PERF_INC(BoardSnapshotCopies);
-    const Board previous = game.board;
-    if (!game.apply_trusted(action, false))
+    ScopedBranchRollback rollback(*this, game);
+    rollback.mark_mutated();
+    if (!apply_action_tracked(game, action))
       return false;
-    const bool keep_going = visitor(-1);
-    game.board = previous;
-    CSPLENDOR_PERF_INC(BoardRestores);
-    CSPLENDOR_PERF_INC(SolverBoardRollbacks);
-    return keep_going;
+    return visitor(-1);
   }
 
   static bool is_replayable(const OrderedAction &ordered) {
@@ -669,24 +747,15 @@ private:
         visible_refill_cards(game, action, level, slot);
     if (cards.empty())
       return false;
-    CSPLENDOR_PERF_INC(BoardSnapshotCopies);
-    const Board previous = game.board;
+    ScopedBranchRollback rollback(*this, game);
     for (int card_id : cards) {
-      game.board = previous;
-      CSPLENDOR_PERF_INC(BoardRestores);
-      CSPLENDOR_PERF_INC(SolverBoardRollbacks);
+      rollback.restore();
+      rollback.mark_mutated();
       if (!apply_visible_refill_outcome(game, action, level, slot, card_id))
         continue;
-      if (!visitor(card_id)) {
-        game.board = previous;
-        CSPLENDOR_PERF_INC(BoardRestores);
-        CSPLENDOR_PERF_INC(SolverBoardRollbacks);
+      if (!visitor(card_id))
         return false;
-      }
     }
-    game.board = previous;
-    CSPLENDOR_PERF_INC(BoardRestores);
-    CSPLENDOR_PERF_INC(SolverBoardRollbacks);
     return true;
   }
 
@@ -697,25 +766,16 @@ private:
     stats_.deck_reserve_candidates += cards.size();
     if (cards.empty())
       return false;
-    CSPLENDOR_PERF_INC(BoardSnapshotCopies);
-    const Board previous = game.board;
+    ScopedBranchRollback rollback(*this, game);
     for (int card_id : cards) {
-      game.board = previous;
-      CSPLENDOR_PERF_INC(BoardRestores);
-      CSPLENDOR_PERF_INC(SolverBoardRollbacks);
+      rollback.restore();
+      rollback.mark_mutated();
       if (!apply_deck_reserve_outcome(game, action, card_id))
         continue;
       ++stats_.deck_reserve_branches;
-      if (!visitor(card_id)) {
-        game.board = previous;
-        CSPLENDOR_PERF_INC(BoardRestores);
-        CSPLENDOR_PERF_INC(SolverBoardRollbacks);
+      if (!visitor(card_id))
         return false;
-      }
     }
-    game.board = previous;
-    CSPLENDOR_PERF_INC(BoardRestores);
-    CSPLENDOR_PERF_INC(SolverBoardRollbacks);
     return true;
   }
 
@@ -763,7 +823,7 @@ private:
     if (!csplendor::solver_internal::card_equivalence_classes_enabled)
       CSPLENDOR_PERF_INC(SolverTemporarySetAllocations);
     for (uint8_t card_id : game.board.decks[level]) {
-      if (!HiddenOutcomeCatalog::is_claimed(game.board, card_id) &&
+      if (!reveal_state_.is_claimed(game.board, card_id) &&
           remember_card_equivalence(legacy_seen, class_seen, card_id))
         cards.push_back(static_cast<int>(card_id));
     }
@@ -829,7 +889,7 @@ private:
     if (!csplendor::solver_internal::card_equivalence_classes_enabled)
       CSPLENDOR_PERF_INC(SolverTemporarySetAllocations);
     for (uint8_t card_id : game.board.decks[level]) {
-      if (!HiddenOutcomeCatalog::is_claimed(game.board, card_id) &&
+      if (!reveal_state_.is_claimed(game.board, card_id) &&
           remember_card_equivalence(legacy_seen, class_seen, card_id))
         cards.push_back(static_cast<int>(card_id));
     }
@@ -908,7 +968,8 @@ private:
     return -1;
   }
 
-  static bool remove_card_from_deck(Board &board, int level, int card_id) {
+  static bool remove_card_from_deck_legacy(Board &board, int level,
+                                           int card_id) {
     if (level < 0 || level >= 3)
       return false;
     auto &deck = board.decks[level];
@@ -924,17 +985,28 @@ private:
     return true;
   }
 
-  static bool apply_visible_refill_outcome(Game &game, const Action &action,
-                                           int level, int slot, int card_id) {
+  bool prepare_reveal_card(Game &game, int level, int card_id) {
+    if (reveal_state_.active()) {
+      if (reveal_state_.move_deck_card_to_back(game.board, level, card_id))
+        return true;
+      if (reveal_state_.active())
+        return false;
+    }
+    if (!remove_card_from_deck_legacy(game.board, level, card_id))
+      return false;
+    return game.board.decks[level].try_push_back(
+        static_cast<uint8_t>(card_id));
+  }
+
+  bool apply_visible_refill_outcome(Game &game, const Action &action,
+                                    int level, int slot, int card_id) {
     if (!is_valid_card_id(card_id) || get_card(card_id).level - 1 != level ||
         slot < 0 || slot >= Board::CARDS_PER_LEVEL ||
-        !remove_card_from_deck(game.board, level, card_id))
-      return false;
-    if (!game.board.decks[level].try_push_back(static_cast<uint8_t>(card_id)))
+        !prepare_reveal_card(game, level, card_id))
       return false;
     const bool previous_blank_refill = game.blank_refill_mode;
     game.blank_refill_mode = false;
-    const bool applied = game.apply_trusted(action, false);
+    const bool applied = apply_action_tracked(game, action);
     game.blank_refill_mode = previous_blank_refill;
     if (!applied)
       return false;
@@ -943,32 +1015,27 @@ private:
     return true;
   }
 
-  static bool apply_deck_reserve_outcome(Game &game, const Action &action,
-                                         int card_id) {
+  bool apply_deck_reserve_outcome(Game &game, const Action &action,
+                                  int card_id) {
     Board &board = game.board;
     if (board.is_game_over() || board.waiting_noble ||
         board.current_player >= Board::NUM_PLAYERS ||
         action.type != RESERVE_DECK || action.deck_level < 0 ||
         action.deck_level >= 3 || board.decks[action.deck_level].empty())
       return false;
-    PlayerState &player = board.players[board.current_player];
+    const int reserving_player = board.current_player;
+    PlayerState &player = board.players[reserving_player];
     if (!player.can_reserve() || !is_valid_card_id(card_id) ||
         get_card(card_id).level - 1 != action.deck_level)
       return false;
 
-    board.begin_unchecked_mutation();
-    if (!remove_card_from_deck(board, action.deck_level, card_id))
+    if (!prepare_reveal_card(game, action.deck_level, card_id))
       return false;
-    csplendor::detail::reserve_card_unchecked(board, card_id, true);
-    csplendor::detail::grant_reserve_gold(board);
-    if (!csplendor::detail::return_gems_checked(board, action.return_gems))
+    if (!apply_action_tracked(game, action))
       return false;
-    // Match Game even for editor-created inputs that were already noble
-    // eligible before reserving. Reserving cannot create eligibility in a
-    // normally reached state, but the public solver also accepts arbitrary
-    // Board snapshots.
-    csplendor::detail::finish_standard_action(board);
-    return true;
+    const PlayerState &reserved_by = board.players[reserving_player];
+    return std::find(reserved_by.reserved.begin(), reserved_by.reserved.end(),
+                     card_id) != reserved_by.reserved.end();
   }
 
   static int visible_refill_level(const Action &action) {
@@ -1009,18 +1076,15 @@ private:
     Entry representative;
     representative.action_count = actions.size();
     for (const OrderedAction &ordered : actions) {
-      CSPLENDOR_PERF_INC(BoardSnapshotCopies);
-      const Board previous = game.board;
+      ScopedBranchRollback rollback(*this, game);
+      rollback.mark_mutated();
       const Action action = Action::unpack(ordered.code);
       const int reveal_card = final_round_representative_reveal(game, action);
-      if (!game.apply_trusted(action, false))
+      if (!apply_action_tracked(game, action))
         continue;
       const ForceStatus child = game.board.waiting_noble
                                     ? resolve_final_round_noble(game)
                                     : terminal_status(game);
-      game.board = previous;
-      CSPLENDOR_PERF_INC(BoardRestores);
-      CSPLENDOR_PERF_INC(SolverBoardRollbacks);
 
       if (!representative.has_action) {
         representative = Entry{child, ordered.code,   reveal_card,
@@ -1049,14 +1113,11 @@ private:
     stats_.legal_moves += actions.size();
     bool has_unknown = false;
     for (const OrderedAction &ordered : actions) {
-      CSPLENDOR_PERF_INC(BoardSnapshotCopies);
-      const Board previous = game.board;
-      if (!game.apply_action_code_trusted(ordered.code, false))
+      ScopedBranchRollback rollback(*this, game);
+      rollback.mark_mutated();
+      if (!apply_action_code_tracked(game, ordered.code))
         continue;
       const ForceStatus child = terminal_status(game);
-      game.board = previous;
-      CSPLENDOR_PERF_INC(BoardRestores);
-      CSPLENDOR_PERF_INC(SolverBoardRollbacks);
       if (current_player == attacker_ && child == ForceStatus::PROVEN)
         return ForceStatus::PROVEN;
       if (current_player != attacker_ && child == ForceStatus::REFUTED)
@@ -1136,7 +1197,7 @@ private:
     if (allow_oracle) {
       for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
         if (hidden_catalog_.is_initially_hidden(card_id) &&
-            !HiddenOutcomeCatalog::is_claimed(board, card_id) &&
+            !reveal_state_.is_claimed(board, card_id) &&
             has_blank_slot_at_level(board, get_card(card_id).level - 1))
           consider_purchase(board, player, card_id, consider);
       }
@@ -1268,7 +1329,7 @@ private:
     const PlayerState &player = game.board.players[game.current_player()];
     for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
       if (!hidden_catalog_.is_initially_hidden(card_id) ||
-          HiddenOutcomeCatalog::is_claimed(game.board, card_id) ||
+          reveal_state_.is_claimed(game.board, card_id) ||
           !has_blank_slot_at_level(game.board, get_card(card_id).level - 1))
         continue;
       const Card &card = get_card(card_id);
@@ -1286,7 +1347,7 @@ private:
     if (player.can_reserve()) {
       for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
         if (!hidden_catalog_.is_initially_hidden(card_id) ||
-            HiddenOutcomeCatalog::is_claimed(game.board, card_id) ||
+            reveal_state_.is_claimed(game.board, card_id) ||
             !has_blank_slot_at_level(game.board, get_card(card_id).level - 1))
           continue;
         const int total_gems = player.total_gems();
@@ -1339,43 +1400,57 @@ private:
     }
   }
 
-  bool apply_oracle_action(Game &game, const OrderedAction &ordered) const {
+  template <bool MaintainExactHash>
+  bool apply_oracle_action_with_mutator(
+      Game &game, const OrderedAction &ordered) const {
     Board &board = game.board;
     if (board.is_game_over() || board.waiting_noble ||
         board.current_player >= Board::NUM_PLAYERS)
       return false;
-    board.begin_unchecked_mutation();
     PlayerState &player = board.players[board.current_player];
+    if (ordered.oracle_card >= 0 &&
+        !is_valid_card_id(ordered.oracle_card))
+      return false;
+    Board::RuleMutator<MaintainExactHash> mutation(board);
     if (ordered.oracle_card >= 0) {
       const Card &card = get_card(ordered.oracle_card);
       if (!player.can_afford(card))
         return false;
-      if (!csplendor::detail::purchase_card<true>(board, card,
-                                                  ordered.oracle_gold_as))
+      if (!csplendor::detail::purchase_card<true>(
+              board, mutation, card, ordered.oracle_gold_as))
         return false;
     } else if (ordered.oracle_reserve) {
       if (!player.can_reserve() ||
           !is_valid_card_id(ordered.oracle_reserve_card) ||
           !hidden_catalog_.is_initially_hidden(ordered.oracle_reserve_card) ||
-          HiddenOutcomeCatalog::is_claimed(board,
-                                           ordered.oracle_reserve_card) ||
+          reveal_state_.is_claimed(board, ordered.oracle_reserve_card) ||
           !has_blank_slot_at_level(
               board, get_card(ordered.oracle_reserve_card).level - 1))
         return false;
       csplendor::detail::reserve_card_unchecked(
-          board, ordered.oracle_reserve_card, true);
-      const bool granted_gold = csplendor::detail::grant_reserve_gold(board);
+          board, mutation, ordered.oracle_reserve_card, true);
+      const bool granted_gold =
+          csplendor::detail::grant_reserve_gold(board, mutation);
       std::array<uint8_t, 6> returned = {0};
       if (granted_gold && ordered.oracle_return_color >= 0)
         returned[ordered.oracle_return_color] = 1;
-      if (!csplendor::detail::return_gems_checked(board, returned))
+      if (!csplendor::detail::return_gems_checked(board, mutation, returned))
         return false;
     } else {
       return false;
     }
 
-    csplendor::detail::finish_standard_action(board);
+    csplendor::detail::finish_standard_action(board, mutation);
+    mutation.commit();
     return true;
+  }
+
+  bool apply_oracle_action(Game &game, const OrderedAction &ordered) const {
+#ifdef CSPLENDOR_INCREMENTAL_EXACT_HASH
+    if (game.board.hash_valid)
+      return apply_oracle_action_with_mutator<true>(game, ordered);
+#endif
+    return apply_oracle_action_with_mutator<false>(game, ordered);
   }
 
   std::vector<OrderedAction>
@@ -1555,11 +1630,25 @@ private:
   StateKey state_key(const Game &game, bool root_independent = false) const {
     CSPLENDOR_PERF_INC(SolverStateKeyCalls);
     const Board &board = game.board;
-    const CardIdSet unseen = hidden_catalog_.unseen_cards(board);
-    const CardIdSet acquired_hidden =
-        root_independent ? CardIdSet{}
-                         : hidden_catalog_.acquired_hidden_cards(board);
-    const uint64_t rule_position_hash = board.compute_set_deck_search_hash();
+    CardIdSet unseen;
+    CardIdSet acquired_hidden;
+    uint64_t rule_position_hash = 0;
+    if (reveal_state_.active()) {
+      CSPLENDOR_PERF_INC(SolverRevealStateFastKeyReads);
+#ifdef CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE
+      reveal_state_.verify_or_abort(board, hidden_catalog_);
+#endif
+      unseen = reveal_state_.remaining_all();
+      acquired_hidden =
+          root_independent ? CardIdSet{} : reveal_state_.acquired_hidden();
+      rule_position_hash = reveal_state_.rule_hash();
+    } else {
+      unseen = hidden_catalog_.unseen_cards(board);
+      acquired_hidden =
+          root_independent ? CardIdSet{}
+                           : hidden_catalog_.acquired_hidden_cards(board);
+      rule_position_hash = board.compute_set_deck_search_hash();
+    }
     return StateKey{StateKeyCore{rule_position_hash, board.players[0].points,
                                  board.players[1].points,
                                  board.players[0].purchased_count,
@@ -1673,7 +1762,9 @@ private:
     const RevealVerifiedSearchStats search_stats = stats_;
     try {
       Game game = root_.clone_light();
+      reveal_state_ = root_reveal_state_;
       dag.root = build_proof_node(game, depth_);
+      reveal_state_ = root_reveal_state_;
       validate_proof_dag(game, depth_, dag.root);
       dag.complete = true;
       dag.validated = true;
@@ -1768,9 +1859,10 @@ private:
           "proof DAG validation found illegal action edge");
     }
 
-    CSPLENDOR_PERF_INC(BoardSnapshotCopies);
-    const Board previous = game.board;
     const int current_player = game.current_player();
+    const bool previous_waiting_noble = game.board.waiting_noble;
+    ScopedBranchRollback rollback(*this, game);
+    rollback.mark_mutated();
     const Action action = Action::unpack(edge.action_code);
     bool applied = false;
     if (action.type == RESERVE_DECK) {
@@ -1791,25 +1883,19 @@ private:
         if (edge.reveal_card >= 0)
           throw ProofDagBuildAborted(
               "proof DAG validation found unexpected reveal card");
-        applied = game.apply_action_code_trusted(edge.action_code, false);
+        applied = apply_action_code_tracked(game, edge.action_code);
       }
     }
     if (!applied) {
-      game.board = previous;
-      CSPLENDOR_PERF_INC(BoardRestores);
-      CSPLENDOR_PERF_INC(SolverBoardRollbacks);
       throw ProofDagBuildAborted(
           "proof DAG validation could not replay edge transition");
     }
     const int next_depth =
-        previous.waiting_noble || preserve_child_depth
+        previous_waiting_noble || preserve_child_depth
             ? depth
             : depth - static_cast<int>(current_player == attacker_ &&
                                        game.current_player() != current_player);
     validate_proof_dag_node(game, next_depth, edge.child, seen);
-    game.board = previous;
-    CSPLENDOR_PERF_INC(BoardRestores);
-    CSPLENDOR_PERF_INC(SolverBoardRollbacks);
   }
 
   void append_proof_edge(size_t id, const OrderedAction &ordered,
@@ -1844,22 +1930,16 @@ private:
     bool proven = current_player != attacker_;
     bool expanded = false;
     for (const OrderedAction &ordered : actions) {
-      CSPLENDOR_PERF_INC(BoardSnapshotCopies);
-      const Board previous = game.board;
-      if (!game.apply_action_code_trusted(ordered.code, false))
+      ScopedBranchRollback rollback(*this, game);
+      rollback.mark_mutated();
+      if (!apply_action_code_tracked(game, ordered.code))
         continue;
       if (!game.is_game_over()) {
-        game.board = previous;
-        CSPLENDOR_PERF_INC(BoardRestores);
-        CSPLENDOR_PERF_INC(SolverBoardRollbacks);
         throw ProofDagBuildAborted(
             "final round noble choice did not reach terminal state");
       }
       const bool child_proven = game.winner() == attacker_;
       const size_t child = build_proof_node(game, depth);
-      game.board = previous;
-      CSPLENDOR_PERF_INC(BoardRestores);
-      CSPLENDOR_PERF_INC(SolverBoardRollbacks);
       if (current_player == attacker_) {
         if (!child_proven)
           continue;
@@ -2006,8 +2086,10 @@ private:
   }
 
   std::vector<RevealVerifiedLineEntry>
-  principal_line(bool exact_refinement = false) const {
+  principal_line(bool exact_refinement = false) {
+    ScopedRevealStateRestore restore_state(*this);
     Game game = root_.clone_light();
+    reveal_state_ = root_reveal_state_;
     std::vector<RevealVerifiedLineEntry> line;
     CSPLENDOR_PERF_INC(SolverTemporarySetAllocations);
     std::unordered_set<DepthStateKey, DepthStateKeyHash> seen;
@@ -2039,7 +2121,7 @@ private:
         applied =
             apply_visible_refill_outcome(game, action, level, slot, reveal_card);
       } else {
-        applied = game.apply_action_code_trusted(it->second.action_code, false);
+        applied = apply_action_code_tracked(game, it->second.action_code);
       }
       if (!applied)
         break;
