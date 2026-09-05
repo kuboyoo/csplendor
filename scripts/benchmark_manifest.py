@@ -68,6 +68,7 @@ _SAFE_CMAKE_CACHE_KEYS = frozenset(
         "CSPLENDOR_REUSE_SEARCH_SCRATCH",
         "CSPLENDOR_SOLVER_NORMAL_ROLLBACK",
         "CSPLENDOR_MCTS_LEGACY_TREE_RECORDS",
+        "CSPLENDOR_V3_PAYMENT_DP",
         "CSPLENDOR_VERIFY_SOLVER_ROLLBACK",
         "CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER",
         "CSPLENDOR_CPU_TARGET",
@@ -131,6 +132,8 @@ _BENCHMARK_BUILD_KEYS = _SAFE_CMAKE_CACHE_KEYS - {
     "CSPLENDOR_SOLVER_NORMAL_ROLLBACK",
     # Phase-4B-1 legacy MCTS record representation experiment axis.
     "CSPLENDOR_MCTS_LEGACY_TREE_RECORDS",
+    # Phase-5D codec experiment axis; no schema or numerical policy change.
+    "CSPLENDOR_V3_PAYMENT_DP",
 }
 _SAFE_FLAG_PREFIXES = (
     "-march=",

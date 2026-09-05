@@ -4,6 +4,7 @@
 // only the public engine/search facades so the same source can be compiled
 // against a baseline and a candidate tree without benchmark-only game logic.
 #include "action_encoder.h"
+#include "action_encoder_v3.h"
 #include "game.h"
 #include "mcts.h"
 #include "mcts_concurrent_tree.h"
@@ -173,7 +174,7 @@ constexpr uint64_t kFormalTraceSimulations = 41;
 
 volatile uint64_t benchmark_sink = 0;
 
-const std::array<const char *, 23> kWorkloads = {
+const std::array<const char *, 27> kWorkloads = {
     "legal_count",      "legal_codes",
     "legal_actions",    "random_selfplay_apply",
     "apply_only",       "purchase_apply",
@@ -186,6 +187,7 @@ const std::array<const char *, 23> kWorkloads = {
     "root_parallel",    "board_copy_restore",
     "solver_state_key", "solver_tt",
     "visible_solver",
+    "v3_payment_encode", "v3_payment_decode", "v3_action_mask", "v3_selfplay",
 };
 
 // exact_reveal is kept separate from the fixed-size array above to make the
@@ -1455,6 +1457,72 @@ Result run_action_mask(const Arguments &arguments, const Fixture &fixture) {
       "mask_popcount",
       mcts_action_mask::popcount(
           ActionEncoderCpp::get_action_mask_bits_trusted(fixture.game)));
+  return result;
+}
+
+Result run_v3_payment(const Arguments &arguments, bool encode) {
+  struct Payment { int card; int pattern; std::array<uint8_t, 5> gold; };
+  std::vector<Payment> inputs;
+  for (int card = 0; card < ActionEncoderV3::NUM_CARDS; ++card)
+    for (int pattern = 0; pattern < ActionEncoderV3::CARD_PATTERN_COUNT[card]; ++pattern)
+      inputs.push_back({card, pattern, ActionEncoderV3::decode_payment_for_card(pattern, card)});
+  return benchmark_loop(arguments, [&](uint64_t i, uint64_t digest) {
+    const auto &input = inputs[i % inputs.size()];
+    if (encode)
+      return digest_i64(digest, ActionEncoderV3::encode_payment_for_card(input.gold, input.card));
+    const auto gold = ActionEncoderV3::decode_payment_for_card(input.pattern, input.card);
+    for (auto value : gold) digest = digest_u64(digest, value);
+    return digest;
+  });
+}
+
+Result run_v3_mask(const Arguments &arguments, const Fixture &fixture) {
+  Result result = benchmark_loop(arguments, [&](uint64_t, uint64_t digest) {
+    const auto mask = ActionEncoderV3::get_action_mask(fixture.game);
+    // Consume every byte, but use a vectorizable sum instead of making a
+    // 3133-element serial hash chain dominate the public mask call.
+    uint64_t weighted = 0;
+    for (size_t i = 0; i < mask.size(); ++i) weighted += (i + 1) * mask[i];
+    return digest_u64(digest, weighted);
+  });
+  const auto mask = ActionEncoderV3::get_action_mask(fixture.game);
+  uint64_t digest = kDigestOffset;
+  for (auto value : mask) digest = digest_u64(digest, value);
+  result.semantics.string("v3_full_mask_digest", hex_digest(digest));
+  result.semantics.string("v3_schema", ActionEncoderV3::Schema::fingerprint());
+  return result;
+}
+
+Result run_v3_selfplay(const Arguments &arguments) {
+  auto perform = [&](uint64_t count) {
+    Game game(arguments.seed);
+    game.simple_payment_mode = arguments.simple_payment_mode;
+    uint64_t random = arguments.seed, resets = 0, digest = kDigestOffset;
+    for (uint64_t step = 0; step < count; ++step) {
+      if (game.is_game_over()) {
+        game = Game(arguments.seed + ++resets);
+        game.simple_payment_mode = arguments.simple_payment_mode;
+      }
+      const auto mask = ActionEncoderV3::get_action_mask(game);
+      uint64_t size = 0;
+      for (auto legal : mask) size += legal;
+      if (!size) throw std::runtime_error("V3 selfplay has no legal action");
+      uint64_t selected = next_random(random) % size;
+      int id = 0;
+      for (; id < ActionEncoderV3::ACTION_SIZE; ++id)
+        if (mask[id] && selected-- == 0) break;
+      const Action action = ActionEncoderV3::decode_and_match(id, game);
+      if (!game.apply(action, false)) throw std::runtime_error("V3 selfplay apply failed");
+      digest = digest_u64(digest, action.pack());
+      digest = digest_u64(digest, game.board.hash());
+    }
+    return digest;
+  };
+  benchmark_sink ^= perform(arguments.warmup);
+  Result result;
+  result.operations = arguments.iterations;
+  result.elapsed_ns = time_once([&] { result.digest = perform(arguments.iterations); }, result.perf);
+  benchmark_sink ^= result.digest;
   return result;
 }
 
@@ -3438,6 +3506,12 @@ Result dispatch(const std::string &workload, const Arguments &arguments,
     return run_state_encoder(arguments, fixture);
   if (workload == "action_mask")
     return run_action_mask(arguments, fixture);
+  if (workload == "v3_payment_encode" || workload == "v3_payment_decode")
+    return run_v3_payment(arguments, workload == "v3_payment_encode");
+  if (workload == "v3_action_mask")
+    return run_v3_mask(arguments, fixture);
+  if (workload == "v3_selfplay")
+    return run_v3_selfplay(arguments);
   if (workload == "decode_apply")
     return run_decode_apply(arguments, transitions);
   if (workload == "legacy_mcts")

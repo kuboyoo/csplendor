@@ -52,6 +52,8 @@ option(CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER
        "Compare cached reveal scores/order with the original comparator" OFF)
 option(CSPLENDOR_MCTS_LEGACY_TREE_RECORDS
        "Store legacy MCTS node, auxiliary policy and LRU time in one record" ON)
+option(CSPLENDOR_V3_PAYMENT_DP
+       "Use a static composition DP for V3 payment rank and unrank" ON)
 if(CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER AND NOT CSPLENDOR_CACHE_REVEAL_SCORES)
   message(FATAL_ERROR "Reveal score verification requires cached scores")
 endif()
@@ -81,6 +83,8 @@ set_property(CACHE CSPLENDOR_SANITIZER PROPERTY STRINGS
 find_package(Threads REQUIRED)
 
 add_library(csplendor_core_config INTERFACE)
+target_compile_definitions(csplendor_core_config INTERFACE
+  CSPLENDOR_V3_PAYMENT_DP=$<BOOL:${CSPLENDOR_V3_PAYMENT_DP}>)
 target_compile_definitions(csplendor_core_config INTERFACE
   CSPLENDOR_MCTS_LEGACY_TREE_RECORDS=$<BOOL:${CSPLENDOR_MCTS_LEGACY_TREE_RECORDS}>)
 target_include_directories(
