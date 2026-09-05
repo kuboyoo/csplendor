@@ -128,6 +128,30 @@ enum class Counter : size_t {
   ParallelCoordinatorIdleNanoseconds,
   ParallelBatchCount,
   ParallelBatchItems,
+  ParallelTraversalRootLockAcquisitions,
+  ParallelTraversalRootLockWaitNanoseconds,
+  ParallelTraversalRootLockHoldNanoseconds,
+  ParallelTraversalRootReservationSamples,
+  ParallelTraversalRootReservationSum,
+  ParallelTraversalRootReservationMax,
+  ParallelTraversalRootReservationFourPlus,
+  ParallelTraversalRootReservationSixteenPlus,
+  ParallelTraversalDepthOneLockAcquisitions,
+  ParallelTraversalDepthOneLockWaitNanoseconds,
+  ParallelTraversalDepthOneLockHoldNanoseconds,
+  ParallelTraversalDepthOneReservationSamples,
+  ParallelTraversalDepthOneReservationSum,
+  ParallelTraversalDepthOneReservationMax,
+  ParallelTraversalDepthOneReservationFourPlus,
+  ParallelTraversalDepthOneReservationSixteenPlus,
+  ParallelTraversalDeepLockAcquisitions,
+  ParallelTraversalDeepLockWaitNanoseconds,
+  ParallelTraversalDeepLockHoldNanoseconds,
+  ParallelTraversalDeepReservationSamples,
+  ParallelTraversalDeepReservationSum,
+  ParallelTraversalDeepReservationMax,
+  ParallelTraversalDeepReservationFourPlus,
+  ParallelTraversalDeepReservationSixteenPlus,
   Count,
 };
 
@@ -145,6 +169,18 @@ const char *counter_name(Counter counter) noexcept;
 
 #ifdef CSPLENDOR_PERF_INSTRUMENTATION
 enum class BlockingRole : uint8_t { None, Worker, Coordinator };
+
+// Traversal-only attribution. Coordinator backpropagation/cleanup is kept
+// in the existing aggregate counters, not mislabelled with a worker depth.
+int traversal_depth() noexcept;
+class TraversalDepthScope {
+public:
+  explicit TraversalDepthScope(int depth) noexcept;
+  ~TraversalDepthScope();
+private:
+  int previous_;
+};
+void record_traversal_lock(int depth, bool acquired, uint64_t nanoseconds) noexcept;
 
 class SolverTtProbeScope {
 public:
@@ -214,6 +250,8 @@ inline Snapshot snapshot() noexcept { return {}; }
   ::csplendor::perf::note_solver_tt_key_comparison()
 #define CSPLENDOR_PERF_TT_PROBE_SCOPE(name)                                    \
   ::csplendor::perf::SolverTtProbeScope name
+#define CSPLENDOR_PERF_TRAVERSAL_DEPTH(depth) \
+  ::csplendor::perf::TraversalDepthScope traversal_depth_scope(depth)
 #define CSPLENDOR_PERF_TT_PROBE_FINISH(name) name.finish()
 #define CSPLENDOR_PERF_RESERVATION_OCCUPANCY(occupancy)                        \
   ::csplendor::perf::record_reservation_occupancy(                             \
@@ -248,6 +286,7 @@ inline Snapshot snapshot() noexcept { return {}; }
 #define CSPLENDOR_PERF_TT_PROBE_SCOPE(name)                                    \
   do {                                                                         \
   } while (false)
+#define CSPLENDOR_PERF_TRAVERSAL_DEPTH(depth) do {} while (false)
 #define CSPLENDOR_PERF_TT_PROBE_FINISH(name)                                   \
   do {                                                                         \
   } while (false)

@@ -954,7 +954,10 @@ struct PerfAccumulator {
 
   void add(const csplendor::perf::Snapshot &snapshot) noexcept {
     for (size_t index = 0; index < values.size(); ++index) {
-      if (index ==
+      const auto counter = static_cast<csplendor::perf::Counter>(index);
+      if (counter == csplendor::perf::Counter::ParallelTraversalRootReservationMax ||
+          counter == csplendor::perf::Counter::ParallelTraversalDepthOneReservationMax ||
+          counter == csplendor::perf::Counter::ParallelTraversalDeepReservationMax || index ==
           static_cast<size_t>(
               csplendor::perf::Counter::ParallelReservationOccupancyMax))
         values[index] = std::max(values[index], snapshot.values[index]);

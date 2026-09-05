@@ -36,9 +36,9 @@ class LockTimer {
 public:
   LockTimer(csplendor::perf::Counter acquisitions,
             csplendor::perf::Counter wait,
-            csplendor::perf::Counter hold) noexcept
+            csplendor::perf::Counter hold, bool node_operation = false) noexcept
       : acquisitions_(acquisitions), wait_(wait), hold_(hold),
-        started_(Clock::now()) {}
+        started_(Clock::now()), depth_(node_operation ? csplendor::perf::traversal_depth() : -1) {}
 
   void acquired() noexcept {
     acquired_ = Clock::now();
@@ -49,11 +49,15 @@ public:
                        acquired_ - started_)
                        .count()));
     locked_ = true;
+    csplendor::perf::record_traversal_lock(depth_, true,
+        static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(acquired_ - started_).count()));
   }
 
   ~LockTimer() {
     if (!locked_)
       return;
+    csplendor::perf::record_traversal_lock(depth_, false,
+        static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - acquired_).count()));
     csplendor::perf::add(
         hold_, static_cast<uint64_t>(
                    std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -69,6 +73,7 @@ private:
   Clock::time_point started_;
   Clock::time_point acquired_{};
   bool locked_ = false;
+  int depth_ = -1;
 };
 #endif
 
@@ -146,7 +151,7 @@ decltype(auto) with_node_lock(const std::shared_ptr<ConcurrentTreeState> &tree,
 #ifdef CSPLENDOR_PERF_INSTRUMENTATION
     LockTimer timer(csplendor::perf::Counter::ParallelShardLockAcquisitions,
                     csplendor::perf::Counter::ParallelShardLockWaitNanoseconds,
-                    csplendor::perf::Counter::ParallelShardLockHoldNanoseconds);
+                    csplendor::perf::Counter::ParallelShardLockHoldNanoseconds, true);
 #endif
     std::lock_guard<std::mutex> lock(tree->coarse_mutex);
 #ifdef CSPLENDOR_PERF_INSTRUMENTATION
@@ -157,7 +162,7 @@ decltype(auto) with_node_lock(const std::shared_ptr<ConcurrentTreeState> &tree,
 #ifdef CSPLENDOR_PERF_INSTRUMENTATION
   LockTimer timer(csplendor::perf::Counter::ParallelNodeLockAcquisitions,
                   csplendor::perf::Counter::ParallelNodeLockWaitNanoseconds,
-                  csplendor::perf::Counter::ParallelNodeLockHoldNanoseconds);
+                  csplendor::perf::Counter::ParallelNodeLockHoldNanoseconds, true);
 #endif
   std::lock_guard<std::mutex> lock(node->mutex);
 #ifdef CSPLENDOR_PERF_INSTRUMENTATION

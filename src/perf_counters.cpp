@@ -123,12 +123,37 @@ constexpr std::array<const char *, COUNTER_COUNT> COUNTER_NAMES = {{
     "parallel_coordinator_idle_nanoseconds",
     "parallel_batch_count",
     "parallel_batch_items",
+    "parallel_traversal_root_lock_acquisitions",
+    "parallel_traversal_root_lock_wait_nanoseconds",
+    "parallel_traversal_root_lock_hold_nanoseconds",
+    "parallel_traversal_root_reservation_samples",
+    "parallel_traversal_root_reservation_sum",
+    "parallel_traversal_root_reservation_max",
+    "parallel_traversal_root_reservation_four_plus",
+    "parallel_traversal_root_reservation_sixteen_plus",
+    "parallel_traversal_depth_one_lock_acquisitions",
+    "parallel_traversal_depth_one_lock_wait_nanoseconds",
+    "parallel_traversal_depth_one_lock_hold_nanoseconds",
+    "parallel_traversal_depth_one_reservation_samples",
+    "parallel_traversal_depth_one_reservation_sum",
+    "parallel_traversal_depth_one_reservation_max",
+    "parallel_traversal_depth_one_reservation_four_plus",
+    "parallel_traversal_depth_one_reservation_sixteen_plus",
+    "parallel_traversal_deep_lock_acquisitions",
+    "parallel_traversal_deep_lock_wait_nanoseconds",
+    "parallel_traversal_deep_lock_hold_nanoseconds",
+    "parallel_traversal_deep_reservation_samples",
+    "parallel_traversal_deep_reservation_sum",
+    "parallel_traversal_deep_reservation_max",
+    "parallel_traversal_deep_reservation_four_plus",
+    "parallel_traversal_deep_reservation_sixteen_plus",
 }};
 
 #ifdef CSPLENDOR_PERF_INSTRUMENTATION
 std::array<std::atomic<uint64_t>, COUNTER_COUNT> counters{};
 thread_local uint64_t *active_solver_tt_comparisons = nullptr;
 thread_local BlockingRole blocking_role = BlockingRole::None;
+thread_local int current_traversal_depth = -1;
 #endif
 
 } // namespace
@@ -200,6 +225,22 @@ BlockingCallScope::BlockingCallScope(BlockingRole role) noexcept
 
 BlockingCallScope::~BlockingCallScope() { blocking_role = previous_; }
 
+int traversal_depth() noexcept { return current_traversal_depth; }
+TraversalDepthScope::TraversalDepthScope(int depth) noexcept
+    : previous_(current_traversal_depth) { current_traversal_depth = depth; }
+TraversalDepthScope::~TraversalDepthScope() { current_traversal_depth = previous_; }
+static Counter traversal_counter(int depth, size_t offset) noexcept {
+  const auto base = depth == 0 ? Counter::ParallelTraversalRootLockAcquisitions
+                  : depth == 1 ? Counter::ParallelTraversalDepthOneLockAcquisitions
+                               : Counter::ParallelTraversalDeepLockAcquisitions;
+  return static_cast<Counter>(static_cast<size_t>(base) + offset);
+}
+void record_traversal_lock(int depth, bool acquired, uint64_t ns) noexcept {
+  if (depth < 0) return;
+  if (acquired) add(traversal_counter(depth, 0));
+  add(traversal_counter(depth, acquired ? 1 : 2), ns);
+}
+
 void note_solver_tt_key_comparison() noexcept {
   if (!active_solver_tt_comparisons)
     return;
@@ -208,6 +249,14 @@ void note_solver_tt_key_comparison() noexcept {
 }
 
 void record_reservation_occupancy(size_t occupancy) noexcept {
+  const int depth = traversal_depth();
+  if (depth >= 0) {
+    add(traversal_counter(depth, 3));
+    add(traversal_counter(depth, 4), occupancy);
+    update_max(traversal_counter(depth, 5), occupancy);
+    if (occupancy >= 4) add(traversal_counter(depth, 6));
+    if (occupancy >= 16) add(traversal_counter(depth, 7));
+  }
   add(Counter::ParallelReservationOccupancySamples);
   add(Counter::ParallelReservationOccupancySum, occupancy);
   update_max(Counter::ParallelReservationOccupancyMax, occupancy);

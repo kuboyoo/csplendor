@@ -48,6 +48,7 @@ void test_counter_contract() {
   CSPLENDOR_PERF_RESERVATION_OCCUPANCY(++unevaluated);
   CSPLENDOR_PERF_LIVE_RESERVATION_INSERT(++unevaluated, ++unevaluated);
   CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerErrorAtomicIncrements, ++unevaluated);
+  CSPLENDOR_PERF_TRAVERSAL_DEPTH(++unevaluated);
   check(unevaluated == 0);
 #endif
 
@@ -199,5 +200,35 @@ int main() {
   test_counter_contract();
   test_detailed_instrumentation_contract();
   test_concurrent_counter_updates();
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+  csplendor::perf::reset();
+  check(csplendor::perf::traversal_depth() == -1);
+  {
+    CSPLENDOR_PERF_TRAVERSAL_DEPTH(0);
+    CSPLENDOR_PERF_RESERVATION_OCCUPANCY(32);
+    csplendor::perf::record_traversal_lock(0, true, 10);
+    csplendor::perf::record_traversal_lock(0, false, 20);
+    {
+      CSPLENDOR_PERF_TRAVERSAL_DEPTH(1);
+      CSPLENDOR_PERF_RESERVATION_OCCUPANCY(4);
+    }
+    check(csplendor::perf::traversal_depth() == 0);
+    std::thread worker([] {
+      check(csplendor::perf::traversal_depth() == -1);
+      CSPLENDOR_PERF_TRAVERSAL_DEPTH(9);
+      CSPLENDOR_PERF_RESERVATION_OCCUPANCY(1);
+    });
+    worker.join();
+  }
+  check(csplendor::perf::traversal_depth() == -1);
+  const auto levels = csplendor::perf::snapshot();
+  check(levels.get(Counter::ParallelTraversalRootReservationMax) == 32);
+  check(levels.get(Counter::ParallelTraversalRootReservationSixteenPlus) == 1);
+  check(levels.get(Counter::ParallelTraversalRootLockAcquisitions) == 1);
+  check(levels.get(Counter::ParallelTraversalRootLockWaitNanoseconds) == 10);
+  check(levels.get(Counter::ParallelTraversalRootLockHoldNanoseconds) == 20);
+  check(levels.get(Counter::ParallelTraversalDepthOneReservationMax) == 4);
+  check(levels.get(Counter::ParallelTraversalDeepReservationMax) == 1);
+#endif
   return 0;
 }

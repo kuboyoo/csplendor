@@ -896,6 +896,7 @@ private:
     TreeKey current_key = root.root_key;
 
     for (int depth = 0; depth < MAX_DEPTH; ++depth) {
+      CSPLENDOR_PERF_TRAVERSAL_DEPTH(depth);
       if (stop_requested.load(std::memory_order_acquire))
         return;
       auto node = tree.find_or_create(current_key);
@@ -1031,6 +1032,7 @@ private:
     TreeKey current_key = root.root_key;
 
     for (int depth = 0; depth < MAX_DEPTH; ++depth) {
+      CSPLENDOR_PERF_TRAVERSAL_DEPTH(depth);
       auto node = tree.find_or_create(current_key);
       if (mcts_internal::GameAdapter::is_terminal(game)) {
         const Value value = checked_value(
