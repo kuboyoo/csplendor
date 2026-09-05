@@ -31,3 +31,8 @@ native oracle: 全699840個0..5入力、全2035有効pattern、uint8境界0..255
 Python bindingも全pattern/ID/無効入力を確認。採用候補のみfull native/Python/ASan+UBSan。
 並列共有可変stateを導入しない。hardware perf不可はN/A、権限を変更しない。
 性能基準を下げず、未達なら試作をdocへ保存して撤去。最後に日本語commitと作業branchへ通常push。
+
+完了: 初案と、汎用dispatchへのinlineを抑えた一度の修正版を検証した。
+修正版はprimaryを通過したが自己対戦guardを満たさず、REJECT_AND_REVERT。
+計画のprimary/閾値を変更していない。網羅oracleと公開経路benchmarkを保持。
+[最終報告](phase5d_v3_payment_20260906.md)を参照。

@@ -57,9 +57,12 @@ def configure_build(label, directory, source=ROOT, flags=(), targets=('benchmark
 
 
 def build():
-    targets = ('benchmark_engine_hotpaths', 'v3_payment_dp_unit', 'encoding_schema_unit',
+    prototype = (ROOT / 'src/v3_payment_dp.h').exists()
+    unit = 'v3_payment_dp_unit' if prototype else 'v3_payment_codec_unit'
+    targets = ('benchmark_engine_hotpaths', unit, 'encoding_schema_unit',
                'rule_query_unit', 'mcts_optimization_unit')
-    for label, flags in [('release', []), ('reference', ['-DCSPLENDOR_V3_PAYMENT_DP=OFF']),
+    for label, flags in [('release', []),
+                         *([('reference', ['-DCSPLENDOR_V3_PAYMENT_DP=OFF'])] if prototype else []),
                          ('diagnostic', ['-DCSPLENDOR_PERF_INSTRUMENTATION=ON'])]:
         directory = ROOT / ('build/5d-' + label)
         configure_build(label, directory, flags=flags, targets=targets)
@@ -77,7 +80,8 @@ def deploy():
 
 
 def sanitizers():
-    targets = ('v3_payment_dp_unit', 'encoding_schema_unit', 'rule_query_unit', 'mcts_optimization_unit')
+    unit = 'v3_payment_dp_unit' if (ROOT / 'src/v3_payment_dp.h').exists() else 'v3_payment_codec_unit'
+    targets = (unit, 'encoding_schema_unit', 'rule_query_unit', 'mcts_optimization_unit')
     directory = ROOT / 'build/5d-asan'
     configure_build('asan', directory, flags=['-DCSPLENDOR_SANITIZER=address-undefined'], targets=targets)
     run('unit_asan', ['ctest', '--test-dir', str(directory), '--output-on-failure',

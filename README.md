@@ -133,6 +133,12 @@ state確認と選択のlock統合はいずれも事前の主要並列探索5%改
 既存の探索実装を保持し、PERF専用の深さ別lock・予約占有診断と検証記録を追加しています。
 詳細は[Phase 4C測定記録](doc/performance_experiments/phase4c_concurrency_20260906.md)を参照してください。
 
+Phase 5DのV3 payment静的DPも試作・評価しました。修正版はV3マスク生成で1.127倍
+（独立再測定1.135倍）になりましたが、V3自己対戦の回帰基準を満たさず撤去しました。
+本番codecは従来方式のままです。V3公開経路のベンチマーク、全支払いパターン・byte境界・
+全IDの網羅テストを追加しました。48手MCTSや実NNの高速化を意味しません。
+詳細は[Phase 5D測定記録](doc/performance_experiments/phase5d_v3_payment_20260906.md)を参照してください。
+
 ### 実験的な並列MCTS
 
 共有tree並列探索はStage Bのexperimental opt-inです。既定の`num_threads=1`はworker queueを
