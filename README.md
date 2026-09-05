@@ -113,6 +113,12 @@ Phase 3D-1では、visible-only詰み探索の通常着手を軽量なRAII復元
 5手/7手詰み・全回帰・ASan/UBSanを検証済みです。採用範囲と棄却判断の詳細は
 [Phase 3D-1測定記録](doc/performance_experiments/phase3d1_normal_rollback_20260905.md)を参照してください。
 
+Phase 3D-2/3D-3は採否評価を完了しました。対象山だけを復元する3D-2の試作は代表deepで
+1.012倍（独立再測定1.010倍）にとどまり、採用基準未達で撤去しました。3D-3は代表探索で
+購入ごとの実訪問めくれ数が1枚だったため、prefix共用を導入していません。
+既存の高速化を維持し、PERF専用診断と記録のみ追加しています。追加の高速化は主張しません。
+詳細は[Phase 3D-2/3D-3測定記録](doc/performance_experiments/phase3d23_reveal_transactions_20260905.md)を参照してください。
+
 ### 実験的な並列MCTS
 
 共有tree並列探索はStage Bのexperimental opt-inです。既定の`num_threads=1`はworker queueを

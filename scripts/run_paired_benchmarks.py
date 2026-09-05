@@ -133,6 +133,16 @@ _CORRECTNESS_COUNTERS = frozenset(
 )
 _MEASUREMENT_COUNTERS = frozenset(
     {
+        "solver_deck_rollback_captures",
+        "solver_deck_rollback_saved_cards",
+        "solver_visible_purchase_refills",
+        "solver_visible_purchase_generated",
+        "solver_visible_purchase_visited",
+        "solver_visible_purchase_visited_0",
+        "solver_visible_purchase_visited_1",
+        "solver_visible_purchase_visited_2_to_4",
+        "solver_visible_purchase_visited_5_plus",
+        "solver_visible_purchase_apply_calls",
         "solver_compact_rollback_captures",
         "solver_full_rollback_captures",
         "solver_compact_rollback_restores",

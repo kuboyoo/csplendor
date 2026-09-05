@@ -285,6 +285,23 @@ def test_manifest_and_native_metadata_mismatches_are_rejected():
         runner.validate_record_pair(instrumented, portable)
 
 
+@pytest.mark.parametrize("counter", [
+    "solver_visible_purchase_refills", "solver_visible_purchase_generated",
+    "solver_visible_purchase_visited", "solver_visible_purchase_visited_0",
+    "solver_visible_purchase_visited_1", "solver_visible_purchase_visited_2_to_4",
+    "solver_visible_purchase_visited_5_plus", "solver_visible_purchase_apply_calls",
+])
+def test_purchase_visit_counters_are_diagnostics_not_logical_work(counter):
+    baseline = _record(counters={"instrumentation_enabled": True, counter: 30})
+    candidate = _record(counters={"instrumentation_enabled": True, counter: 1})
+    runner.validate_record_pair(baseline, candidate)
+    comparison = runner._comparison_from_paired_samples(
+        [{"A": {"records": [baseline]}, "B": {"records": [candidate]}}],
+        bootstrap_iterations=20,
+    )
+    assert comparison[0]["counters"][counter]["classification"] == "measurement"
+
+
 def test_counter_contract_separates_correctness_and_measurement():
     correctness_a = _record(
         counters={"instrumentation_enabled": False, "legal_moves": 20}

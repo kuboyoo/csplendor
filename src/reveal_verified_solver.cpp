@@ -369,6 +369,39 @@ private:
     return true;
   }
 
+  // Count visits even on early visitor cutoff or exception. The generated
+  // list alone is NOT evidence that purchase-common work can be amortized.
+  // The entire scope vanishes when instrumentation is disabled.
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+  class RefillVisitCounter {
+  public:
+    RefillVisitCounter(const Action &action, size_t generated) noexcept {
+      purchase_ = action.type == PURCHASE;
+      if (purchase_) {
+        CSPLENDOR_PERF_INC(SolverVisiblePurchaseRefills);
+        CSPLENDOR_PERF_ADD(SolverVisiblePurchaseGenerated, generated);
+      }
+    }
+    void visit() noexcept {
+      if (purchase_) {
+        ++visited_;
+        CSPLENDOR_PERF_INC(SolverVisiblePurchaseVisited);
+      }
+    }
+    ~RefillVisitCounter() {
+      if (purchase_) {
+        if (visited_ == 0) CSPLENDOR_PERF_INC(SolverVisiblePurchaseVisited0);
+        else if (visited_ == 1) CSPLENDOR_PERF_INC(SolverVisiblePurchaseVisited1);
+        else if (visited_ <= 4) CSPLENDOR_PERF_INC(SolverVisiblePurchaseVisited2To4);
+        else CSPLENDOR_PERF_INC(SolverVisiblePurchaseVisited5Plus);
+      }
+    }
+  private:
+    size_t visited_ = 0;
+    bool purchase_ = false;
+  };
+#endif
+
   bool apply_action_tracked(Game &game, const Action &action) {
     return apply_tracked(game,
                          [&] { return game.apply_trusted(action, false); });
@@ -769,12 +802,18 @@ private:
     visible_refill_cards(game, action, level, slot, cards);
     if (cards.empty())
       return false;
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    RefillVisitCounter visits(action, cards.size());
+#endif
     ScopedBranchRollback rollback(*this, game);
     for (int card_id : cards) {
       rollback.restore();
       rollback.mark_mutated();
       if (!apply_visible_refill_outcome(game, action, level, slot, card_id))
         continue;
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+      visits.visit();
+#endif
       if (!visitor(card_id))
         return false;
     }
@@ -1031,7 +1070,11 @@ private:
   }
 
   bool apply_visible_refill_outcome(Game &game, const Action &action, int level,
-                                    int slot, int card_id) {
+                                  int slot, int card_id) {
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    if (action.type == PURCHASE)
+      CSPLENDOR_PERF_INC(SolverVisiblePurchaseApplyCalls);
+#endif
     if (!is_valid_card_id(card_id) || get_card(card_id).level - 1 != level ||
         slot < 0 || slot >= Board::CARDS_PER_LEVEL ||
         !prepare_reveal_card(game, level, card_id))

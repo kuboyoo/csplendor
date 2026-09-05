@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.13)
+project(purchase_visit_cost_adapter LANGUAGES CXX)
+set(CSPLENDOR_BUILD_PYTHON_MODULE OFF CACHE BOOL "" FORCE)
+set(CSPLENDOR_BUILD_NATIVE_TESTS OFF CACHE BOOL "" FORCE)
+set(CSPLENDOR_PERF_INSTRUMENTATION ON CACHE BOOL "" FORCE)
+add_subdirectory("${ENGINE_SOURCE_ROOT}" engine)
+add_executable(purchase_visit_cost ../phase3d3_purchase_visit_cost_20260905.cpp)
+target_link_libraries(purchase_visit_cost PRIVATE csplendor_core csplendor_core_config)
+target_compile_definitions(purchase_visit_cost PRIVATE
+    CSPLENDOR_EXISTING_BENCHMARK="${ENGINE_SOURCE_ROOT}/scripts/benchmark_engine_hotpaths.cpp")

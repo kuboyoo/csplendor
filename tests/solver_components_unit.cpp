@@ -80,6 +80,46 @@ void test_public_solver_value_contracts() {
   }
 }
 
+void test_purchase_visit_diagnostics() {
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+  using csplendor::perf::Counter;
+  // An explicit editor fixture keeps this test independent of self-play. The
+  // diagnostic belongs to the common enumeration path, including fallback.
+  for (int count : {1, 3, 20}) {
+    Game game(42);
+    game.board.decks[0].count = count;
+    auto &player = game.board.players[0];
+    player.bonuses = {10, 10, 10, 10, 10};
+    player.sync_packed();
+    game.board.invalidate_hash();
+    Action purchase;
+    purchase.type = PURCHASE;
+    purchase.card_id = game.board.visible[0][0];
+    require(game.is_legal(purchase), "diagnostic fixture purchase is illegal");
+    for (size_t edge_limit : {size_t(1), size_t(1000)}) {
+      RevealVerifiedSolver solver(0, 3, 0, 0.0, {}, false, 100000, 500000,
+                                  purchase.pack(), false, 0, false, true);
+      csplendor::perf::reset();
+      const auto frontier = solver.split_root(game, edge_limit);
+      const auto perf = csplendor::perf::snapshot();
+      const auto generated = perf.get(Counter::SolverVisiblePurchaseGenerated);
+      const auto visited = perf.get(Counter::SolverVisiblePurchaseVisited);
+      require(generated == static_cast<uint64_t>(count), "generated count changed");
+      require(visited == std::min(generated, edge_limit + 1), "cutoff visits were miscounted");
+      require(perf.get(Counter::SolverVisiblePurchaseRefills) == 1 &&
+                  perf.get(Counter::SolverVisiblePurchaseApplyCalls) == visited,
+              "purchase scope/apply count changed");
+      require(perf.get(Counter::SolverVisiblePurchaseVisited0) == 0 &&
+                  perf.get(Counter::SolverVisiblePurchaseVisited1) == (visited == 1) &&
+                  perf.get(Counter::SolverVisiblePurchaseVisited2To4) == (visited >= 2 && visited <= 4) &&
+                  perf.get(Counter::SolverVisiblePurchaseVisited5Plus) == (visited >= 5),
+              "exception/full-enumeration visit histogram changed");
+      require(frontier.complete == (edge_limit >= generated), "frontier limit contract changed");
+    }
+  }
+#endif
+}
+
 void test_common_search_values() {
   SearchLimit limit(3, 0.0);
   limit.reset();
@@ -874,6 +914,7 @@ int main() {
   try {
     test_public_solver_value_contracts();
     test_recursive_scratch_lifetime();
+    test_purchase_visit_diagnostics();
     test_common_search_values();
     test_reveal_score_order_and_locality();
     test_defender_reserve_order_depends_on_return_colour();
