@@ -39,3 +39,7 @@ S0は決定的trace/float/ledger、S1はcompleted/evaluated/path steps/owner-wai
 実NN不使用を明記し、棋力改善を主張しない。perf不可ならN/A、権限設定は変更しない。
 最終統合は共通基準と直接A/Bし、倍率を乗算しない。棄却試作とrawはdocへ保存して撤去。
 最後に日本語commitと作業branchへの通常push。mainへの直接push、force、stash/resetは禁止。
+
+完了記録 (2026-09-06): 3件とも主要5%基準未達でREJECT_AND_REVERT。
+事前基準は変更していない。PERF専用の深さ診断を保持し、全体テストを実施した。
+[採否・測定・再現記録](phase4c_concurrency_20260906.md)を参照。

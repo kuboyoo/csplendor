@@ -127,6 +127,12 @@ Phase 3D-2/3D-3は採否評価を完了しました。対象山だけを復元�
 未展開ノードを大量に保持する場合のメモリ増加を含む詳細とreferenceビルド方法は
 [5B-R/4B-1測定記録](doc/performance_experiments/phase5br4b1_mcts_state_records_20260905.md)を参照してください。
 
+Phase 4C-1〜4C-3は試作と採否評価を完了しました。metrics分散、予約tokenのinline格納、
+state確認と選択のlock統合はいずれも事前の主要並列探索5%改善基準に届かず、撤去しました。
+最後のlock統合案は1.048倍（独立再測定1.043倍）でしたが、採用後の速度としては扱いません。
+既存の探索実装を保持し、PERF専用の深さ別lock・予約占有診断と検証記録を追加しています。
+詳細は[Phase 4C測定記録](doc/performance_experiments/phase4c_concurrency_20260906.md)を参照してください。
+
 ### 実験的な並列MCTS
 
 共有tree並列探索はStage Bのexperimental opt-inです。既定の`num_threads=1`はworker queueを

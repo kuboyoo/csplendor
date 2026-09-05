@@ -98,8 +98,52 @@ def diagnostics():
             '--warmup', '100', '--seed', '42', *extra])
 
 
+def deploy():
+    """Test the shipped source; assert Python enablement did not relink timing code."""
+    import pybind11
+    before = hashlib.sha256((RELEASE / 'benchmark_engine_hotpaths').read_bytes()).hexdigest()
+    checked('configure_deploy', ['cmake', '-S', str(ROOT), '-B', str(RELEASE),
+        '-DCSPLENDOR_BUILD_PYTHON_MODULE=ON', '-DPython_EXECUTABLE=' + sys.executable,
+        '-Dpybind11_DIR=' + pybind11.get_cmake_dir(),
+        '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + str(ROOT / 'csplendor')])
+    checked('build_deploy', ['cmake', '--build', str(RELEASE), '-j4'], timeout=1200)
+    after = hashlib.sha256((RELEASE / 'benchmark_engine_hotpaths').read_bytes()).hexdigest()
+    save('deployment_binary_identity.json', {'before': before, 'after': after, 'identical': before == after})
+    assert before == after
+    checked('native_full', ['ctest', '--test-dir', str(RELEASE), '--output-on-failure', '-j2'])
+    checked('python_full', [sys.executable, '-c',
+        "import csplendor._csplendor as n;print(n.__file__,flush=True);"
+        "import pytest;raise SystemExit(pytest.main(['tests']))"], timeout=1200)
+    checked('python_performance', [sys.executable, '-m', 'pytest', '-m', 'performance', 'tests'])
+    checked('python_compile', [sys.executable, '-m', 'py_compile',
+        *map(str, sorted((ROOT / 'csplendor').glob('*.py')))])
+
+
+def sanitizers():
+    # All three speed prototypes were rejected. Exercise the actually retained
+    # depth/TLS instrumentation, not a PERF-OFF build with those sites removed.
+    assert PHASE == 'final'
+    for label, sanitizer, targets in (
+        ('asan-perf', 'address-undefined', ['perf_counters_unit', 'mcts_parallel_unit',
+         'mcts_ownership_unit', 'mcts_scheduler_lifecycle', 'mcts_scheduler_limits',
+         'mcts_scheduler_hidden', 'mcts_parallel_replay', 'mcts_parallel_stress']),
+        ('tsan-perf', 'thread', ['perf_counters_unit', 'mcts_ownership_unit',
+         'mcts_parallel_stress', 'mcts_scheduler_limits']),
+    ):
+        directory = ROOT / ('build/' + PHASE + '-' + label)
+        checked('configure_' + label, ['cmake', '-S', str(ROOT), '-B', str(directory),
+            '-DCMAKE_BUILD_TYPE=Release', '-DCSPLENDOR_BUILD_NATIVE_TESTS=ON',
+            '-DCSPLENDOR_BUILD_PYTHON_MODULE=OFF', '-DCSPLENDOR_PERF_INSTRUMENTATION=ON',
+            '-DCSPLENDOR_SANITIZER=' + sanitizer])
+        checked('build_' + label, ['cmake', '--build', str(directory), '-j4', '--target', *targets], timeout=1200)
+        # Keep failures verbatim. Unsupported runtime is N/A, not a passing test.
+        run('unit_' + label, ['ctest', '--test-dir', str(directory), '--output-on-failure',
+            '-R', '^(' + '|'.join(targets) + ')$'], timeout=600)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('stage', choices=['build', 'diagnostics', 'smoke', 'formal', 'holdout'])
+    parser.add_argument('stage', choices=['build', 'diagnostics', 'smoke', 'formal', 'holdout',
+                                        'deploy', 'sanitizers'])
     args = parser.parse_args()
     measure(args.stage) if args.stage in {'smoke', 'formal', 'holdout'} else globals()[args.stage]()
