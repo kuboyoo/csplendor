@@ -540,6 +540,7 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
         "CSPLENDOR_CARD_EQUIVALENCE_CLASSES:BOOL=OFF\n"
         "CSPLENDOR_COMPACT_FORCED_ACTIONS:BOOL=OFF\n"
         "CSPLENDOR_COMPACT_SOLVER_REASONS:BOOL=OFF\n"
+        "CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES:BOOL=OFF\n"
         "CSPLENDOR_CPU_TARGET:STRING=portable\n"
         "CSPLENDOR_CLOSED_FORM_RETURN_COUNT:BOOL=OFF\n"
         "CSPLENDOR_INCREMENTAL_EXACT_HASH:BOOL=OFF\n"
@@ -574,6 +575,10 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
     )
     assert metadata["allowlisted_entries"]["CSPLENDOR_COMPACT_FORCED_ACTIONS"] == "OFF"
     assert metadata["allowlisted_entries"]["CSPLENDOR_COMPACT_SOLVER_REASONS"] == "OFF"
+    assert (
+        metadata["allowlisted_entries"]["CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES"]
+        == "OFF"
+    )
     assert (
         metadata["allowlisted_entries"]["CMAKE_CXX_FLAGS_RELEASE"][
             "redacted_token_count"
@@ -790,6 +795,30 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
     )
     assert (
         compact_reasons_metadata["benchmark_build_fingerprint_sha256"]
+        == metadata["benchmark_build_fingerprint_sha256"]
+    )
+
+    compact_tt_cache = tmp_path / "compact-tt-CMakeCache.txt"
+    compact_tt_cache.write_text(
+        cache.read_text(encoding="utf-8").replace(
+            "CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES:BOOL=OFF",
+            "CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES:BOOL=ON",
+        ),
+        encoding="utf-8",
+    )
+    compact_tt_metadata, _ = manifest_tool._cmake_build_metadata(compact_tt_cache)
+    assert (
+        compact_tt_metadata["allowlisted_entries"][
+            "CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES"
+        ]
+        == "ON"
+    )
+    assert (
+        compact_tt_metadata["allowlisted_fingerprint_sha256"]
+        != metadata["allowlisted_fingerprint_sha256"]
+    )
+    assert (
+        compact_tt_metadata["benchmark_build_fingerprint_sha256"]
         == metadata["benchmark_build_fingerprint_sha256"]
     )
 

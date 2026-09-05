@@ -1,0 +1,171 @@
+{
+  "schema": "csplendor.phase3c_solver_tt_compaction_diagnostics.v1",
+  "measurement_date": "2026-09-05",
+  "layout_bytes": {
+    "raw_archives": {
+      "A_compact_off": "doc/performance_experiments/raw/phase3c/stage1_layout_off_20260905.json.gz",
+      "B_compact_on": "doc/performance_experiments/raw/phase3c/stage1_layout_on_20260905.json.gz"
+    },
+    "A_compact_off": {
+      "reveal_state_key": 56,
+      "reveal_depth_key": 64,
+      "reveal_exact_state_key": 56,
+      "reveal_exact_depth_key": 64,
+      "reveal_memo_entry": 56,
+      "reveal_persistent_entry": 56,
+      "reveal_memo_value": 120,
+      "reveal_persistent_value": 120,
+      "reveal_proof_node_value": 72,
+      "visible_state_key": 16,
+      "visible_depth_key": 24,
+      "visible_memo_entry": 32,
+      "visible_force_entry": 32,
+      "visible_force_bounds": 72,
+      "visible_memo_value": 48,
+      "visible_force_value": 56,
+      "visible_bounds_value": 88
+    },
+    "B_compact_on": {
+      "reveal_state_key": 48,
+      "reveal_depth_key": 56,
+      "reveal_exact_state_key": 32,
+      "reveal_exact_depth_key": 40,
+      "reveal_memo_entry": 24,
+      "reveal_persistent_entry": 32,
+      "reveal_memo_value": 80,
+      "reveal_persistent_value": 72,
+      "reveal_proof_node_value": 64,
+      "visible_state_key": 16,
+      "visible_depth_key": 24,
+      "visible_memo_entry": 16,
+      "visible_force_entry": 16,
+      "visible_force_bounds": 40,
+      "visible_memo_value": 32,
+      "visible_force_value": 40,
+      "visible_bounds_value": 56
+    },
+    "public_layout_unchanged": {
+      "action": 21,
+      "board": 392,
+      "game": 448
+    }
+  },
+  "stage1_reprofile": {
+    "workload": "exact_reveal",
+    "fixture": "hidden_reserve",
+    "instrumentation": true,
+    "nodes": 418336,
+    "legal_moves": 2119495,
+    "memo_hits": 60855,
+    "memoized_states": 194950,
+    "tt_probes": 291703,
+    "tt_hits": 60865,
+    "tt_stores": 194950,
+    "full_key_equality_calls": 182529,
+    "mean_equality_calls_per_probe": 0.6257357654874993,
+    "equality_call_histogram": {
+      "zero": 144484,
+      "one": 118875,
+      "two": 22549,
+      "three_to_four": 5663,
+      "five_plus": 132
+    },
+    "equality_call_histogram_percent": {
+      "zero": 49.5312012560721,
+      "one": 40.75206631402488,
+      "two": 7.730122761850238,
+      "three_to_four": 1.9413581622403608,
+      "five_plus": 0.0452515058124188
+    },
+    "p99_bucket": "three_to_four",
+    "histogram_semantics": "unordered_map full-key equality calls, not open-addressing slot probes",
+    "global_allocation_calls": 3290936,
+    "global_allocation_bytes": 475457143,
+    "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_reprofile_exact_hidden_instrumented_20260905.json.gz"
+  },
+  "gprof": {
+    "samples": 73,
+    "tt_map_operator_self_samples": 0,
+    "tt_map_operator_callgraph_percent": 0.6,
+    "observed_hot_areas": [
+      "visible refill card ordering",
+      "attacker action scoring",
+      "legal move generation"
+    ],
+    "caveat": "The optimized profile has a low sample count and apparent identical-code-folding aliases, so symbol percentages are supporting evidence only.",
+    "raw_report": "doc/performance_experiments/raw/phase3c/stage1_gprof_exact_hidden_20260905.txt.gz",
+    "raw_gmon": "doc/performance_experiments/raw/phase3c/stage1_gprof_exact_hidden_20260905.gmon.out.gz",
+    "raw_run": "doc/performance_experiments/raw/phase3c/stage1_gprof_run_exact_hidden_20260905.json.gz"
+  },
+  "hardware_perf": {
+    "available": false,
+    "reason": "perf_event_paranoid=4; no supported events found",
+    "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_perf_unavailable_20260905.log.gz"
+  },
+  "stage2": {
+    "decision": "NOT_ENTERED",
+    "precondition": "unordered_map remains a material hotspot after Stage 1",
+    "precondition_satisfied": false,
+    "implementation_created": false,
+    "flat_table_specific_tests_run": false,
+    "reason": "TT lookup had no gprof self sample and only about 0.6% callgraph attribution; equality chains were short. A power-of-two flat table could also increase capacity-rounded RSS at 282879 states."
+  },
+  "correctness": {
+    "release_compact_off_ctest": {
+      "passed": 33,
+      "failed": 0,
+      "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_off_ctest_20260905.log.gz"
+    },
+    "release_compact_on_ctest": {
+      "passed": 33,
+      "failed": 0,
+      "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_on_ctest_20260905.log.gz"
+    },
+    "asan_ubsan_compact_on_ctest": {
+      "passed": 33,
+      "failed": 0,
+      "leak_detection": false,
+      "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_asan_ubsan_ctest_20260905.log.gz"
+    },
+    "python_full": {
+      "passed": 556,
+      "skipped": 2,
+      "deselected_performance": 4,
+      "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_python_pytest_20260905.log.gz"
+    },
+    "python_performance": {
+      "passed": 4,
+      "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_python_performance_pytest_20260905.log.gz"
+    },
+    "python_pycompile": {
+      "exit_status": 0,
+      "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_python_pycompile_20260905.log.gz"
+    },
+    "known_five_seven_and_proof_tests": {
+      "passed": 7,
+      "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_mate_5_7_proof_pytest_20260905.log.gz"
+    },
+    "proof_dag": {
+      "proven": true,
+      "complete": true,
+      "validated": true,
+      "nodes": 37,
+      "edges": 36,
+      "digest": "7e76e5820a15c692",
+      "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_proof_dag_reveal_heavy_20260905.json.gz"
+    },
+    "collision_contract": {
+      "container": "std::unordered_map",
+      "hasher": "constant zero",
+      "distinct_full_keys": 128,
+      "lookup_verified": true,
+      "duplicate_update_verified": true
+    },
+    "semantic_equality": "All correctness/configuration counters and all public semantic fields were identical in every A/B pair."
+  },
+  "benchmark_contract_changes": {
+    "solver_tt": "Now uses the production exact key/hash/persistent-entry types rather than a surrogate key/value.",
+    "solver_state_key": "Now uses the production reveal key and packed metadata accessor.",
+    "comparison_rule": "Do not compare these two microbenchmark absolute rates or digests directly with Phase 3B."
+  }
+}

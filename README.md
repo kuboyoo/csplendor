@@ -86,6 +86,13 @@ CPU 1論理コア固定で測定しました。5手詰め収集局面の初手�
 検査し、wall-clockと外部cancelだけを64 nodeごとに検査します。node 0では必ず検査するため、
 事前cancelと即時timeoutの挙動は維持されます。
 
+2026-09-05のPhase 3Cでは、詰み探索の置換表を用途別に圧縮しました。portable Releaseの
+paired A/Bで、exact 5手局面は3.91%高速化し、exact/visible solverのpeak RSSは局面により
+11.91%〜27.38%減少しました。production型TT microは28.40%高速化した一方、key生成単体は
+2.33%低下しています。探索量・候補順・5手/7手詰み・証明DAGは同一です。測定fixtureと方法が
+上表とは異なるため倍率は合算していません。詳細は
+[Phase 3C測定記録](doc/performance_experiments/phase3c_solver_tt_compaction_20260905.md)を参照してください。
+
 ### 実験的な並列MCTS
 
 共有tree並列探索はStage Bのexperimental opt-inです。既定の`num_threads=1`はworker queueを

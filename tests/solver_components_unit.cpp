@@ -3,28 +3,32 @@
 #include "solver_action_filter.h"
 #include "solver_card_equivalence.h"
 #include "solver_path.h"
+#include "solver_tt_types.h"
 #include "solver_types.h"
 #include "visible_only_solver.h"
 
 #include <algorithm>
 #include <chrono>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <type_traits>
+#include <unordered_map>
 
 namespace {
 
 using csplendor::solver_internal::ActionOrderKey;
 using csplendor::solver_internal::CardEquivalenceMask;
+using csplendor::solver_internal::ForceStatus;
 using csplendor::solver_internal::HiddenOutcomeCatalog;
 using csplendor::solver_internal::OracleActionMetadata;
 using csplendor::solver_internal::ProofDagBuildAborted;
+using csplendor::solver_internal::RecursionPath;
 using csplendor::solver_internal::RevealProofDagBuilder;
 using csplendor::solver_internal::RevealSearchState;
-using csplendor::solver_internal::RecursionPath;
+using csplendor::solver_internal::ScopedPathEntry;
 using csplendor::solver_internal::SearchLimit;
 using csplendor::solver_internal::SearchLimitExceeded;
-using csplendor::solver_internal::ScopedPathEntry;
 using csplendor::solver_internal::StateKeyCore;
 using csplendor::solver_internal::ZeroSumScore;
 
@@ -78,6 +82,251 @@ void test_common_search_values() {
   require(purchase < take, "shared action ordering changed");
 }
 
+void test_solver_tt_layout_and_value_contracts() {
+  using namespace csplendor::solver_internal;
+  const StateKeyCore core{123, 1, 2, 3, 4, true, 0};
+  const RevealStateKey key(core, 5, 6, 7, 8, 2, 3);
+  const RevealStateKey same(core, 5, 6, 7, 8, 2, 3);
+  require(key == same &&
+              RevealStateKeyHash{}(key) == RevealStateKeyHash{}(same),
+          "reveal TT key equality/hash contract changed");
+  require(key != RevealStateKey(core, 9, 6, 7, 8, 2, 3) &&
+              key != RevealStateKey(core, 5, 9, 7, 8, 2, 3) &&
+              key != RevealStateKey(core, 5, 6, 9, 8, 2, 3) &&
+              key != RevealStateKey(core, 5, 6, 7, 9, 2, 3) &&
+              key != RevealStateKey(core, 5, 6, 7, 8, 4, 3) &&
+              key != RevealStateKey(core, 5, 6, 7, 8, 2, 4),
+          "reveal TT key omitted a semantic field");
+  require(key != RevealStateKey(StateKeyCore{124, 1, 2, 3, 4, true, 0}, 5, 6, 7,
+                                8, 2, 3) &&
+              key != RevealStateKey(StateKeyCore{123, 2, 2, 3, 4, true, 0}, 5,
+                                    6, 7, 8, 2, 3) &&
+              key != RevealStateKey(StateKeyCore{123, 1, 3, 3, 4, true, 0}, 5,
+                                    6, 7, 8, 2, 3) &&
+              key != RevealStateKey(StateKeyCore{123, 1, 2, 4, 4, true, 0}, 5,
+                                    6, 7, 8, 2, 3) &&
+              key != RevealStateKey(StateKeyCore{123, 1, 2, 3, 5, true, 0}, 5,
+                                    6, 7, 8, 2, 3) &&
+              key != RevealStateKey(StateKeyCore{123, 1, 2, 3, 4, false, 0}, 5,
+                                    6, 7, 8, 2, 3) &&
+              key != RevealStateKey(StateKeyCore{123, 1, 2, 3, 4, true, 1}, 5,
+                                    6, 7, 8, 2, 3),
+          "reveal TT packed metadata omitted a core field");
+
+  const RevealStateKey default_key;
+  const RevealStateKey constructed_default(StateKeyCore{}, 0, 0, 0, 0, 0, 0);
+  require(default_key == constructed_default,
+          "reveal TT default key differs from its logical default state");
+
+  const RevealStateKey exact_source(core, 5, 6, 0, 0, 2, 3);
+  const RevealExactDepthStateKey exact_key(exact_source, 7);
+  const RevealExactDepthStateKey exact_same(exact_source, 7);
+  require(exact_key == exact_same &&
+              RevealExactDepthStateKeyHash{}(exact_key) ==
+                  RevealExactDepthStateKeyHash{}(exact_same),
+          "exact reveal TT key equality/hash contract changed");
+#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
+  require(RevealExactStateKey{} == RevealExactStateKey(constructed_default),
+          "exact reveal TT default key differs from its logical default state");
+  bool rejected_non_root_independent = false;
+  try {
+    (void)RevealExactStateKey(key);
+  } catch (const std::invalid_argument &) {
+    rejected_non_root_independent = true;
+  }
+  require(rejected_non_root_independent,
+          "exact reveal TT key accepted acquired-hidden state");
+#endif
+
+  RevealMemoEntry transient(ForceStatus::PROVEN, 42, 17, true, 70000, false);
+  require(transient.status() == ForceStatus::PROVEN &&
+              transient.action_code() == 42 && transient.reveal_card() == 17 &&
+              transient.has_action() && transient.action_count() == 70000 &&
+              !transient.replayable(),
+          "transient reveal TT entry lost a field");
+  transient.set_status(ForceStatus::REFUTED);
+  transient.set_action_count(70001);
+  require(transient.status() == ForceStatus::REFUTED &&
+              transient.action_count() == 70001,
+          "transient reveal TT entry update changed semantics");
+
+  RevealPersistentEntry persistent(ForceStatus::PROVEN, 84, CARD_COUNT - 1,
+                                   true, MAX_MOVES, true);
+  const RevealPersistentEntry non_replayable(ForceStatus::REFUTED, 85, -1, true,
+                                             MAX_MOVES, false);
+  persistent.set_generation(UINT64_MAX - 1);
+  persistent.set_last_touched(UINT64_MAX);
+  require(persistent.status() == ForceStatus::PROVEN &&
+              persistent.action_code() == 84 &&
+              persistent.reveal_card() == CARD_COUNT - 1 &&
+              persistent.has_action() &&
+              persistent.action_count() == MAX_MOVES &&
+              persistent.replayable() && !non_replayable.replayable() &&
+              persistent.generation() == UINT64_MAX - 1 &&
+              persistent.last_touched() == UINT64_MAX,
+          "persistent reveal TT entry lost a field or counter width");
+
+  VisibleMemoEntry visible(1, VisibleMemoEntry::Bound::LOWER,
+#ifdef CSPLENDOR_COMPACT_SOLVER_REASONS
+                           VisibleEntryReason::CurrentPlayerWin,
+#else
+                           std::string(
+                               "current_player_can_force_visible_only_win"),
+#endif
+                           126, true, MAX_MOVES);
+  VisibleForceEntry forced(ForceStatus::REFUTED, 168, true, MAX_MOVES);
+  require(visible.score() == 1 &&
+              visible.bound() == VisibleMemoEntry::Bound::LOWER &&
+              visible.action_code() == 126 && visible.has_action() &&
+              visible.action_count() == MAX_MOVES &&
+              forced.status() == ForceStatus::REFUTED &&
+              forced.action_code() == 168 && forced.has_action() &&
+              forced.action_count() == MAX_MOVES,
+          "visible TT compact entry lost a field");
+
+#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
+  bool rejected_visible_count = false;
+  try {
+    (void)VisibleForceEntry(
+        ForceStatus::PROVEN, 0, false,
+        static_cast<size_t>(std::numeric_limits<uint16_t>::max()) + 1);
+  } catch (const std::overflow_error &) {
+    rejected_visible_count = true;
+  }
+  require(rejected_visible_count,
+          "compact visible TT accepted an overflowing action count");
+  if constexpr (sizeof(size_t) > sizeof(uint32_t)) {
+    bool rejected_persistent_count = false;
+    try {
+      (void)RevealPersistentEntry(
+          ForceStatus::PROVEN, 0, -1, false,
+          static_cast<size_t>(std::numeric_limits<uint32_t>::max()) + 1, true);
+    } catch (const std::overflow_error &) {
+      rejected_persistent_count = true;
+    }
+    require(rejected_persistent_count,
+            "compact persistent TT accepted an overflowing action count");
+  }
+#endif
+
+  const SolverTtLayoutMetrics layout = solver_tt_layout_metrics();
+#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
+  require(layout.reveal_exact_state_key < layout.reveal_state_key &&
+              layout.reveal_exact_depth_key < layout.reveal_depth_key &&
+              layout.reveal_memo_entry < layout.reveal_persistent_entry &&
+              layout.visible_force_entry < layout.reveal_persistent_entry &&
+              layout.visible_force_bounds < 2 * layout.reveal_persistent_entry,
+          "compact solver TT did not retain its portable size relationships");
+#if defined(__GLIBCXX__)
+  if constexpr (sizeof(void *) == 8) {
+    require(layout.reveal_state_key == 48 && layout.reveal_depth_key == 56 &&
+                layout.reveal_exact_state_key == 32 &&
+                layout.reveal_exact_depth_key == 40 &&
+                layout.reveal_memo_entry == 24 &&
+                layout.reveal_persistent_entry == 32 &&
+                layout.reveal_memo_value == 80 &&
+                layout.reveal_persistent_value == 72 &&
+                layout.reveal_proof_node_value == 64 &&
+                layout.visible_force_entry == 16 &&
+                layout.visible_force_bounds == 40 &&
+                layout.visible_force_value == 40 &&
+                layout.visible_bounds_value == 56,
+            "compact reveal TT layout exceeded its 64-bit libstdc++ budget");
+#ifdef CSPLENDOR_COMPACT_SOLVER_REASONS
+    require(layout.visible_memo_entry == 16 && layout.visible_memo_value == 32,
+            "compact visible minimax TT layout exceeded its 64-bit libstdc++ "
+            "budget");
+#else
+    require(layout.visible_memo_entry == 56 && layout.visible_memo_value == 72,
+            "string-reason visible minimax TT 64-bit libstdc++ baseline "
+            "changed");
+#endif
+  }
+#endif
+#else
+  require(layout.reveal_exact_state_key == layout.reveal_state_key &&
+              layout.reveal_exact_depth_key == layout.reveal_depth_key &&
+              layout.reveal_memo_entry == layout.reveal_persistent_entry,
+          "legacy solver TT aliases changed their portable layout contract");
+#if defined(__GLIBCXX__)
+  if constexpr (sizeof(void *) == 8) {
+    require(layout.reveal_state_key == 56 && layout.reveal_depth_key == 64 &&
+                layout.reveal_exact_state_key == 56 &&
+                layout.reveal_exact_depth_key == 64 &&
+                layout.reveal_memo_entry == 56 &&
+                layout.reveal_persistent_entry == 56 &&
+                layout.reveal_memo_value == 120 &&
+                layout.reveal_persistent_value == 120 &&
+                layout.reveal_proof_node_value == 72 &&
+                layout.visible_force_entry == 32 &&
+                layout.visible_force_bounds == 72 &&
+                layout.visible_force_value == 56 &&
+                layout.visible_bounds_value == 88,
+            "legacy reveal TT 64-bit libstdc++ baseline changed");
+#ifdef CSPLENDOR_COMPACT_SOLVER_REASONS
+    require(layout.visible_memo_entry == 32 && layout.visible_memo_value == 48,
+            "legacy visible minimax TT 64-bit libstdc++ baseline changed");
+#else
+    require(layout.visible_memo_entry == 64 && layout.visible_memo_value == 80,
+            "string-reason visible minimax TT 64-bit libstdc++ baseline "
+            "changed");
+#endif
+  }
+#endif
+#endif
+}
+
+void test_solver_tt_full_key_collision_contract() {
+  using namespace csplendor::solver_internal;
+  struct ConstantHash {
+    size_t operator()(const RevealDepthStateKey &) const noexcept { return 0; }
+  };
+
+  std::unordered_map<RevealDepthStateKey, int, ConstantHash> table;
+  table.reserve(128);
+  for (int index = 0; index < 128; ++index) {
+    const StateKeyCore core{static_cast<uint64_t>(1000 + index),
+                            static_cast<uint8_t>(index % 16),
+                            static_cast<uint8_t>((index + 1) % 16),
+                            static_cast<uint8_t>(index % 32),
+                            static_cast<uint8_t>((index + 3) % 32),
+                            (index & 1) != 0,
+                            static_cast<int8_t>((index % 3) - 1)};
+    const RevealStateKey state(
+        core, static_cast<uint64_t>(index), static_cast<uint64_t>(index) << 1,
+        static_cast<uint64_t>(index) << 2, static_cast<uint64_t>(index) << 3,
+        static_cast<uint8_t>(index % 4), static_cast<uint8_t>((index + 1) % 4));
+    table.emplace(RevealDepthStateKey{state, index % 9}, index);
+  }
+  require(table.size() == 128,
+          "solver TT collapsed distinct keys under hash collision");
+
+  for (int index = 0; index < 128; ++index) {
+    const StateKeyCore core{static_cast<uint64_t>(1000 + index),
+                            static_cast<uint8_t>(index % 16),
+                            static_cast<uint8_t>((index + 1) % 16),
+                            static_cast<uint8_t>(index % 32),
+                            static_cast<uint8_t>((index + 3) % 32),
+                            (index & 1) != 0,
+                            static_cast<int8_t>((index % 3) - 1)};
+    const RevealStateKey state(
+        core, static_cast<uint64_t>(index), static_cast<uint64_t>(index) << 1,
+        static_cast<uint64_t>(index) << 2, static_cast<uint64_t>(index) << 3,
+        static_cast<uint8_t>(index % 4), static_cast<uint8_t>((index + 1) % 4));
+    const RevealDepthStateKey key{state, index % 9};
+    const auto found = table.find(key);
+    require(found != table.end() && found->second == index,
+            "solver TT failed a full-key lookup under hash collision");
+  }
+
+  const RevealStateKey duplicate_state(StateKeyCore{1007, 7, 8, 7, 10, true, 0},
+                                       7, 14, 28, 56, 3, 0);
+  const RevealDepthStateKey duplicate{duplicate_state, 7};
+  table[duplicate] = 999;
+  require(table.size() == 128 && table.at(duplicate) == 999,
+          "solver TT collision update duplicated an existing key");
+}
+
 void test_recursive_path_lifo_guard() {
   using Path = RecursionPath<int, std::hash<int>>;
   Path path(4);
@@ -112,13 +361,13 @@ void test_recursive_path_lifo_guard() {
 }
 
 void test_card_equivalence_classes_match_tuple_oracle() {
-  const auto &classes =
-      csplendor::solver_internal::CARD_EQUIVALENCE_CLASSES;
+  const auto &classes = csplendor::solver_internal::CARD_EQUIVALENCE_CLASSES;
   require(classes.class_count > 0 && classes.class_count <= 128,
           "card equivalence class count does not fit its mask");
   for (int left = 0; left < CARD_COUNT; ++left) {
     for (int right = 0; right < CARD_COUNT; ++right) {
-      const bool same_class = classes.class_ids[left] == classes.class_ids[right];
+      const bool same_class =
+          classes.class_ids[left] == classes.class_ids[right];
       const bool same_tuple =
           csplendor::solver_internal::same_card_equivalence_tuple(
               get_card(left), get_card(right));
@@ -270,7 +519,7 @@ void test_incremental_reveal_search_state_and_fallback() {
     expected_deck.erase(std::find(expected_deck.begin(), expected_deck.end(),
                                   static_cast<uint8_t>(selected_card)));
     require(reserve_state.move_deck_card_to_back(reserve_game.board, level,
-                                                  selected_card),
+                                                 selected_card),
             "exact reveal card could not be moved to the pop position");
     const auto before = reserve_state.observe_before(reserve_game.board);
     Action reserve;
@@ -281,12 +530,11 @@ void test_incremental_reveal_search_state_and_fallback() {
     reserve_state.observe_after(before, reserve_game.board, reserve_catalog);
     require(std::equal(expected_deck.begin(), expected_deck.end(),
                        reserve_game.board.decks[level].begin()) &&
-                expected_deck.size() ==
-                    reserve_game.board.decks[level].size(),
+                expected_deck.size() == reserve_game.board.decks[level].size(),
             "exact reveal changed the remaining physical deck order");
-    require(reserve_state.matches_reference(reserve_game.board,
-                                            reserve_catalog),
-            "exact deck-reserve sidecar diverged from its oracle");
+    require(
+        reserve_state.matches_reference(reserve_game.board, reserve_catalog),
+        "exact deck-reserve sidecar diverged from its oracle");
 
     // Keep playing until the originally hidden reserved card is purchased.
     // This covers the acquired-hidden delta as well as its ordinary rollback
@@ -303,21 +551,20 @@ void test_incremental_reveal_search_state_and_fallback() {
         const Action candidate = Action::unpack(*it);
         int score = 0;
         if (reserve_game.current_player() == reserving_player &&
-            candidate.type == PURCHASE &&
-            candidate.card_id == selected_card) {
+            candidate.type == PURCHASE && candidate.card_id == selected_card) {
           score = 100000;
         } else if (candidate.type == TAKE_DIFFERENT ||
                    candidate.type == TAKE_SAME) {
           const Card &target = get_card(selected_card);
           for (int color = 0; color < 5; ++color) {
-            const int deficit = std::max(
-                0, static_cast<int>(target.cost[color]) -
-                       static_cast<int>(reserve_game.board
-                                            .players[reserving_player]
-                                            .bonuses[color]) -
-                       static_cast<int>(reserve_game.board
-                                            .players[reserving_player]
-                                            .gems[color]));
+            const int deficit =
+                std::max(0, static_cast<int>(target.cost[color]) -
+                                static_cast<int>(
+                                    reserve_game.board.players[reserving_player]
+                                        .bonuses[color]) -
+                                static_cast<int>(
+                                    reserve_game.board.players[reserving_player]
+                                        .gems[color]));
             const int useful = std::min<int>(candidate.take[color], deficit);
             score += reserve_game.current_player() == reserving_player
                          ? useful * 20
@@ -381,8 +628,7 @@ void test_reveal_solver_sidecar_restores_on_node_limit() {
     throw std::runtime_error(
         "reveal solver did not stop at the nested node limit: reason=" +
         result.reason + " unknown=" + result.unknown_reason +
-        " nodes=" + std::to_string(result.stats.nodes) +
-        " oracle=" +
+        " nodes=" + std::to_string(result.stats.nodes) + " oracle=" +
         std::to_string(result.stats.oracle_purchase_actions +
                        result.stats.oracle_reserve_actions));
   }
@@ -454,6 +700,8 @@ int main() {
   try {
     test_public_solver_value_contracts();
     test_common_search_values();
+    test_solver_tt_layout_and_value_contracts();
+    test_solver_tt_full_key_collision_contract();
     test_recursive_path_lifo_guard();
     test_card_equivalence_classes_match_tuple_oracle();
     test_compact_forced_action_filter_order_and_caps();

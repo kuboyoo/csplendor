@@ -1,0 +1,211 @@
+{
+  "schema": "csplendor.phase3c_solver_tt_compaction_evidence.v1",
+  "measurement_date": "2026-09-05",
+  "decision": {
+    "stage1": "ACCEPT",
+    "stage2": "NOT_ENTERED",
+    "stage2_reason": "Stage 1 reprofile did not show unordered_map as a material remaining hotspot."
+  },
+  "provenance": {
+    "branch": "perf/codex56-engine-hotpaths",
+    "baseline_revision": "affb80a1fac3d92dcbd0f7b3b0d480fca6cc4c52",
+    "manifest_dirty": true,
+    "clean_provenance_gate_satisfied": false,
+    "changed_files_content_manifest_sha256": "ecfbc3f68a68201656d0dc7f3a44b31519e9556aa441c21236213c9a6f6fd045",
+    "build_source_provenance_archive": "doc/performance_experiments/raw/phase3c/stage1_build_source_provenance_20260905.json.gz",
+    "raw_directory": "doc/performance_experiments/raw/phase3c",
+    "raw_integrity_manifest": "doc/performance_experiments/raw/manifest.tsv",
+    "note": "A and B were rebuilt from the same source tree and differ only by the allowlisted Phase 3C option. All seven formal cases use the same final binaries."
+  },
+  "build": {
+    "type": "Release",
+    "language_standard": "C++17",
+    "release_flags": ["-O3", "-DNDEBUG"],
+    "cpu_target": "portable",
+    "compiler": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+    "cmake": "4.2.3",
+    "python": "3.12.1",
+    "instrumentation": false,
+    "verify_incremental_hash": false,
+    "verify_reveal_search_state": false,
+    "A": {
+      "compact_solver_tt_entries": false,
+      "binary_size_bytes": 1123632,
+      "binary_text_bytes": 954154,
+      "binary_sha256": "747f68313b07b3a7c8f40f43b0de34baebe678195a523964203234a4752a6d21"
+    },
+    "B": {
+      "compact_solver_tt_entries": true,
+      "binary_size_bytes": 1133736,
+      "binary_text_bytes": 960518,
+      "binary_sha256": "8a69dca8ce5a50fa6c5592f460a3730b98da4e1824fd6669685af46316c1f28e"
+    }
+  },
+  "method": {
+    "cpu_affinity": [4],
+    "cpu_thread_siblings": "4,16",
+    "selected_set_contains_smt_siblings": false,
+    "governor": "performance",
+    "pairs": 22,
+    "crossover_blocks": 11,
+    "order": "ABBA",
+    "warmups_per_side": 3,
+    "bootstrap_iterations": 10000,
+    "bootstrap_unit": "two_pair_crossover_block",
+    "binary_slot_policy": "two_private_fixed_inodes_crossed_every_pair",
+    "ratio_note": "B_over_A_median is the median of crossover-block ratios, not the quotient of absolute side medians."
+  },
+  "acceptance": {
+    "stage1_rss_reduction_minimum": 0.10,
+    "stage1_nps_alternative_minimum": 1.03,
+    "stage1_gate_passed": true,
+    "stage1_gate_basis": "Runner peak RSS fell by 11.91% to 27.38% in all five end-to-end solver cases.",
+    "semantic_gate_passed": true,
+    "sanitizer_gate_passed": true,
+    "known_regression": {
+      "case_id": "state_key",
+      "B_over_A_median": 0.976726614539449,
+      "ci95": [0.975243453756922, 0.9898705124266695],
+      "regression_percent": 2.3273385460551,
+      "general_two_percent_guide_exceeded": true,
+      "disposition": "Accepted with explicit residual-risk record because the Phase-specific RSS gate passes substantially and no end-to-end case has a significant speed regression."
+    }
+  },
+  "formal_cases": [
+    {
+      "case_id": "state_key",
+      "workload": "solver_state_key",
+      "fixture": "reveal_heavy",
+      "operations": 2000000,
+      "A_median_rate_per_second": 21527026.909739677,
+      "B_median_rate_per_second": 21005497.446310528,
+      "B_over_A_median": 0.976726614539449,
+      "ci95": [0.975243453756922, 0.9898705124266695],
+      "A_median_runner_rss_kib": 5718,
+      "B_median_runner_rss_kib": 5708,
+      "digest": "122a073bd6be7b83",
+      "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_solver_state_key_paired_20260905.json.gz"
+    },
+    {
+      "case_id": "solver_tt",
+      "workload": "solver_tt",
+      "fixture": "midgame_250",
+      "operations": 20000000,
+      "A_median_rate_per_second": 16317411.693069264,
+      "B_median_rate_per_second": 21096687.85606478,
+      "B_over_A_median": 1.2840075001947096,
+      "ci95": [1.258087777200398, 1.3308498290457156],
+      "A_median_runner_rss_kib": 5726,
+      "B_median_runner_rss_kib": 5694,
+      "digest": "2bef6fcac87c8611",
+      "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_solver_tt_paired_20260905.json.gz"
+    },
+    {
+      "case_id": "exact_five_moves",
+      "workload": "exact_reveal",
+      "fixture": "five_moves",
+      "persistent_reuse": false,
+      "operations": 139868,
+      "A_median_rate_per_second": 364943.9202561504,
+      "B_median_rate_per_second": 378019.99726475717,
+      "B_over_A_median": 1.0390563860446071,
+      "ci95": [1.003259169678954, 1.0782282130681398],
+      "A_median_runner_rss_kib": 16446,
+      "B_median_runner_rss_kib": 13184,
+      "digest": "9dd9c11919a4581a",
+      "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_exact_five_moves_paired_20260905.json.gz"
+    },
+    {
+      "case_id": "exact_hidden_reserve",
+      "workload": "exact_reveal",
+      "fixture": "hidden_reserve",
+      "persistent_reuse": false,
+      "operations": 418336,
+      "A_median_rate_per_second": 458099.12379934086,
+      "B_median_rate_per_second": 462556.80310252635,
+      "B_over_A_median": 0.9558927281452392,
+      "ci95": [0.8814598674212236, 1.0492679927561148],
+      "A_median_runner_rss_kib": 36402,
+      "B_median_runner_rss_kib": 27036,
+      "digest": "684280a42eaabf21",
+      "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_exact_hidden_reserve_paired_20260905.json.gz"
+    },
+    {
+      "case_id": "exact_persistent",
+      "workload": "exact_reveal",
+      "fixture": "five_moves",
+      "persistent_reuse": true,
+      "operations": 280909,
+      "A_median_rate_per_second": 635090.8521801771,
+      "B_median_rate_per_second": 709464.0610440837,
+      "B_over_A_median": 1.0687980956553413,
+      "ci95": [0.9782339987330907, 1.1101210672984712],
+      "A_median_runner_rss_kib": 48582,
+      "B_median_runner_rss_kib": 35278,
+      "digest": "34eff58fdf34805c",
+      "cache_states_before": 210454,
+      "cache_states_after": 282879,
+      "persistent_memo_hits": 8801,
+      "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_exact_persistent_paired_20260905.json.gz"
+    },
+    {
+      "case_id": "visible_five_moves",
+      "workload": "visible_solver",
+      "fixture": "five_moves",
+      "operations": 100000,
+      "A_median_rate_per_second": 500392.27539666614,
+      "B_median_rate_per_second": 488274.8275330706,
+      "B_over_A_median": 0.9630652350178475,
+      "ci95": [0.9394759669199073, 1.0552986087045426],
+      "A_median_runner_rss_kib": 13036,
+      "B_median_runner_rss_kib": 11484,
+      "digest": "b6cdbdc80156e463",
+      "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_visible_five_moves_paired_20260905.json.gz"
+    },
+    {
+      "case_id": "visible_forced_pass",
+      "workload": "visible_solver",
+      "fixture": "forced_pass",
+      "operations": 1000000,
+      "A_median_rate_per_second": 2278664.093228005,
+      "B_median_rate_per_second": 2250366.6855439404,
+      "B_over_A_median": 0.9900616631991606,
+      "ci95": [0.9810440813340516, 1.001149175065947],
+      "A_median_runner_rss_kib": 17742,
+      "B_median_runner_rss_kib": 13732,
+      "digest": "46ac22ac2ea2fecf",
+      "raw_archive": "doc/performance_experiments/raw/phase3c/stage1_visible_forced_pass_paired_20260905.json.gz"
+    }
+  ],
+  "semantic_anchors": {
+    "five_moves": {
+      "nodes": 139868,
+      "legal_moves": 692386,
+      "memo_hits": 17163,
+      "memoized_states": 67615,
+      "digest": "9dd9c11919a4581a"
+    },
+    "hidden_reserve": {
+      "nodes": 418336,
+      "legal_moves": 2119495,
+      "memo_hits": 60855,
+      "memoized_states": 194950,
+      "digest": "684280a42eaabf21"
+    },
+    "persistent": {
+      "nodes": 280909,
+      "legal_moves": 910976,
+      "memo_hits": 145274,
+      "memoized_states": 282879,
+      "digest": "34eff58fdf34805c"
+    },
+    "proof_dag": {
+      "status": "proven",
+      "complete": true,
+      "validated": true,
+      "nodes": 37,
+      "edges": 36,
+      "digest": "7e76e5820a15c692"
+    }
+  }
+}

@@ -38,6 +38,8 @@ option(CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE
        "Maintain reveal-solver set state and rule hash incrementally" ON)
 option(CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE
        "Verify incremental reveal-solver state against scan oracles" OFF)
+option(CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
+       "Compact and specialize solver transposition-table keys and entries" ON)
 
 if(CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE AND
    NOT CSPLENDOR_INCREMENTAL_EXACT_HASH)
@@ -159,6 +161,11 @@ endif()
 if(CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE)
   target_compile_definitions(
       csplendor_core_config INTERFACE CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE=1)
+endif()
+
+if(CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES=1)
 endif()
 
 if(CSPLENDOR_CPU_TARGET STREQUAL "portable")

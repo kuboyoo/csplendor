@@ -6,6 +6,7 @@
 #include "solver_action_filter.h"
 #include "solver_card_equivalence.h"
 #include "solver_path.h"
+#include "solver_tt_types.h"
 #include <algorithm>
 #include <chrono>
 #include <iterator>
@@ -18,18 +19,18 @@
 #include <utility>
 
 using csplendor::solver_internal::ActionOrderKey;
-using csplendor::solver_internal::CardIdSet;
 using csplendor::solver_internal::CardEquivalenceMask;
+using csplendor::solver_internal::CardIdSet;
 using csplendor::solver_internal::ForceStatus;
 using csplendor::solver_internal::HiddenOutcomeCatalog;
 using csplendor::solver_internal::OracleActionMetadata;
 using csplendor::solver_internal::ProofDagBuildAborted;
 using csplendor::solver_internal::RevealProofDagBuilder;
-using csplendor::solver_internal::RevealSearchState;
 using csplendor::solver_internal::RevealSearchCancellationToken;
+using csplendor::solver_internal::RevealSearchState;
+using csplendor::solver_internal::ScopedPathEntry;
 using csplendor::solver_internal::SearchLimit;
 using csplendor::solver_internal::SearchLimitExceeded;
-using csplendor::solver_internal::ScopedPathEntry;
 using csplendor::solver_internal::StateKeyCore;
 using csplendor::solver_internal::TerminalResult;
 
@@ -42,8 +43,7 @@ public:
        size_t strict_preferred_attacker_prefix,
        bool exhaustive_attacker_actions, bool exact_reveal_search,
        std::shared_ptr<RevealSearchCancellationToken> cancellation_token)
-      : attacker_(attacker), depth_(depth),
-        max_nodes_(max_nodes),
+      : attacker_(attacker), depth_(depth), max_nodes_(max_nodes),
         limits_(max_nodes, time_limit_seconds, std::move(cancellation_token)),
         preferred_attacker_actions_(std::move(preferred_attacker_actions)),
         include_proof_dag_(include_proof_dag),
@@ -137,14 +137,14 @@ public:
     std::vector<uint64_t> touches;
     touches.reserve(exact_memo_.size());
     for (const auto &item : exact_memo_)
-      touches.push_back(item.second.last_touched);
+      touches.push_back(item.second.last_touched());
     const size_t remove_count = exact_memo_.size() - max_cache_states;
     std::nth_element(touches.begin(), touches.begin() + remove_count,
                      touches.end());
     const uint64_t keep_from = touches[remove_count];
     for (auto it = exact_memo_.begin();
          it != exact_memo_.end() && exact_memo_.size() > max_cache_states;) {
-      if (it->second.last_touched < keep_from)
+      if (it->second.last_touched() < keep_from)
         it = exact_memo_.erase(it);
       else
         ++it;
@@ -153,7 +153,7 @@ public:
     // aggregate entries and counter wrap without exceeding the hard bound.
     for (auto it = exact_memo_.begin();
          it != exact_memo_.end() && exact_memo_.size() > max_cache_states;) {
-      if (it->second.last_touched == keep_from)
+      if (it->second.last_touched() == keep_from)
         it = exact_memo_.erase(it);
       else
         ++it;
@@ -249,8 +249,7 @@ public:
                                        current_player == attacker_ &&
                                        game.current_player() != current_player);
                 result.edges.push_back(RevealVerifiedFrontierEdge{
-                    ordered.code, reveal_card, next_depth,
-                    game.clone_light()});
+                    ordered.code, reveal_card, next_depth, game.clone_light()});
                 return true;
               });
           if (!completed)
@@ -359,8 +358,7 @@ private:
     RevealSearchState previous_;
   };
 
-  template <typename Apply>
-  bool apply_tracked(Game &game, Apply apply) {
+  template <typename Apply> bool apply_tracked(Game &game, Apply apply) {
     const RevealSearchState::TransitionObservation before =
         reveal_state_.observe_before(game.board);
     if (!apply())
@@ -370,8 +368,8 @@ private:
   }
 
   bool apply_action_tracked(Game &game, const Action &action) {
-    return apply_tracked(
-        game, [&] { return game.apply_trusted(action, false); });
+    return apply_tracked(game,
+                         [&] { return game.apply_trusted(action, false); });
   }
 
   bool apply_action_code_tracked(Game &game, uint64_t code) {
@@ -387,6 +385,14 @@ private:
 #endif
   }
 
+  template <typename MemoType>
+  static void reserve_memo(MemoType &memo, size_t target) {
+    const double capacity =
+        static_cast<double>(memo.bucket_count()) * memo.max_load_factor();
+    if (static_cast<double>(target) > capacity)
+      memo.reserve(target);
+  }
+
   void reserve_active_memo() {
     // Deep exact searches retain roughly one transposition for every several
     // visited nodes.  Reserving a conservative fraction avoids repeated
@@ -398,84 +404,29 @@ private:
         max_cache_states_
             ? std::min<uint64_t>(MAX_RESERVED_STATES, max_cache_states_)
             : MAX_RESERVED_STATES;
-    const size_t target = static_cast<size_t>(
-        std::min<uint64_t>(reserve_limit, max_nodes_ / 12));
-    auto &active_memo = exact_reveal_search_ ? exact_memo_ : memo_;
-    const double capacity = static_cast<double>(active_memo.bucket_count()) *
-                            active_memo.max_load_factor();
-    if (static_cast<double>(target) > capacity)
-      active_memo.reserve(target);
+    const size_t target =
+        static_cast<size_t>(std::min<uint64_t>(reserve_limit, max_nodes_ / 12));
+    if (exact_reveal_search_)
+      reserve_memo(exact_memo_, target);
+    else
+      reserve_memo(memo_, target);
   }
 
-  struct StateKey {
-    StateKeyCore core;
-    uint64_t unseen_low = 0;
-    uint64_t unseen_high = 0;
-    uint64_t acquired_hidden_low = 0;
-    uint64_t acquired_hidden_high = 0;
-    uint8_t reserved0 = 0;
-    uint8_t reserved1 = 0;
+  using StateKey = csplendor::solver_internal::RevealStateKey;
+  using StateKeyHash = csplendor::solver_internal::RevealStateKeyHash;
+  using DepthStateKey = csplendor::solver_internal::RevealDepthStateKey;
+  using DepthStateKeyHash = csplendor::solver_internal::RevealDepthStateKeyHash;
+  using ExactDepthStateKey =
+      csplendor::solver_internal::RevealExactDepthStateKey;
+  using ExactDepthStateKeyHash =
+      csplendor::solver_internal::RevealExactDepthStateKeyHash;
 
-    bool operator==(const StateKey &other) const {
-      CSPLENDOR_PERF_TT_KEY_COMPARISON();
-      return core == other.core && unseen_low == other.unseen_low &&
-             unseen_high == other.unseen_high &&
-             acquired_hidden_low == other.acquired_hidden_low &&
-             acquired_hidden_high == other.acquired_hidden_high &&
-             reserved0 == other.reserved0 && reserved1 == other.reserved1;
-    }
-  };
+  using DepthPath =
+      csplendor::solver_internal::RecursionPath<DepthStateKey,
+                                                DepthStateKeyHash>;
 
-  struct StateKeyHash {
-    size_t operator()(const StateKey &key) const {
-      uint64_t meta = static_cast<uint64_t>(key.core.points0);
-      meta |= static_cast<uint64_t>(key.core.points1) << 8;
-      meta |= static_cast<uint64_t>(key.core.purchased0) << 16;
-      meta |= static_cast<uint64_t>(key.core.purchased1) << 24;
-      meta |= static_cast<uint64_t>(key.reserved0) << 32;
-      meta |= static_cast<uint64_t>(key.reserved1) << 40;
-      meta |= static_cast<uint64_t>(key.core.final_round ? 1 : 0) << 48;
-      meta |= static_cast<uint64_t>(static_cast<uint8_t>(key.core.winner + 2))
-              << 49;
-      const uint64_t mixed =
-          key.core.board_hash ^ (key.unseen_low * 0x9e3779b97f4a7c15ULL) ^
-          (key.unseen_high * 0xc2b2ae3d27d4eb4fULL) ^
-          (key.acquired_hidden_low * 0x27d4eb2f165667c5ULL) ^
-          (key.acquired_hidden_high * 0x94d049bb133111ebULL) ^
-          (meta * 0x165667b19e3779f9ULL);
-      return std::hash<uint64_t>{}(mixed);
-    }
-  };
-
-  struct DepthStateKey {
-    StateKey state;
-    int depth = 0;
-
-    bool operator==(const DepthStateKey &other) const {
-      return state == other.state && depth == other.depth;
-    }
-  };
-
-  struct DepthStateKeyHash {
-    size_t operator()(const DepthStateKey &key) const {
-      return StateKeyHash{}(key.state) ^
-             (std::hash<int>{}(key.depth) * 0x9e3779b9U);
-    }
-  };
-
-  using DepthPath = csplendor::solver_internal::RecursionPath<
-      DepthStateKey, DepthStateKeyHash>;
-
-  struct Entry {
-    ForceStatus status = ForceStatus::UNKNOWN;
-    uint64_t action_code = 0;
-    int reveal_card = -1;
-    bool has_action = false;
-    size_t action_count = 0;
-    bool replayable = true;
-    uint64_t generation = 0;
-    uint64_t last_touched = 0;
-  };
+  using Entry = csplendor::solver_internal::RevealMemoEntry;
+  using PersistentEntry = csplendor::solver_internal::RevealPersistentEntry;
 
   struct OrderedAction : ActionOrderKey, OracleActionMetadata {
     OrderedAction() = default;
@@ -502,8 +453,11 @@ private:
   size_t max_cache_states_ = 0;
   SearchLimit limits_;
   RevealVerifiedSearchStats stats_;
-  std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash> memo_;
-  std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash> exact_memo_;
+  using Memo = std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash>;
+  using ExactMemo = std::unordered_map<ExactDepthStateKey, PersistentEntry,
+                                       ExactDepthStateKeyHash>;
+  Memo memo_;
+  ExactMemo exact_memo_;
   uint64_t search_generation_ = 0;
   uint64_t cache_touch_counter_ = 0;
   Game root_{0};
@@ -525,13 +479,20 @@ private:
   static constexpr size_t ATTACKER_RESERVE_LIMIT = 3;
 
   static size_t path_reserve_capacity(int remaining_depth) noexcept {
-    const size_t depth =
-        static_cast<size_t>(std::max(remaining_depth, 1));
+    const size_t depth = static_cast<size_t>(std::max(remaining_depth, 1));
     return depth * 4 + 4;
   }
 
   ForceStatus forced_win(Game &game, DepthPath &path, int depth,
                          bool exact_refinement) {
+    if (exact_refinement)
+      return forced_win_with_memo(game, path, depth, true, exact_memo_);
+    return forced_win_with_memo(game, path, depth, false, memo_);
+  }
+
+  template <typename MemoType>
+  ForceStatus forced_win_with_memo(Game &game, DepthPath &path, int depth,
+                                   bool exact_refinement, MemoType &memo) {
     check_limits();
     ++stats_.nodes;
 
@@ -545,50 +506,55 @@ private:
     if (game.current_player() == attacker_ && depth <= 0)
       return ForceStatus::REFUTED;
 
-    const DepthStateKey key{state_key(game, exact_refinement), depth};
-    auto &memo = exact_refinement ? exact_memo_ : memo_;
+    const StateKey state = state_key(game, exact_refinement);
+    const DepthStateKey path_key{state, depth};
+    using MemoKey = typename MemoType::key_type;
+    using MemoEntry = typename MemoType::mapped_type;
+    const MemoKey key{state, depth};
     CSPLENDOR_PERF_TT_PROBE_SCOPE(tt_probe);
     auto memo_it = memo.find(key);
     CSPLENDOR_PERF_TT_PROBE_FINISH(tt_probe);
     if (memo_it != memo.end()) {
       CSPLENDOR_PERF_INC(SolverTtHits);
       ++stats_.memo_hits;
-      if (memo_it->second.generation != search_generation_)
-        ++stats_.persistent_memo_hits;
-      memo_it->second.generation = search_generation_;
-      memo_it->second.last_touched = ++cache_touch_counter_;
-      return memo_it->second.status;
+      if constexpr (MemoEntry::tracks_persistence) {
+        if (memo_it->second.generation() != search_generation_)
+          ++stats_.persistent_memo_hits;
+        memo_it->second.set_generation(search_generation_);
+        memo_it->second.set_last_touched(++cache_touch_counter_);
+      }
+      return memo_it->second.status();
     }
-    if (path.contains(key)) {
+    if (path.contains(path_key)) {
       ++stats_.terminal_nodes;
       return ForceStatus::UNKNOWN;
     }
     if (can_resolve_final_round(game)) {
-      const Entry resolved = resolve_final_round(game, exact_refinement);
+      const MemoEntry resolved =
+          resolve_final_round<MemoEntry>(game, exact_refinement);
       store_entry(memo, key, resolved);
-      return resolved.status;
+      return resolved.status();
     }
 
     std::vector<OrderedAction> actions =
         exact_refinement ? proof_ordered_actions(game) : ordered_actions(game);
     CSPLENDOR_PERF_INC(SolverTemporaryVectorAllocations);
     if (exact_refinement)
-      prefer_iterative_action(key.state, depth, game.current_player(), actions);
+      prefer_iterative_action(state, depth, game.current_player(), actions);
     if (game.current_player() == attacker_)
       actions = forced_attacker_actions(game, actions, depth, path.empty());
     stats_.legal_moves += actions.size();
     if (actions.empty()) {
       ++stats_.terminal_nodes;
-      store_entry(memo, key,
-                  Entry{ForceStatus::REFUTED, 0, -1, false, 0});
+      store_entry(memo, key, MemoEntry{ForceStatus::REFUTED, 0, -1, false, 0});
       return ForceStatus::REFUTED;
     }
 
     const int current_player = game.current_player();
-    ScopedPathEntry<DepthPath> path_entry(path, key);
+    ScopedPathEntry<DepthPath> path_entry(path, path_key);
     bool has_unknown = false;
-    Entry representative;
-    representative.action_count = actions.size();
+    MemoEntry representative;
+    representative.set_action_count(actions.size());
 
     for (const OrderedAction &ordered : actions) {
       bool action_unknown = false;
@@ -599,8 +565,8 @@ private:
         const int next_depth =
             depth - static_cast<int>(current_player == attacker_ &&
                                      game.current_player() != current_player);
-        const ForceStatus child =
-            forced_win(game, path, next_depth, exact_refinement);
+        const ForceStatus child = forced_win_with_memo(game, path, next_depth,
+                                                       exact_refinement, memo);
         if (!has_representative_reveal) {
           representative_reveal = reveal_card;
           has_representative_reveal = true;
@@ -619,23 +585,24 @@ private:
       if (!completed && !action_refuted)
         action_unknown = true;
 
-      if (!representative.has_action) {
-        representative = Entry{ForceStatus::UNKNOWN,  ordered.code,
-                               representative_reveal, true,
-                               actions.size(),        is_replayable(ordered)};
+      if (!representative.has_action()) {
+        representative =
+            MemoEntry{ForceStatus::UNKNOWN,  ordered.code,
+                      representative_reveal, true,
+                      actions.size(),        is_replayable(ordered)};
       }
       if (current_player == attacker_ && !action_refuted && !action_unknown) {
         store_entry(memo, key,
-                    Entry{ForceStatus::PROVEN,   ordered.code,
-                          representative_reveal, true,
-                          actions.size(),        is_replayable(ordered)});
+                    MemoEntry{ForceStatus::PROVEN, ordered.code,
+                              representative_reveal, true, actions.size(),
+                              is_replayable(ordered)});
         return ForceStatus::PROVEN;
       }
       if (current_player != attacker_ && action_refuted) {
         store_entry(memo, key,
-                    Entry{ForceStatus::REFUTED,  ordered.code,
-                          representative_reveal, true,
-                          actions.size(),        is_replayable(ordered)});
+                    MemoEntry{ForceStatus::REFUTED, ordered.code,
+                              representative_reveal, true, actions.size(),
+                              is_replayable(ordered)});
         return ForceStatus::REFUTED;
       }
       has_unknown = has_unknown || action_unknown;
@@ -646,17 +613,20 @@ private:
     const ForceStatus status = current_player == attacker_
                                    ? ForceStatus::REFUTED
                                    : ForceStatus::PROVEN;
-    representative.status = status;
+    representative.set_status(status);
     store_entry(memo, key, representative);
     return status;
   }
 
-  void store_entry(
-      std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash> &memo,
-      const DepthStateKey &key, Entry entry) {
+  template <typename MemoType>
+  void store_entry(MemoType &memo, const typename MemoType::key_type &key,
+                   typename MemoType::mapped_type entry) {
     CSPLENDOR_PERF_INC(SolverTtStores);
-    entry.generation = search_generation_;
-    entry.last_touched = ++cache_touch_counter_;
+    using MemoEntry = typename MemoType::mapped_type;
+    if constexpr (MemoEntry::tracks_persistence) {
+      entry.set_generation(search_generation_);
+      entry.set_last_touched(++cache_touch_counter_);
+    }
     memo[key] = std::move(entry);
   }
 
@@ -667,21 +637,21 @@ private:
       return;
     for (int cached_depth = depth - 1; cached_depth >= 0; --cached_depth) {
       CSPLENDOR_PERF_TT_PROBE_SCOPE(iterative_memo_probe);
-      const auto cached = exact_memo_.find(DepthStateKey{state, cached_depth});
+      const auto cached =
+          exact_memo_.find(ExactDepthStateKey{state, cached_depth});
       CSPLENDOR_PERF_TT_PROBE_FINISH(iterative_memo_probe);
       if (cached != exact_memo_.end())
         CSPLENDOR_PERF_INC(SolverTtHits);
-      if (cached == exact_memo_.end() || !cached->second.has_action)
+      if (cached == exact_memo_.end() || !cached->second.has_action())
         continue;
-      const bool useful =
-          current_player == attacker_
-              ? cached->second.status == ForceStatus::PROVEN
-              : cached->second.status == ForceStatus::REFUTED;
+      const bool useful = current_player == attacker_
+                              ? cached->second.status() == ForceStatus::PROVEN
+                              : cached->second.status() == ForceStatus::REFUTED;
       if (!useful)
         continue;
       const auto action = std::find_if(
           actions.begin(), actions.end(), [&](const OrderedAction &candidate) {
-            return candidate.code == cached->second.action_code;
+            return candidate.code == cached->second.action_code();
           });
       if (action == actions.end())
         continue;
@@ -801,9 +771,9 @@ private:
     return CardEquivalenceKey{card.level, card.points, card.bonus, card.cost};
   }
 
-  static bool remember_card_equivalence(
-      std::set<CardEquivalenceKey> &legacy_seen,
-      CardEquivalenceMask &class_seen, int card_id) {
+  static bool
+  remember_card_equivalence(std::set<CardEquivalenceKey> &legacy_seen,
+                            CardEquivalenceMask &class_seen, int card_id) {
     CSPLENDOR_PERF_INC(SolverCardEquivalenceLookups);
     if (csplendor::solver_internal::card_equivalence_classes_enabled) {
       return class_seen.insert(
@@ -994,12 +964,11 @@ private:
     }
     if (!remove_card_from_deck_legacy(game.board, level, card_id))
       return false;
-    return game.board.decks[level].try_push_back(
-        static_cast<uint8_t>(card_id));
+    return game.board.decks[level].try_push_back(static_cast<uint8_t>(card_id));
   }
 
-  bool apply_visible_refill_outcome(Game &game, const Action &action,
-                                    int level, int slot, int card_id) {
+  bool apply_visible_refill_outcome(Game &game, const Action &action, int level,
+                                    int slot, int card_id) {
     if (!is_valid_card_id(card_id) || get_card(card_id).level - 1 != level ||
         slot < 0 || slot >= Board::CARDS_PER_LEVEL ||
         !prepare_reveal_card(game, level, card_id))
@@ -1051,18 +1020,20 @@ private:
            game.current_player() == 1;
   }
 
-  Entry resolve_final_round(Game &game, bool exact_refinement) {
+  template <typename EntryType>
+  EntryType resolve_final_round(Game &game, bool exact_refinement) {
     ForceStatus direct_status = ForceStatus::UNKNOWN;
     if (resolve_final_round_direct(game, direct_status, exact_refinement)) {
       ++stats_.final_round_direct_resolutions;
       if (direct_status == ForceStatus::PROVEN)
         ++stats_.final_round_score_prunes;
-      return Entry{direct_status, 0, -1, false, 0};
+      return EntryType{direct_status, 0, -1, false, 0};
     }
     if (max_final_round_score(game) < game.board.players[0].points) {
       ++stats_.final_round_score_prunes;
-      return Entry{attacker_ == 0 ? ForceStatus::PROVEN : ForceStatus::REFUTED,
-                   0, -1, false, 0};
+      return EntryType{attacker_ == 0 ? ForceStatus::PROVEN
+                                      : ForceStatus::REFUTED,
+                       0, -1, false, 0};
     }
 
     const int current_player = game.current_player();
@@ -1070,11 +1041,11 @@ private:
         exact_refinement ? proof_ordered_actions(game) : ordered_actions(game);
     stats_.legal_moves += actions.size();
     if (actions.empty())
-      return Entry{ForceStatus::REFUTED, 0, -1, false, 0};
+      return EntryType{ForceStatus::REFUTED, 0, -1, false, 0};
 
     bool has_unknown = false;
-    Entry representative;
-    representative.action_count = actions.size();
+    EntryType representative;
+    representative.set_action_count(actions.size());
     for (const OrderedAction &ordered : actions) {
       ScopedBranchRollback rollback(*this, game);
       rollback.mark_mutated();
@@ -1086,24 +1057,26 @@ private:
                                     ? resolve_final_round_noble(game)
                                     : terminal_status(game);
 
-      if (!representative.has_action) {
-        representative = Entry{child, ordered.code,   reveal_card,
-                               true,  actions.size(), is_replayable(ordered)};
+      if (!representative.has_action()) {
+        representative =
+            EntryType{child, ordered.code,   reveal_card,
+                      true,  actions.size(), is_replayable(ordered)};
       }
       if (current_player == attacker_ && child == ForceStatus::PROVEN)
-        return Entry{ForceStatus::PROVEN, ordered.code,
-                     reveal_card,         true,
-                     actions.size(),      is_replayable(ordered)};
+        return EntryType{ForceStatus::PROVEN, ordered.code,
+                         reveal_card,         true,
+                         actions.size(),      is_replayable(ordered)};
       if (current_player != attacker_ && child == ForceStatus::REFUTED)
-        return Entry{ForceStatus::REFUTED, ordered.code,
-                     reveal_card,          true,
-                     actions.size(),       is_replayable(ordered)};
+        return EntryType{ForceStatus::REFUTED, ordered.code,
+                         reveal_card,          true,
+                         actions.size(),       is_replayable(ordered)};
       has_unknown = has_unknown || child == ForceStatus::UNKNOWN;
     }
 
-    representative.status = has_unknown                   ? ForceStatus::UNKNOWN
-                            : current_player == attacker_ ? ForceStatus::REFUTED
-                                                          : ForceStatus::PROVEN;
+    representative.set_status(has_unknown ? ForceStatus::UNKNOWN
+                              : current_player == attacker_
+                                  ? ForceStatus::REFUTED
+                                  : ForceStatus::PROVEN);
     return representative;
   }
 
@@ -1401,23 +1374,22 @@ private:
   }
 
   template <bool MaintainExactHash>
-  bool apply_oracle_action_with_mutator(
-      Game &game, const OrderedAction &ordered) const {
+  bool apply_oracle_action_with_mutator(Game &game,
+                                        const OrderedAction &ordered) const {
     Board &board = game.board;
     if (board.is_game_over() || board.waiting_noble ||
         board.current_player >= Board::NUM_PLAYERS)
       return false;
     PlayerState &player = board.players[board.current_player];
-    if (ordered.oracle_card >= 0 &&
-        !is_valid_card_id(ordered.oracle_card))
+    if (ordered.oracle_card >= 0 && !is_valid_card_id(ordered.oracle_card))
       return false;
     Board::RuleMutator<MaintainExactHash> mutation(board);
     if (ordered.oracle_card >= 0) {
       const Card &card = get_card(ordered.oracle_card);
       if (!player.can_afford(card))
         return false;
-      if (!csplendor::detail::purchase_card<true>(
-              board, mutation, card, ordered.oracle_gold_as))
+      if (!csplendor::detail::purchase_card<true>(board, mutation, card,
+                                                  ordered.oracle_gold_as))
         return false;
     } else if (ordered.oracle_reserve) {
       if (!player.can_reserve() ||
@@ -1494,8 +1466,9 @@ private:
     if (csplendor::solver_internal::compact_forced_actions_enabled) {
       filtered = csplendor::solver_internal::compact_forced_attacker_actions<
           ATTACKER_TAKE_LIMIT, ATTACKER_RESERVE_LIMIT>(
-          actions,
-          [&](const Action &action) { return attacker_take_score(game, action); });
+          actions, [&](const Action &action) {
+            return attacker_take_score(game, action);
+          });
     } else {
       std::vector<OrderedAction> purchases;
       std::vector<std::pair<int, OrderedAction>> takes;
@@ -1644,9 +1617,9 @@ private:
       rule_position_hash = reveal_state_.rule_hash();
     } else {
       unseen = hidden_catalog_.unseen_cards(board);
-      acquired_hidden =
-          root_independent ? CardIdSet{}
-                           : hidden_catalog_.acquired_hidden_cards(board);
+      acquired_hidden = root_independent
+                            ? CardIdSet{}
+                            : hidden_catalog_.acquired_hidden_cards(board);
       rule_position_hash = board.compute_set_deck_search_hash();
     }
     return StateKey{StateKeyCore{rule_position_hash, board.players[0].points,
@@ -1703,7 +1676,7 @@ private:
     if (memo_it != memo_.end())
       CSPLENDOR_PERF_INC(SolverTtHits);
     if (memo_it == memo_.end() ||
-        memo_it->second.status != ForceStatus::PROVEN) {
+        memo_it->second.status() != ForceStatus::PROVEN) {
       throw ProofDagBuildAborted(
           "frontier references an unmaterialized proof state");
     }
@@ -1712,11 +1685,11 @@ private:
     const bool preserve_child_depth = can_resolve_final_round(game);
     std::vector<OrderedAction> actions = proof_ordered_actions(game);
 
-    if (current_player == attacker_ && entry.has_action) {
+    if (current_player == attacker_ && entry.has_action()) {
       actions = forced_attacker_actions(game, actions, depth, true);
       actions.erase(std::remove_if(actions.begin(), actions.end(),
                                    [&](const OrderedAction &ordered) {
-                                     return ordered.code != entry.action_code;
+                                     return ordered.code != entry.action_code();
                                    }),
                     actions.end());
     }
@@ -2018,7 +1991,7 @@ private:
     if (memo_it != memo_.end())
       CSPLENDOR_PERF_INC(SolverTtHits);
     if (memo_it == memo_.end() ||
-        memo_it->second.status != ForceStatus::PROVEN) {
+        memo_it->second.status() != ForceStatus::PROVEN) {
       DepthPath path(path_reserve_capacity(depth));
       const ForceStatus refined = forced_win(game, path, depth, false);
       if (refined != ForceStatus::PROVEN)
@@ -2030,11 +2003,11 @@ private:
         CSPLENDOR_PERF_INC(SolverTtHits);
     }
     if (memo_it == memo_.end() ||
-        memo_it->second.status != ForceStatus::PROVEN) {
+        memo_it->second.status() != ForceStatus::PROVEN) {
       throw ProofDagBuildAborted("proof DAG references unmaterialized subtree");
     }
     const Entry &entry = memo_it->second;
-    if (!entry.has_action) {
+    if (!entry.has_action()) {
       expand_final_round_proof_summary(game, depth, id);
       return id;
     }
@@ -2044,7 +2017,7 @@ private:
       actions = forced_attacker_actions(game, actions, depth, id == 0);
       actions.erase(std::remove_if(actions.begin(), actions.end(),
                                    [&](const OrderedAction &ordered) {
-                                     return ordered.code != entry.action_code;
+                                     return ordered.code != entry.action_code();
                                    }),
                     actions.end());
     }
@@ -2090,6 +2063,15 @@ private:
     ScopedRevealStateRestore restore_state(*this);
     Game game = root_.clone_light();
     reveal_state_ = root_reveal_state_;
+    if (exact_refinement)
+      return principal_line_from_memo(game, true, exact_memo_);
+    return principal_line_from_memo(game, false, memo_);
+  }
+
+  template <typename MemoType>
+  std::vector<RevealVerifiedLineEntry>
+  principal_line_from_memo(Game &game, bool exact_refinement,
+                           const MemoType &memo) {
     std::vector<RevealVerifiedLineEntry> line;
     CSPLENDOR_PERF_INC(SolverTemporarySetAllocations);
     std::unordered_set<DepthStateKey, DepthStateKeyHash> seen;
@@ -2097,36 +2079,38 @@ private:
     for (int ply = 0; ply < 200 && depth >= 0; ++ply) {
       if (game.is_game_over())
         break;
-      const DepthStateKey key{state_key(game, exact_refinement), depth};
-      if (seen.find(key) != seen.end())
+      const StateKey state = state_key(game, exact_refinement);
+      const DepthStateKey seen_key{state, depth};
+      if (seen.find(seen_key) != seen.end())
         break;
-      seen.insert(key);
-      const auto &memo = exact_refinement ? exact_memo_ : memo_;
+      seen.insert(seen_key);
+      const typename MemoType::key_type key{state, depth};
       CSPLENDOR_PERF_TT_PROBE_SCOPE(line_memo_probe);
       auto it = memo.find(key);
       CSPLENDOR_PERF_TT_PROBE_FINISH(line_memo_probe);
       if (it != memo.end())
         CSPLENDOR_PERF_INC(SolverTtHits);
-      if (it == memo.end() || !it->second.has_action || !it->second.replayable)
+      if (it == memo.end() || !it->second.has_action() ||
+          !it->second.replayable())
         break;
       const int current_player = game.current_player();
-      const Action action = Action::unpack(it->second.action_code);
-      const int reveal_card = it->second.reveal_card;
+      const Action action = Action::unpack(it->second.action_code());
+      const int reveal_card = it->second.reveal_card();
       bool applied = false;
       if (action.type == RESERVE_DECK && reveal_card >= 0) {
         applied = apply_deck_reserve_outcome(game, action, reveal_card);
       } else if (reveal_card >= 0 && visible_refill_level(action) >= 0) {
         const int level = visible_refill_level(action);
         const int slot = visible_refill_slot(game.board, action);
-        applied =
-            apply_visible_refill_outcome(game, action, level, slot, reveal_card);
+        applied = apply_visible_refill_outcome(game, action, level, slot,
+                                               reveal_card);
       } else {
-        applied = apply_action_code_tracked(game, it->second.action_code);
+        applied = apply_action_code_tracked(game, it->second.action_code());
       }
       if (!applied)
         break;
       line.push_back(RevealVerifiedLineEntry{
-          it->second.action_code, reveal_card, it->second.action_count});
+          it->second.action_code(), reveal_card, it->second.action_count()});
       depth -= static_cast<int>(current_player == attacker_ &&
                                 game.current_player() != current_player);
     }
@@ -2148,9 +2132,9 @@ RevealVerifiedSolver::RevealVerifiedSolver(
           attacker, depth, max_nodes, time_limit_seconds,
           std::move(preferred_attacker_actions), include_proof_dag,
           proof_dag_node_limit, proof_dag_edge_limit, required_root_action,
-          strict_preferred_attacker_actions,
-          strict_preferred_attacker_prefix, exhaustive_attacker_actions,
-          exact_reveal_search, std::move(cancellation_token))) {}
+          strict_preferred_attacker_actions, strict_preferred_attacker_prefix,
+          exhaustive_attacker_actions, exact_reveal_search,
+          std::move(cancellation_token))) {}
 
 RevealVerifiedSolver::~RevealVerifiedSolver() = default;
 
@@ -2175,8 +2159,7 @@ RevealVerifiedSearchResult RevealVerifiedSolver::solve(const Game &input) {
 }
 
 RevealVerifiedSearchResult RevealVerifiedSolver::solve_reusing_exact_cache(
-    const Game &input, int depth, uint64_t max_nodes,
-    double time_limit_seconds,
+    const Game &input, int depth, uint64_t max_nodes, double time_limit_seconds,
     std::vector<uint64_t> preferred_attacker_actions,
     std::shared_ptr<RevealSearchCancellationToken> cancellation_token,
     size_t max_cache_states) {

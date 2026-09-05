@@ -13,6 +13,7 @@
 #include "perf_counters.h"
 #include "reveal_solver_components.h"
 #include "reveal_verified_solver.h"
+#include "solver_tt_types.h"
 #include "state_encoder.h"
 #include "state_invariants.h"
 #include "visible_only_solver.h"
@@ -173,28 +174,17 @@ constexpr uint64_t kFormalTraceSimulations = 41;
 volatile uint64_t benchmark_sink = 0;
 
 const std::array<const char *, 23> kWorkloads = {
-    "legal_count",
-    "legal_codes",
-    "legal_actions",
-    "random_selfplay_apply",
-    "apply_only",
-    "purchase_apply",
-    "apply_exact_hash",
-    "apply_observable_hash",
-    "cold_hash",
-    "cached_hash",
-    "clone_light",
-    "determinization_clone",
-    "state_encoder",
-    "action_mask",
-    "decode_apply",
-    "legacy_mcts",
-    "shared_tree",
-    "parallel_scheduler",
-    "root_parallel",
-    "board_copy_restore",
-    "solver_state_key",
-    "solver_tt",
+    "legal_count",      "legal_codes",
+    "legal_actions",    "random_selfplay_apply",
+    "apply_only",       "purchase_apply",
+    "apply_exact_hash", "apply_observable_hash",
+    "cold_hash",        "cached_hash",
+    "clone_light",      "determinization_clone",
+    "state_encoder",    "action_mask",
+    "decode_apply",     "legacy_mcts",
+    "shared_tree",      "parallel_scheduler",
+    "root_parallel",    "board_copy_restore",
+    "solver_state_key", "solver_tt",
     "visible_solver",
 };
 
@@ -1124,16 +1114,15 @@ make_purchase_transition_corpus(const Fixture &fixture, uint64_t seed) {
       const Action action = Action::unpack(code);
       if (action.type == PURCHASE) {
         purchases.push_back(code);
-      } else if (action.type == VISIT_NOBLE ||
-                 action.type == TAKE_DIFFERENT || action.type == TAKE_SAME) {
+      } else if (action.type == VISIT_NOBLE || action.type == TAKE_DIFFERENT ||
+                 action.type == TAKE_SAME) {
         progress.push_back(code);
       }
     }
 
     const uint64_t random_value = next_random(random);
-    const auto &choices = !purchases.empty() ? purchases
-                                             : (!progress.empty() ? progress
-                                                                  : codes);
+    const auto &choices =
+        !purchases.empty() ? purchases : (!progress.empty() ? progress : codes);
     const uint64_t code =
         choices[static_cast<size_t>(random_value % choices.size())];
     if (!purchases.empty()) {
@@ -2612,53 +2601,20 @@ Result run_board_copy_restore(const Arguments &arguments,
   return result;
 }
 
-struct SolverBenchmarkKey {
-  csplendor::solver_internal::StateKeyCore core;
-  csplendor::solver_internal::CardIdSet unseen;
-  csplendor::solver_internal::CardIdSet acquired_hidden;
-  uint8_t reserved0 = 0;
-  uint8_t reserved1 = 0;
-  int depth = 0;
-
-  bool operator==(const SolverBenchmarkKey &other) const noexcept {
-    CSPLENDOR_PERF_TT_KEY_COMPARISON();
-    return core == other.core && unseen.low == other.unseen.low &&
-           unseen.high == other.unseen.high &&
-           acquired_hidden.low == other.acquired_hidden.low &&
-           acquired_hidden.high == other.acquired_hidden.high &&
-           reserved0 == other.reserved0 && reserved1 == other.reserved1 &&
-           depth == other.depth;
-  }
-};
-
-struct SolverBenchmarkKeyHash {
-  size_t operator()(const SolverBenchmarkKey &key) const noexcept {
-    uint64_t meta = static_cast<uint64_t>(key.core.points0);
-    meta |= static_cast<uint64_t>(key.core.points1) << 8;
-    meta |= static_cast<uint64_t>(key.core.purchased0) << 16;
-    meta |= static_cast<uint64_t>(key.core.purchased1) << 24;
-    meta |= static_cast<uint64_t>(key.reserved0) << 32;
-    meta |= static_cast<uint64_t>(key.reserved1) << 40;
-    meta |= static_cast<uint64_t>(key.core.final_round ? 1 : 0) << 48;
-    meta |= static_cast<uint64_t>(static_cast<uint8_t>(key.core.winner + 2))
-            << 49;
-    const uint64_t mixed = key.core.board_hash ^
-                           (key.unseen.low * 0x9e3779b97f4a7c15ULL) ^
-                           (key.unseen.high * 0xc2b2ae3d27d4eb4fULL) ^
-                           (key.acquired_hidden.low * 0x27d4eb2f165667c5ULL) ^
-                           (key.acquired_hidden.high * 0x94d049bb133111ebULL) ^
-                           (meta * 0x165667b19e3779f9ULL);
-    return std::hash<uint64_t>{}(mixed) ^
-           (std::hash<int>{}(key.depth) * 0x9e3779b9U);
-  }
-};
+using SolverBenchmarkKey = csplendor::solver_internal::RevealDepthStateKey;
+using SolverBenchmarkKeyHash =
+    csplendor::solver_internal::RevealDepthStateKeyHash;
+using SolverBenchmarkExactKey =
+    csplendor::solver_internal::RevealExactDepthStateKey;
+using SolverBenchmarkExactKeyHash =
+    csplendor::solver_internal::RevealExactDepthStateKeyHash;
+using SolverBenchmarkEntry = csplendor::solver_internal::RevealPersistentEntry;
 
 SolverBenchmarkKey make_solver_benchmark_key(
     const Game &game,
-    const csplendor::solver_internal::HiddenOutcomeCatalog &catalog,
-    int depth,
-    const csplendor::solver_internal::RevealSearchState *search_state =
-        nullptr) {
+    const csplendor::solver_internal::HiddenOutcomeCatalog &catalog, int depth,
+    const csplendor::solver_internal::RevealSearchState *search_state = nullptr,
+    bool root_independent = false) {
   CSPLENDOR_PERF_INC(SolverStateKeyCalls);
   const Board &board = game.board;
   csplendor::solver_internal::CardIdSet unseen;
@@ -2667,35 +2623,35 @@ SolverBenchmarkKey make_solver_benchmark_key(
   if (search_state != nullptr && search_state->active()) {
     CSPLENDOR_PERF_INC(SolverRevealStateFastKeyReads);
     unseen = search_state->remaining_all();
-    acquired_hidden = search_state->acquired_hidden();
+    acquired_hidden = root_independent ? csplendor::solver_internal::CardIdSet{}
+                                       : search_state->acquired_hidden();
     board_hash = search_state->rule_hash();
   } else {
     unseen = catalog.unseen_cards(board);
-    acquired_hidden = catalog.acquired_hidden_cards(board);
+    acquired_hidden = root_independent ? csplendor::solver_internal::CardIdSet{}
+                                       : catalog.acquired_hidden_cards(board);
     board_hash = board.compute_set_deck_search_hash();
   }
-  return {csplendor::solver_internal::StateKeyCore{
-              board_hash, board.players[0].points, board.players[1].points,
-              board.players[0].purchased_count,
-              board.players[1].purchased_count, board.final_round,
-              board.winner},
-          unseen,
-          acquired_hidden,
-          board.players[0].reserved_count,
-          board.players[1].reserved_count,
+  return {csplendor::solver_internal::RevealStateKey{
+              csplendor::solver_internal::StateKeyCore{
+                  board_hash, board.players[0].points, board.players[1].points,
+                  board.players[0].purchased_count,
+                  board.players[1].purchased_count, board.final_round,
+                  board.winner},
+              unseen.low, unseen.high, acquired_hidden.low,
+              acquired_hidden.high, board.players[0].reserved_count,
+              board.players[1].reserved_count},
           depth};
 }
 
 uint64_t digest_solver_key(uint64_t digest,
                            const SolverBenchmarkKey &key) noexcept {
-  digest = digest_u64(digest, key.core.board_hash);
-  digest = digest_u64(digest, key.core.metadata_bits());
-  digest = digest_u64(digest, key.unseen.low);
-  digest = digest_u64(digest, key.unseen.high);
-  digest = digest_u64(digest, key.acquired_hidden.low);
-  digest = digest_u64(digest, key.acquired_hidden.high);
-  digest = digest_u64(digest, key.reserved0);
-  digest = digest_u64(digest, key.reserved1);
+  digest = digest_u64(digest, key.state.board_hash());
+  digest = digest_u64(digest, key.state.metadata_bits());
+  digest = digest_u64(digest, key.state.unseen_low());
+  digest = digest_u64(digest, key.state.unseen_high());
+  digest = digest_u64(digest, key.state.acquired_hidden_low());
+  digest = digest_u64(digest, key.state.acquired_hidden_high());
   return digest_i64(digest, key.depth);
 }
 
@@ -2707,17 +2663,15 @@ Result run_solver_state_key(const Arguments &arguments,
   search_state.initialize(fixture.game, catalog);
   const SolverBenchmarkKey oracle = make_solver_benchmark_key(
       fixture.game, catalog, arguments.depth, nullptr);
-  const SolverBenchmarkKey repeated =
-      make_solver_benchmark_key(fixture.game, catalog, arguments.depth,
-                                &search_state);
+  const SolverBenchmarkKey repeated = make_solver_benchmark_key(
+      fixture.game, catalog, arguments.depth, &search_state);
   if (!(oracle == repeated) ||
       SolverBenchmarkKeyHash{}(oracle) != SolverBenchmarkKeyHash{}(repeated))
     throw std::runtime_error("solver state-key oracle is unstable");
 
   Result result = benchmark_loop(arguments, [&](uint64_t, uint64_t digest) {
-    const SolverBenchmarkKey key =
-        make_solver_benchmark_key(fixture.game, catalog, arguments.depth,
-                                  &search_state);
+    const SolverBenchmarkKey key = make_solver_benchmark_key(
+        fixture.game, catalog, arguments.depth, &search_state);
     return digest_solver_key(digest, key);
   });
   result.semantics.boolean("state_key_repeatable", true);
@@ -2739,25 +2693,41 @@ Result run_solver_tt(const Arguments &arguments,
                      const Fixture &fixture) {
   csplendor::solver_internal::HiddenOutcomeCatalog catalog;
   catalog.remember_initial_position(fixture.game);
-  std::vector<SolverBenchmarkKey> keys;
+  std::vector<SolverBenchmarkExactKey> keys;
   keys.reserve(transitions.size());
   for (size_t index = 0; index < transitions.size(); ++index) {
-    keys.push_back(make_solver_benchmark_key(transitions[index].game, catalog,
-                                             arguments.depth -
-                                                 static_cast<int>(index % 3)));
+    const SolverBenchmarkKey full_key = make_solver_benchmark_key(
+        transitions[index].game, catalog,
+        arguments.depth - static_cast<int>(index % 3), nullptr, true);
+    keys.emplace_back(full_key.state, full_key.depth);
   }
-  std::unordered_map<SolverBenchmarkKey, uint64_t, SolverBenchmarkKeyHash>
-      table;
+  using SolverBenchmarkTable =
+      std::unordered_map<SolverBenchmarkExactKey, SolverBenchmarkEntry,
+                         SolverBenchmarkExactKeyHash>;
+  SolverBenchmarkTable table;
   table.reserve(keys.size() * 2);
+  const auto make_entry = [](uint64_t index) {
+    SolverBenchmarkEntry entry{
+        index % 3 == 0 ? csplendor::solver_internal::ForceStatus::PROVEN
+                       : csplendor::solver_internal::ForceStatus::REFUTED,
+        index + 1,
+        static_cast<int>(index % CARD_COUNT),
+        true,
+        static_cast<size_t>(index % MAX_MOVES) + 1,
+        true};
+    entry.set_generation(index / 7 + 1);
+    entry.set_last_touched(index + 1);
+    return entry;
+  };
   for (size_t index = 0; index < keys.size(); ++index)
-    table.insert_or_assign(keys[index], index + 1);
+    table.insert_or_assign(keys[index], make_entry(index));
   if (table.empty())
     throw std::runtime_error("solver TT corpus is empty");
 
   uint64_t hit_count = 0;
   Result result =
       benchmark_loop(arguments, [&](uint64_t index, uint64_t digest) {
-        const SolverBenchmarkKey &lookup_key = keys[index % keys.size()];
+        const SolverBenchmarkExactKey &lookup_key = keys[index % keys.size()];
         CSPLENDOR_PERF_TT_PROBE_SCOPE(probe_scope);
         const auto found = table.find(lookup_key);
         CSPLENDOR_PERF_TT_PROBE_FINISH(probe_scope);
@@ -2765,19 +2735,27 @@ Result run_solver_tt(const Arguments &arguments,
           throw std::runtime_error("solver TT expected lookup miss");
         CSPLENDOR_PERF_INC(SolverTtHits);
         ++hit_count;
-        digest = digest_u64(digest, found->second);
+        const SolverBenchmarkEntry &entry = found->second;
+        digest = digest_u64(digest, static_cast<uint8_t>(entry.status()));
+        digest = digest_u64(digest, entry.action_code());
+        digest = digest_i64(digest, entry.reveal_card());
+        digest = digest_u64(digest, entry.has_action() ? 1 : 0);
+        digest = digest_u64(digest, entry.action_count());
+        digest = digest_u64(digest, entry.replayable() ? 1 : 0);
+        digest = digest_u64(digest, entry.generation());
+        digest = digest_u64(digest, entry.last_touched());
 
-        const SolverBenchmarkKey &store_key =
+        const SolverBenchmarkExactKey &store_key =
             keys[(index * 17 + 3) % keys.size()];
         CSPLENDOR_PERF_INC(SolverTtStores);
-        table.insert_or_assign(store_key, index + 1);
+        table.insert_or_assign(store_key, make_entry(index + keys.size()));
         return digest_u64(digest, table.size());
       });
   // benchmark_loop includes warmup calls in the local total.
   const uint64_t expected_hits = arguments.warmup + arguments.iterations;
   if (hit_count != expected_hits)
     throw std::runtime_error("solver TT hit total mismatch");
-  for (const SolverBenchmarkKey &key : keys) {
+  for (const SolverBenchmarkExactKey &key : keys) {
     if (table.find(key) == table.end())
       throw std::runtime_error("solver TT lost a corpus key");
   }
@@ -3215,6 +3193,8 @@ CloneAllocationObservables observe_clone_allocations(const Fixture &fixture) {
 
 Result run_layout_probe(const Arguments &, const Fixture &fixture) {
   const MoveListBoundaryObservables move_lists = observe_move_list_boundaries();
+  const csplendor::solver_internal::SolverTtLayoutMetrics solver_tt =
+      csplendor::solver_internal::solver_tt_layout_metrics();
   Result result;
   result.operations = 1;
   result.elapsed_ns = time_once(
@@ -3226,6 +3206,23 @@ Result run_layout_probe(const Arguments &, const Fixture &fixture) {
         digest = digest_u64(digest, sizeof(Board));
         digest = digest_u64(digest, sizeof(Game));
         digest = digest_u64(digest, sizeof(MCTSNode));
+        digest = digest_u64(digest, solver_tt.reveal_state_key);
+        digest = digest_u64(digest, solver_tt.reveal_depth_key);
+        digest = digest_u64(digest, solver_tt.reveal_exact_state_key);
+        digest = digest_u64(digest, solver_tt.reveal_exact_depth_key);
+        digest = digest_u64(digest, solver_tt.reveal_memo_entry);
+        digest = digest_u64(digest, solver_tt.reveal_persistent_entry);
+        digest = digest_u64(digest, solver_tt.reveal_memo_value);
+        digest = digest_u64(digest, solver_tt.reveal_persistent_value);
+        digest = digest_u64(digest, solver_tt.reveal_proof_node_value);
+        digest = digest_u64(digest, solver_tt.visible_state_key);
+        digest = digest_u64(digest, solver_tt.visible_depth_key);
+        digest = digest_u64(digest, solver_tt.visible_memo_entry);
+        digest = digest_u64(digest, solver_tt.visible_force_entry);
+        digest = digest_u64(digest, solver_tt.visible_force_bounds);
+        digest = digest_u64(digest, solver_tt.visible_memo_value);
+        digest = digest_u64(digest, solver_tt.visible_force_value);
+        digest = digest_u64(digest, solver_tt.visible_bounds_value);
         digest = digest_u64(digest, move_lists.sampled_states);
         digest = digest_u64(digest, move_lists.max_retained);
         digest = digest_u64(digest, move_lists.saturated_states);
@@ -3250,6 +3247,40 @@ Result run_layout_probe(const Arguments &, const Fixture &fixture) {
   result.semantics.integer("sizeof_board", sizeof(Board));
   result.semantics.integer("sizeof_game", sizeof(Game));
   result.semantics.integer("sizeof_mcts_node", sizeof(MCTSNode));
+  result.semantics.integer("sizeof_reveal_state_key",
+                           solver_tt.reveal_state_key);
+  result.semantics.integer("sizeof_reveal_depth_key",
+                           solver_tt.reveal_depth_key);
+  result.semantics.integer("sizeof_reveal_exact_state_key",
+                           solver_tt.reveal_exact_state_key);
+  result.semantics.integer("sizeof_reveal_exact_depth_key",
+                           solver_tt.reveal_exact_depth_key);
+  result.semantics.integer("sizeof_reveal_memo_entry",
+                           solver_tt.reveal_memo_entry);
+  result.semantics.integer("sizeof_reveal_persistent_entry",
+                           solver_tt.reveal_persistent_entry);
+  result.semantics.integer("sizeof_reveal_memo_value",
+                           solver_tt.reveal_memo_value);
+  result.semantics.integer("sizeof_reveal_persistent_value",
+                           solver_tt.reveal_persistent_value);
+  result.semantics.integer("sizeof_reveal_proof_node_value",
+                           solver_tt.reveal_proof_node_value);
+  result.semantics.integer("sizeof_visible_state_key",
+                           solver_tt.visible_state_key);
+  result.semantics.integer("sizeof_visible_depth_key",
+                           solver_tt.visible_depth_key);
+  result.semantics.integer("sizeof_visible_memo_entry",
+                           solver_tt.visible_memo_entry);
+  result.semantics.integer("sizeof_visible_force_entry",
+                           solver_tt.visible_force_entry);
+  result.semantics.integer("sizeof_visible_force_bounds",
+                           solver_tt.visible_force_bounds);
+  result.semantics.integer("sizeof_visible_memo_value",
+                           solver_tt.visible_memo_value);
+  result.semantics.integer("sizeof_visible_force_value",
+                           solver_tt.visible_force_value);
+  result.semantics.integer("sizeof_visible_bounds_value",
+                           solver_tt.visible_bounds_value);
   result.semantics.integer("move_list_capacity", MAX_MOVES);
   result.semantics.integer("reachable_random_corpus_seeds", 64);
   result.semantics.integer("reachable_random_corpus_max_plies", 100);

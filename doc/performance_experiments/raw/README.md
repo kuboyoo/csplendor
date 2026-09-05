@@ -16,6 +16,9 @@
 655件（元データ125.72 MiB、圧縮後15.79 MiB）を`/tmp`から移した。全ファイルで
 gzip展開後のSHA-256が元記録と一致することを確認してから、`/tmp`側を削除した。
 
+Phase 3Cでは、solver TT圧縮の正式A/B、layout、再profile、gprof、sanitizer、
+5手・7手詰みを含む検証記録23件を`phase3c/`へ追加した。
+
 ## 構成
 
 | directory | contents |
@@ -27,6 +30,7 @@ gzip展開後のSHA-256が元記録と一致することを確認してから、
 | `phase2b/` | 合法手生成高速化 |
 | `phase3a/` | solver container/metadata削減 |
 | `phase3b/` | 厳密めくれ探索の増分set-state/key、fallback、oracle検証 |
+| `phase3c/` | solver TT key/entry圧縮、layout、Stage 2再profile |
 | `exploratory/` | Phase分類前のsolver・benchmark探索 |
 
 内容の確認例:

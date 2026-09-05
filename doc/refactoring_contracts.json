@@ -110,6 +110,7 @@
       "solver_action_filter.h",
       "solver_card_equivalence.h",
       "solver_path.h",
+      "solver_tt_types.h",
       "state_field_roles.h",
       "state_invariants.h",
       "undo_record.h",
