@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(CSPLENDOR_BUILD_PYTHON_MODULE "Build the pybind11 extension" ON)
+option(CSPLENDOR_GROUP_TAKE_CANDIDATES "Group visible solver take deltas" ON)
 option(CSPLENDOR_BUILD_NATIVE_TESTS "Build native C++ tests" OFF)
 option(CSPLENDOR_BUILD_PARALLEL_BENCHMARK "Build native MCTS benchmark" OFF)
 option(CSPLENDOR_BUILD_ENGINE_BENCHMARK
@@ -243,6 +244,9 @@ else()
 endif()
 
 add_library(csplendor_sanitizer INTERFACE)
+if(CSPLENDOR_GROUP_TAKE_CANDIDATES)
+  target_compile_definitions(csplendor_core_config INTERFACE CSPLENDOR_GROUP_TAKE_CANDIDATES=1)
+endif()
 if(CSPLENDOR_SANITIZER STREQUAL "none")
   # No instrumentation.
 elseif(CSPLENDOR_SANITIZER STREQUAL "thread")

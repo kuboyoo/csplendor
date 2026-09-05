@@ -5,6 +5,7 @@
 #include "solver_path.h"
 #include "solver_normal_rollback.h"
 #include "solver_tt_types.h"
+#include "solver_take_groups.h"
 #include "state_invariants.h"
 #include <algorithm>
 #include <chrono>
@@ -349,7 +350,11 @@ private:
   std::vector<OrderedAction> representative_actions(Game &game) {
     CSPLENDOR_PERF_INC(SolverTemporaryVectorAllocations);
     std::unordered_map<StateKey, OrderedAction, StateKeyHash> representatives;
-    for (uint64_t code : game.legal_action_codes()) {
+    auto codes = game.legal_action_codes();
+#ifdef CSPLENDOR_GROUP_TAKE_CANDIDATES
+    codes = csplendor::solver_internal::group_take_candidates(game, std::move(codes));
+#endif
+    for (uint64_t code : codes) {
       const Action action = Action::unpack(code);
       if (action.type == RESERVE_DECK)
         continue;

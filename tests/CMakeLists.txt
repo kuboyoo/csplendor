@@ -11,6 +11,9 @@ function(csplendor_add_native_test target source labels timeout)
   endif()
 endfunction()
 
+csplendor_add_native_test(action_selection_unit action_selection_unit.cpp
+                          "unit;selection;oracle" 120)
+
 set(CSPLENDOR_STANDALONE_HEADERS
     action.h
     action_encoder.h
