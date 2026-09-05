@@ -69,5 +69,58 @@ def measure(stage, names=None):
         paired(stage + '_' + name, *cases[name], pairs=4 if stage == 'smoke' else 22)
 
 
+def final_builds():
+    build('final-release')
+    build('final-reference', ['-DCSPLENDOR_GROUP_TAKE_CANDIDATES=OFF',
+                             '-DCSPLENDOR_RETURN_RANK_SELECTION=OFF'])
+    build('final-diagnostic', ['-DCSPLENDOR_PERF_INSTRUMENTATION=ON'])
+    build('final-asan', ['-DCSPLENDOR_SANITIZER=address-undefined'],
+          ('action_selection_unit', 'solver_components_unit', 'solver_normal_rollback_unit',
+           'rule_query_unit', 'mcts_optimization_unit'))
+    # build() uses targets[1:] as the test list; include the first native target.
+    checked('unit_final_asan_selection', ['ctest', '--test-dir', str(ROOT / 'build/final-asan'),
+                                        '--output-on-failure', '-R', '^action_selection_unit$'])
+
+
+def deploy():
+    import phase4c_record_20260905 as previous
+    prior.ROOT, prior.RAW, prior.BASE_SOURCE, prior.BASE, prior.RELEASE = ROOT, RAW, BASE_SOURCE, BASE, RELEASE
+    previous.ROOT, previous.RELEASE = ROOT, RELEASE
+    previous.checked, previous.save = checked, save
+    previous.deploy()
+
+
+def final_measurements():
+    # Direct comparison with the phase-start engine, not multiplied ticket gains.
+    for name, case in {
+        'visible': CASES['3e']['primary'], 'random': CASES['5e']['primary'],
+        'mcts': CASES['5a']['mcts'], 'decode': CASES['5a']['primary'],
+        'v3': ('v3_selfplay', 'initial', 10000, []),
+    }.items():
+        paired('common_' + name, *case, pairs=22)
+    # The new diagnostic slice uses identical source/harness with both new
+    # optimization flags OFF as its reference. The mask/count APIs are unchanged.
+    prior.BASE_SOURCE, prior.BASE = ROOT, ROOT / 'build/final-reference'
+    for workload in ('legal_count', 'legal_select'):
+        paired('component_' + workload, workload, 'token_return', 100000, [], pairs=22)
+    for profile in ('release', 'reference', 'diagnostic'):
+        binary = ROOT / ('build/final-' + profile) / 'benchmark_engine_hotpaths'
+        for workload, fixture, budget in (
+            ('legal_count', 'token_return', 100000),
+            ('legal_select', 'token_return', 100000),
+            ('visible_solver', 'five_moves', 100000),
+        ):
+            checked('profile_' + profile + '_' + workload,
+                    [str(binary), '--workload', workload, '--fixture', fixture,
+                     '--iterations', str(budget), '--seed', '42', '--warmup', '100'])
+
+
 if __name__ == '__main__':
-    measure(sys.argv[1], sys.argv[2:] or None)
+    if sys.argv[1] == 'builds':
+        final_builds()
+    elif sys.argv[1] == 'deploy':
+        deploy()
+    elif sys.argv[1] == 'final_measurements':
+        final_measurements()
+    else:
+        measure(sys.argv[1], sys.argv[2:] or None)

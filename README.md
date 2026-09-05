@@ -139,6 +139,12 @@ Phase 5DのV3 payment静的DPも試作・評価しました。修正版はV3マ�
 全IDの網羅テストを追加しました。48手MCTSや実NNの高速化を意味しません。
 詳細は[Phase 5D測定記録](doc/performance_experiments/phase5d_v3_payment_20260906.md)を参照してください。
 
+Phase 3E・5E・5Aも採否評価を完了しました。3Eのtake代表化は代表visible-only探索で
+1.106倍（独立再測定1.112倍）、5Eの返却手順位選択はfull-action自己対戦で
+1.088倍（再測定1.079倍）となり採用しました。5Aの48手直接適用は代表処理が遅くなり撤去しました。
+別経路の倍率を掛け合わせたり、実NN・問題保存速度の改善率として扱ったりはしません。
+詳細は[3E・5E・5A測定記録](doc/performance_experiments/phase3e5e5a_action_selection_20260906.md)を参照してください。
+
 ### 実験的な並列MCTS
 
 共有tree並列探索はStage Bのexperimental opt-inです。既定の`num_threads=1`はworker queueを

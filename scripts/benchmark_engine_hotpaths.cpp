@@ -174,9 +174,9 @@ constexpr uint64_t kFormalTraceSimulations = 41;
 
 volatile uint64_t benchmark_sink = 0;
 
-const std::array<const char *, 27> kWorkloads = {
+const std::array<const char *, 28> kWorkloads = {
     "legal_count",      "legal_codes",
-    "legal_actions",    "random_selfplay_apply",
+    "legal_actions",    "random_selfplay_apply", "legal_select",
     "apply_only",       "purchase_apply",
     "apply_exact_hash", "apply_observable_hash",
     "cold_hash",        "cached_hash",
@@ -1257,6 +1257,16 @@ Result run_legal_codes(const Arguments &arguments, const Fixture &fixture) {
   });
   result.counters.integer("actions_per_call", fixture.legal_count);
   return result;
+}
+
+// Separate rank/prefix materialization from legal_count. Count is fixture
+// setup, not part of this timer; random_selfplay_apply still times both.
+Result run_legal_select(const Arguments &arguments, const Fixture &fixture) {
+  const uint16_t count = fixture.game.legal_action_count();
+  return benchmark_loop(arguments, [&](uint64_t index, uint64_t digest) {
+    return digest_u64(digest, fixture.game.legal_action_code_at(
+        static_cast<uint16_t>(count ? index % count : 0)));
+  });
 }
 
 Result run_legal_actions(const Arguments &arguments, const Fixture &fixture) {
@@ -3482,6 +3492,8 @@ Result dispatch(const std::string &workload, const Arguments &arguments,
     return run_legal_count(arguments, fixture);
   if (workload == "legal_codes")
     return run_legal_codes(arguments, fixture);
+  if (workload == "legal_select")
+    return run_legal_select(arguments, fixture);
   if (workload == "legal_actions")
     return run_legal_actions(arguments, fixture);
   if (workload == "random_selfplay_apply")

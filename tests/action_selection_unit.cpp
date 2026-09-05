@@ -1,5 +1,6 @@
 #include "action_encoder.h"
 #include "game_snapshot.h"
+#include "mcts_game_adapter.h"
 #include "solver_take_groups.h"
 #include "solver_types.h"
 #include "undo_record.h"
@@ -16,7 +17,7 @@ ActionOrderKey order(uint64_t code) {
   Action a = Action::unpack(code);
   int rank = (a.type == PURCHASE || a.type == VISIT_NOBLE) ? 0 :
       (a.type == RESERVE_VISIBLE ? 1 :
-       (a.type == TAKE_DIFFERENT || a.type == TAKE_SAME ? 2 : 3));
+       (a.type == TAKE_DIFFERENT || a.type == TAKE_SAME ? 2 : 9));
   return {rank, is_valid_card_id(a.card_id) ? -get_card(a.card_id).points : 0, code};
 }
 auto representatives(const Game &game, const std::vector<uint64_t> &codes) {
@@ -134,8 +135,85 @@ void index_corpus() {
   checked += verify_indices(game);
   std::cout << "full-action indices checked: " << checked << '\n';
 }
+
+uint64_t verify_policy(Game game, bool canonical = true) {
+  uint64_t covered = 0;
+  const auto mask = ActionEncoderCpp::get_action_mask_reference_for_testing(game);
+  for (bool history : {false, true}) for (int index = -1; index <= 48; ++index) {
+    Game reference = game.clone_light(), actual = game.clone_light();
+    // The historical scan helper assumes a policy index; -1 can match an
+    // intentionally unencodable action (PASS or a shortage TAKE).
+    const auto action = index >= 0 && index < 48
+        ? ActionEncoderCpp::decode_reference_for_testing(index, reference) : Action{};
+    const bool legal = index >= 0 && index < 48 && mask[index];
+    require((action.type != ACTION_TYPE_COUNT) == legal, "policy oracle mask");
+    const bool expected = legal && reference.apply_trusted(action, history);
+    const Action decoded = index >= 0 && index < 48 ? ActionEncoderCpp::decode(index, actual) : Action{};
+    const bool result = decoded.type != ACTION_TYPE_COUNT && actual.apply_trusted(decoded, history);
+    require(result == expected &&
+            csplendor::detail::UndoRecord::boards_equal(reference.board, actual.board), "safe policy child");
+    require(reference.history.size() == actual.history.size(), "policy history");
+    if (legal) {
+      covered |= uint64_t{1} << index;
+      if (canonical) {
+        actual = game.clone_light();
+        const bool applied = mcts_internal::GameAdapter::decode_and_apply_native(actual, index);
+        require(applied == expected &&
+                csplendor::detail::UndoRecord::boards_equal(reference.board, actual.board), "native policy child");
+      }
+    }
+  }
+  return covered;
+}
+void policy_corpus() {
+  uint64_t covered = 0;
+  for (int seed = 1; seed <= 16; ++seed) for (bool blank : {false, true}) {
+    Game game(seed);
+    game.blank_refill_mode = blank;
+    for (int ply = 0; ply < 64 && !game.is_game_over(); ++ply) {
+      if (ply % 2) (void)game.board.hash();
+      covered |= verify_policy(game);
+      const auto actions = game.legal_actions();
+      require(game.apply_trusted(actions[(seed * 7919 + ply * 97) % actions.size()]), "policy corpus progression");
+    }
+  }
+  Game game(42);
+  auto &player = game.board.players[0];
+  player.bonuses = {10,10,10,10,10};
+  player.gems = {2,2,2,2,2,0};
+  player.sync_packed();
+  for (int slot = 0; slot < 3; ++slot) {
+    player.reserved[slot] = game.board.decks[slot].back();
+    game.board.decks[slot].pop_back();
+    player.reserved_is_hidden[slot] = true;
+  }
+  player.reserved_count = 3;
+  covered |= verify_policy(game); // all reserved sources, hidden shift/clear
+  game.board.waiting_noble = true;
+  covered |= verify_policy(game); // all three noble slots
+  game.board.waiting_noble = false;
+  game.board.final_round = true;
+  game.board.current_player = 1;
+  covered |= verify_policy(game);
+  game.board.current_player = 0;
+  game.board.visible[0][1] = game.board.visible[0][0];
+  player.reserved[1] = player.reserved[0];
+  covered |= verify_policy(game, false); // duplicate source: first-match fallback
+  player.gems = {3,3,3,3,3,3};
+  player.sync_packed();
+  covered |= verify_policy(game, false); // legacy cap/editor fallback
+  for (auto &row : game.board.visible) row.fill(-1);
+  for (auto &deck : game.board.decks) deck.clear();
+  player.reserved.fill(-1);
+  player.reserved_count = 0;
+  game.board.bank.fill(0);
+  require(game.requires_forced_pass(), "policy forced pass fixture");
+  require(verify_policy(game, false) == 0, "PASS entered policy");
+  require(covered == (uint64_t{1} << 48) - 1, "not all 48 slots covered");
+  std::cout << "all 48 policy slots, hidden/editor/final-round/PASS checked\n";
+}
 } // namespace
 int main() {
-  try { group_corpus(); index_corpus(); }
+  try { group_corpus(); index_corpus(); policy_corpus(); }
   catch (const std::exception &error) { std::cerr << error.what() << '\n'; return 1; }
 }

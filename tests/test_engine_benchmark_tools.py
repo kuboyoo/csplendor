@@ -845,6 +845,9 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
         "CSPLENDOR_SOLVER_NORMAL_ROLLBACK",
         "CSPLENDOR_MCTS_LEGACY_TREE_RECORDS",
         "CSPLENDOR_V3_PAYMENT_DP",
+        "CSPLENDOR_GROUP_TAKE_CANDIDATES",
+        "CSPLENDOR_RETURN_RANK_SELECTION",
+        "CSPLENDOR_DIRECT_POLICY_APPLY",
         "CSPLENDOR_VERIFY_SOLVER_ROLLBACK",
         "CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER",
     ):

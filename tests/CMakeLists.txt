@@ -13,6 +13,7 @@ endfunction()
 
 csplendor_add_native_test(action_selection_unit action_selection_unit.cpp
                           "unit;selection;oracle" 120)
+target_compile_definitions(action_selection_unit PRIVATE CSPLENDOR_ACTION_ENCODER_REFERENCE=1)
 
 set(CSPLENDOR_STANDALONE_HEADERS
     action.h
