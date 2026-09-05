@@ -31,6 +31,7 @@ Phase 3Cでは、solver TT圧縮の正式A/B、layout、再profile、gprof、san
 | `phase3a/` | solver container/metadata削減 |
 | `phase3b/` | 厳密めくれ探索の増分set-state/key、fallback、oracle検証 |
 | `phase3c/` | solver TT key/entry圧縮、layout、Stage 2再profile |
+| `phase3dp1/` | めくれscore一回計算、正式A/B・holdout・oracle・全回帰・sanitizer |
 | `exploratory/` | Phase分類前のsolver・benchmark探索 |
 
 内容の確認例:

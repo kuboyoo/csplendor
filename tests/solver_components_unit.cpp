@@ -3,6 +3,7 @@
 #include "solver_action_filter.h"
 #include "solver_card_equivalence.h"
 #include "solver_path.h"
+#include "solver_reveal_order.h"
 #include "solver_tt_types.h"
 #include "solver_types.h"
 #include "visible_only_solver.h"
@@ -11,6 +12,7 @@
 #include <chrono>
 #include <iostream>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <type_traits>
 #include <unordered_map>
@@ -80,6 +82,116 @@ void test_common_search_values() {
   const ActionOrderKey purchase{0, -3, 9};
   const ActionOrderKey take{2, 0, 1};
   require(purchase < take, "shared action ordering changed");
+}
+
+void test_reveal_score_order_and_locality() {
+  using csplendor::solver_internal::sort_reveal_cards_by_score;
+  // Cover the 40-card production bound, larger fallback, all ties, negative
+  // values and integer extremes without subtraction-based comparisons.
+  for (int size : {0, 1, 2, 16, 40, 41, 90}) {
+    for (int action = 0; action < 6; ++action) {
+      std::vector<int> cards;
+      for (int i = 0; i < size; ++i)
+        cards.push_back(size - i - 1);
+      const auto score = [action](int card) {
+        if (action == 0)
+          return 0;
+        if (action == 1)
+          return card % 2 ? std::numeric_limits<int>::min()
+                          : std::numeric_limits<int>::max();
+        return (card * 7 + action * card) % 11 - 5;
+      };
+      auto expected = cards;
+      sort_reveal_cards_by_score<false>(expected, score);
+      size_t calls = 0;
+      sort_reveal_cards_by_score<true>(cards, [&](int card) {
+        ++calls;
+        return score(card);
+      });
+      require(cards == expected, "cached reveal order differs from comparator");
+#ifndef CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER
+      require(calls == (size > 1 ? static_cast<size_t>(size) : 0),
+              "reveal score must be computed once per candidate, not per compare");
+#endif
+    }
+  }
+  std::vector<int> cards{3, 2, 1, 0};
+  const auto original = cards;
+  bool threw = false;
+  try {
+    sort_reveal_cards_by_score<true>(cards, [](int) -> int {
+      throw std::runtime_error("score failure");
+    });
+  } catch (const std::runtime_error &) {
+    threw = true;
+  }
+  require(threw && cards == original, "score exception was swallowed or mutated input");
+}
+
+void test_defender_reserve_order_depends_on_return_colour() {
+  for (bool simple : {false, true}) {
+    Game game(42);
+    game.simple_payment_mode = simple;
+    Board &board = game.board.begin_editor_mutation();
+    board.players[0].gems = {2, 2, 2, 2, 2, 0};
+    board.players[0].sync_packed();
+    board.bank = {2, 2, 2, 2, 2, 5};
+    const auto input_hash = board.hash();
+    RevealVerifiedSolver solver(1, 3, 0, 0.0, {}, false, 100000, 500000,
+                                UINT64_MAX, false, 0, true, true);
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    csplendor::perf::reset();
+#endif
+    const auto result = solver.split_root(game, 50000);
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    const auto counts = csplendor::perf::snapshot();
+    const auto score_calls = counts.get(
+        csplendor::perf::Counter::SolverDefenderReserveScoreCalls);
+    const auto candidates = counts.get(
+        csplendor::perf::Counter::SolverDefenderReserveSortCandidates);
+    require(candidates > 0, "defender reserve score path was not exercised");
+#ifndef CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER
+    require(csplendor::solver_internal::cache_reveal_scores_enabled
+                ? score_calls == candidates
+                : score_calls > candidates,
+            "defender reserve score-call mechanism changed");
+#endif
+    std::cout << "defender reserve simple=" << simple
+              << " score_calls=" << score_calls
+              << " candidates=" << candidates << '\n';
+#endif
+    require(result.complete, "defender reserve frontier was not complete");
+    std::unordered_map<uint64_t, std::pair<int, int>> last;
+    std::set<int> return_colours;
+    for (const auto &edge : result.edges) {
+      const Action action = Action::unpack(edge.action_code);
+      if (action.type != RESERVE_DECK)
+        continue;
+      const Card &card = get_card(edge.reveal_card);
+      int shortage = 0;
+      for (int colour = 0; colour < 5; ++colour) {
+        const int available = 2 - action.return_gems[colour];
+        shortage += std::max(0, static_cast<int>(card.cost[colour]) - available);
+      }
+      const int gold = 1 - action.return_gems[GOLD];
+      const int gap = std::max(0, shortage - gold);
+      // This fixture has zero bonuses/points; no card can win or earn a noble.
+      const int score = (gap == 0 ? 100000 : 0) + card.points * 10000 -
+                        gap * 100 + card.bonus;
+      const std::pair<int, int> order{-score, edge.reveal_card};
+      const auto previous = last.find(edge.action_code);
+      require(previous == last.end() || previous->second <= order,
+              "defender reserve reused another action's score/order");
+      last[edge.action_code] = order;
+      for (int colour = 0; colour < 6; ++colour)
+        if (action.return_gems[colour])
+          return_colours.insert(colour);
+    }
+    require(last.size() >= 18 && return_colours.size() == 6,
+            "defender reserve oracle did not cover every return colour/level");
+    require(game.board.hash() == input_hash && game.simple_payment_mode == simple,
+            "sorting a frontier mutated its input game");
+  }
 }
 
 void test_solver_tt_layout_and_value_contracts() {
@@ -700,6 +812,8 @@ int main() {
   try {
     test_public_solver_value_contracts();
     test_common_search_values();
+    test_reveal_score_order_and_locality();
+    test_defender_reserve_order_depends_on_return_colour();
     test_solver_tt_layout_and_value_contracts();
     test_solver_tt_full_key_collision_contract();
     test_recursive_path_lifo_guard();

@@ -38,6 +38,15 @@ foreach(header IN LISTS CSPLENDOR_STANDALONE_HEADERS)
     "header_${header_stem}" "${source}" "header;standalone;api" 10)
 endforeach()
 
+# Internal helpers get standalone checks without expanding the public API
+# header matrix (which is versioned in doc/refactoring_contracts.json).
+set(reveal_order_header_source
+    "${CMAKE_CURRENT_BINARY_DIR}/header_solver_reveal_order.cpp")
+file(GENERATE OUTPUT "${reveal_order_header_source}"
+     CONTENT "#include \"solver_reveal_order.h\"\nint main() { return 0; }\n")
+csplendor_add_native_test(header_solver_reveal_order "${reveal_order_header_source}"
+                          "header;standalone;internal" 10)
+
 csplendor_add_native_test(mcts_parallel_unit mcts_parallel_unit.cpp
                           "unit;replay" 30)
 target_compile_definitions(mcts_parallel_unit PRIVATE CSPLENDOR_MCTS_TESTING=1)

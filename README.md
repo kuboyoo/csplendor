@@ -93,6 +93,13 @@ paired A/Bで、exact 5手局面は3.91%高速化し、exact/visible solverのpe
 上表とは異なるため倍率は合算していません。詳細は
 [Phase 3C測定記録](doc/performance_experiments/phase3c_solver_tt_compaction_20260905.md)を参照してください。
 
+Phase 3D-P1では、めくれ候補のスコアをsort比較のたびに再計算せず、一度だけ計算するように
+しました。3C後を基準とする固定探索量のpaired A/Bで、代表deepは1.497倍（独立再測定1.486倍）、
+shallowは1.307倍、warm sessionは1.544倍です。候補順・探索結果を維持し、5手/7手詰み、
+proof/frontier、cache再利用、ASan/UBSanを検証しました。depth7の速度fixtureはnode上限で
+UNKNOWNとなるため、7手詰みの完遂速度を意味しません。小さなproof計測の不確実性を含む詳細は
+[Phase 3D-P1測定記録](doc/performance_experiments/phase3dp1_score_once_20260905.md)を参照してください。
+
 ### 実験的な並列MCTS
 
 共有tree並列探索はStage Bのexperimental opt-inです。既定の`num_threads=1`はworker queueを

@@ -822,6 +822,27 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
         == metadata["benchmark_build_fingerprint_sha256"]
     )
 
+    for option in (
+        "CSPLENDOR_CACHE_REVEAL_SCORES",
+        "CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER",
+    ):
+        option_cache = tmp_path / f"{option}-CMakeCache.txt"
+        option_cache.write_text(
+            cache.read_text(encoding="utf-8") + f"{option}:BOOL=ON\n",
+            encoding="utf-8",
+        )
+        option_metadata, _ = manifest_tool._cmake_build_metadata(option_cache)
+        assert option_metadata["allowlisted_entries"][option] == "ON"
+        assert (
+            option_metadata["allowlisted_fingerprint_sha256"]
+            != metadata["allowlisted_fingerprint_sha256"]
+        )
+        same_build = (
+            option_metadata["benchmark_build_fingerprint_sha256"]
+            == metadata["benchmark_build_fingerprint_sha256"]
+        )
+        assert same_build == (option == "CSPLENDOR_CACHE_REVEAL_SCORES")
+
     verify_cache = tmp_path / "verify-CMakeCache.txt"
     verify_cache.write_text(
         cache.read_text(encoding="utf-8").replace(

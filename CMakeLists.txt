@@ -40,6 +40,13 @@ option(CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE
        "Verify incremental reveal-solver state against scan oracles" OFF)
 option(CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
        "Compact and specialize solver transposition-table keys and entries" ON)
+option(CSPLENDOR_CACHE_REVEAL_SCORES
+       "Compute each action-local reveal candidate score once before sorting" ON)
+option(CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER
+       "Compare cached reveal scores/order with the original comparator" OFF)
+if(CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER AND NOT CSPLENDOR_CACHE_REVEAL_SCORES)
+  message(FATAL_ERROR "Reveal score verification requires cached scores")
+endif()
 
 if(CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE AND
    NOT CSPLENDOR_INCREMENTAL_EXACT_HASH)
@@ -166,6 +173,15 @@ endif()
 if(CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES)
   target_compile_definitions(
       csplendor_core_config INTERFACE CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES=1)
+endif()
+
+if(CSPLENDOR_CACHE_REVEAL_SCORES)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_CACHE_REVEAL_SCORES=1)
+endif()
+if(CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER=1)
 endif()
 
 if(CSPLENDOR_CPU_TARGET STREQUAL "portable")

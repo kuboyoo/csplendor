@@ -64,6 +64,8 @@ _SAFE_CMAKE_CACHE_KEYS = frozenset(
         "CSPLENDOR_COMPACT_FORCED_ACTIONS",
         "CSPLENDOR_COMPACT_SOLVER_REASONS",
         "CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES",
+        "CSPLENDOR_CACHE_REVEAL_SCORES",
+        "CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER",
         "CSPLENDOR_CPU_TARGET",
         "CSPLENDOR_INCREMENTAL_EXACT_HASH",
         "CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE",
@@ -117,6 +119,8 @@ _BENCHMARK_BUILD_KEYS = _SAFE_CMAKE_CACHE_KEYS - {
     "CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE",
     # Phase-3C solver transposition-table representation experiment axis.
     "CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES",
+    # Phase-3D-P1 scoring experiment axis (verification is NOT an axis).
+    "CSPLENDOR_CACHE_REVEAL_SCORES",
 }
 _SAFE_FLAG_PREFIXES = (
     "-march=",
@@ -275,6 +279,9 @@ def _cmake_build_metadata(cache_path: Path | None) -> tuple[dict[str, Any], str 
     benchmark_entries = {
         key: value for key, value in raw_entries.items() if key in _BENCHMARK_BUILD_KEYS
     }
+    # Pre-3D-P1 reference trees cannot enable this verifier. Missing means OFF,
+    # while ON must still prevent comparison with a deployment timing build.
+    benchmark_entries.setdefault("CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER", "OFF")
     benchmark_canonical = json.dumps(
         benchmark_entries, sort_keys=True, separators=(",", ":")
     )

@@ -6,6 +6,7 @@
 #include "solver_action_filter.h"
 #include "solver_card_equivalence.h"
 #include "solver_path.h"
+#include "solver_reveal_order.h"
 #include "solver_tt_types.h"
 #include <algorithm>
 #include <chrono>
@@ -797,16 +798,12 @@ private:
           remember_card_equivalence(legacy_seen, class_seen, card_id))
         cards.push_back(static_cast<int>(card_id));
     }
-    if (game.current_player() != attacker_) {
-      std::sort(cards.begin(), cards.end(), [&](int left, int right) {
-        const int left_score =
-            defender_reserved_card_threat_score(game, action, left);
-        const int right_score =
-            defender_reserved_card_threat_score(game, action, right);
-        if (left_score != right_score)
-          return left_score > right_score;
-        return left < right;
-      });
+    if (game.current_player() != attacker_ && cards.size() > 1) {
+      CSPLENDOR_PERF_ADD(SolverDefenderReserveSortCandidates, cards.size());
+      csplendor::solver_internal::sort_reveal_cards_by_score(
+          cards, [&](int card_id) {
+            return defender_reserved_card_threat_score(game, action, card_id);
+          });
     }
     CSPLENDOR_PERF_ADD(SolverRevealCandidates, cards.size());
     return cards;
@@ -815,6 +812,7 @@ private:
   static int defender_reserved_card_threat_score(const Game &game,
                                                  const Action &action,
                                                  int card_id) {
+    CSPLENDOR_PERF_INC(SolverDefenderReserveScoreCalls);
     if (!is_valid_card_id(card_id))
       return 0;
     const Board &board = game.board;
@@ -876,13 +874,11 @@ private:
     Game blank = game.clone_light();
     if (!apply_visible_refill_blank_outcome(blank, action, level, slot))
       return;
-    std::sort(cards.begin(), cards.end(), [&](int left, int right) {
-      const int left_score = reveal_counterexample_score(blank, level, left);
-      const int right_score = reveal_counterexample_score(blank, level, right);
-      if (left_score != right_score)
-        return left_score > right_score;
-      return left < right;
-    });
+    CSPLENDOR_PERF_ADD(SolverVisibleRefillSortCandidates, cards.size());
+    csplendor::solver_internal::sort_reveal_cards_by_score(
+        cards, [&](int card_id) {
+          return reveal_counterexample_score(blank, level, card_id);
+        });
   }
 
   static bool apply_visible_refill_blank_outcome(Game &game,
@@ -900,6 +896,7 @@ private:
 
   static int reveal_counterexample_score(const Game &blank, int level,
                                          int card_id) {
+    CSPLENDOR_PERF_INC(SolverVisibleRefillScoreCalls);
     if (!is_valid_card_id(card_id))
       return 0;
     const Board &board = blank.board;
