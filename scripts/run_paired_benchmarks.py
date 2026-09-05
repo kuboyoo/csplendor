@@ -133,6 +133,16 @@ _CORRECTNESS_COUNTERS = frozenset(
 )
 _MEASUREMENT_COUNTERS = frozenset(
     {
+        "solver_scratch_frame_count_max",
+        "solver_scratch_payload_bytes_max",
+        "solver_scratch_action_capacity_max",
+        "solver_scratch_reveal_capacity_max",
+        "solver_scratch_actions_0",
+        "solver_scratch_actions_1_to_16",
+        "solver_scratch_actions_17_plus",
+        "solver_scratch_reveals_0",
+        "solver_scratch_reveals_1_to_16",
+        "solver_scratch_reveals_17_plus",
         "acquired_noble_vector_reallocations",
         "action_vector_reallocations",
         "board_restores",

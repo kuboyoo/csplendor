@@ -42,6 +42,8 @@ option(CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
        "Compact and specialize solver transposition-table keys and entries" ON)
 option(CSPLENDOR_CACHE_REVEAL_SCORES
        "Compute each action-local reveal candidate score once before sorting" ON)
+option(CSPLENDOR_REUSE_SEARCH_SCRATCH
+       "Reuse reveal solver temporary vectors by live recursion invocation" ON)
 option(CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER
        "Compare cached reveal scores/order with the original comparator" OFF)
 if(CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER AND NOT CSPLENDOR_CACHE_REVEAL_SCORES)
@@ -178,6 +180,10 @@ endif()
 if(CSPLENDOR_CACHE_REVEAL_SCORES)
   target_compile_definitions(
       csplendor_core_config INTERFACE CSPLENDOR_CACHE_REVEAL_SCORES=1)
+endif()
+if(CSPLENDOR_REUSE_SEARCH_SCRATCH)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_REUSE_SEARCH_SCRATCH=1)
 endif()
 if(CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER)
   target_compile_definitions(

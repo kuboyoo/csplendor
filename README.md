@@ -100,6 +100,13 @@ proof/frontier、cache再利用、ASan/UBSanを検証しました。depth7の速
 UNKNOWNとなるため、7手詰みの完遂速度を意味しません。小さなproof計測の不確実性を含む詳細は
 [Phase 3D-P1測定記録](doc/performance_experiments/phase3dp1_score_once_20260905.md)を参照してください。
 
+Phase 3D-P2では、再帰呼出しごとに合法手・めくれ候補の一時配列を再利用するようにしました。
+3D-P1後を基準に、代表deepは1.085倍（独立再測定1.082倍）、shallowは1.076倍、
+warm sessionは1.073倍です。同じ100万ノード探索の確保回数は約938万回から330万回へ減少し、
+5手/7手詰み、proof/frontier、cache再利用、ASan/UBSanの検証を通過しました。
+過去Phaseとの倍率は乗算していません。極小proofの単発測定に残る制約を含む詳細は
+[Phase 3D-P2測定記録](doc/performance_experiments/phase3dp2_search_scratch_20260905.md)を参照してください。
+
 ### 実験的な並列MCTS
 
 共有tree並列探索はStage Bのexperimental opt-inです。既定の`num_threads=1`はworker queueを

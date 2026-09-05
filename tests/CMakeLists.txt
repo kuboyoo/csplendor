@@ -46,6 +46,11 @@ file(GENERATE OUTPUT "${reveal_order_header_source}"
      CONTENT "#include \"solver_reveal_order.h\"\nint main() { return 0; }\n")
 csplendor_add_native_test(header_solver_reveal_order "${reveal_order_header_source}"
                           "header;standalone;internal" 10)
+set(scratch_header_source "${CMAKE_CURRENT_BINARY_DIR}/header_solver_search_scratch.cpp")
+file(GENERATE OUTPUT "${scratch_header_source}"
+     CONTENT "#include \"solver_search_scratch.h\"\nint main() { return 0; }\n")
+csplendor_add_native_test(header_solver_search_scratch "${scratch_header_source}"
+                          "header;standalone;internal" 10)
 
 csplendor_add_native_test(mcts_parallel_unit mcts_parallel_unit.cpp
                           "unit;replay" 30)

@@ -4,6 +4,7 @@
 #include "solver_card_equivalence.h"
 #include "solver_path.h"
 #include "solver_reveal_order.h"
+#include "solver_search_scratch.h"
 #include "solver_tt_types.h"
 #include "solver_types.h"
 #include "visible_only_solver.h"
@@ -55,6 +56,28 @@ void test_public_solver_value_contracts() {
               first.unknown_reason == "node limit exceeded" &&
               first.unknown_reason == second.unknown_reason,
           "visible solver copy changed its limit/result contract");
+
+  RevealVerifiedSolver reveal(0, 3, 500, 0.0, {}, false, 100000, 500000,
+                              UINT64_MAX, false, 0, true, true);
+  const auto interrupted = reveal.solve(Game(42));
+  require(interrupted.unknown_reason == "node limit exceeded",
+          "scratch test did not interrupt a recursive search");
+  RevealVerifiedSolver reveal_copy = reveal;
+  RevealVerifiedSolver assigned(1, 1, 1, 0.0);
+  assigned = reveal;
+  for (int seed : {43, 42, 44}) {
+    const auto reused = reveal.solve(Game(seed));
+    const auto copied_result = reveal_copy.solve(Game(seed));
+    const auto assigned_result = assigned.solve(Game(seed));
+    for (const auto *result : {&copied_result, &assigned_result}) {
+      require(result->proven == reused.proven &&
+                  result->unknown_reason == reused.unknown_reason &&
+                  result->stats.nodes == reused.stats.nodes &&
+                  result->stats.legal_moves == reused.stats.legal_moves &&
+                  result->stats.memo_hits == reused.stats.memo_hits,
+              "reveal copy/reuse after interruption changed search");
+    }
+  }
 }
 
 void test_common_search_values() {
@@ -776,6 +799,45 @@ void test_incremental_reveal_search_state_random_differential() {
   }
 }
 
+void test_recursive_scratch_lifetime() {
+  struct Frame {
+    std::vector<int> values;
+    void clear() { values.clear(); }
+  };
+  using Scratch = csplendor::solver_internal::RecursionScratch<Frame>;
+  Scratch scratch;
+  const auto recurse = [&](auto &self, int depth) -> void {
+    Scratch::Lease lease(scratch);
+    auto &frame = lease.get();
+    frame.values.assign(1 + depth % 91, depth);
+    const auto *address = frame.values.data();
+    if (depth)
+      self(self, depth - 1);
+    require(frame.values.data() == address && frame.values.back() == depth,
+            "scratch growth invalidated or overwrote parent");
+  };
+  recurse(recurse, 256); // Much deeper than the bounded mate depth or 108 plies.
+  require(scratch.active() == 0 && scratch.frames().size() == 257,
+          "scratch did not unwind");
+  const auto *address = scratch.frames().front()->values.data();
+  recurse(recurse, 256);
+  require(scratch.frames().front()->values.data() == address,
+          "warm scratch lost capacity");
+  try {
+    Scratch::Lease outer(scratch);
+    outer.get().values.push_back(42);
+    Scratch::Lease inner(scratch);
+    throw std::runtime_error("cancellation");
+  } catch (const std::runtime_error &) {}
+  require(scratch.active() == 0, "exception retained a scratch lease");
+  Scratch copy(scratch);
+  require(copy.active() == 0 && copy.frames().empty(),
+          "solver copy retained scratch state");
+  copy = scratch;
+  Scratch::Lease lease(scratch);
+  require(lease.get().values.empty(), "lease exposed stale values");
+}
+
 void test_proof_dag_builder_owns_limits() {
   RevealProofDagBuilder builder(1, 1);
   RevealVerifiedProofNode root;
@@ -811,6 +873,7 @@ void test_proof_dag_builder_owns_limits() {
 int main() {
   try {
     test_public_solver_value_contracts();
+    test_recursive_scratch_lifetime();
     test_common_search_values();
     test_reveal_score_order_and_locality();
     test_defender_reserve_order_depends_on_return_colour();

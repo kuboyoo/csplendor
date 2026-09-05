@@ -7,6 +7,7 @@
 #include "solver_card_equivalence.h"
 #include "solver_path.h"
 #include "solver_reveal_order.h"
+#include "solver_search_scratch.h"
 #include "solver_tt_types.h"
 #include <algorithm>
 #include <chrono>
@@ -379,6 +380,21 @@ private:
   }
 
   void verify_reveal_state(const Game &game) const noexcept {
+#if defined(CSPLENDOR_REUSE_SEARCH_SCRATCH) && defined(CSPLENDOR_PERF_INSTRUMENTATION)
+    // Diagnostic-only retained payload, including pointer slots but excluding
+    // allocator bookkeeping. No memory is reserved from the mate depth limit.
+    assert(scratch_.active() == 0);
+    size_t payload = scratch_.frames().size() * sizeof(SearchScratchFrame) +
+                     scratch_.frames().capacity() * sizeof(void *);
+    for (const auto &frame : scratch_.frames()) {
+      payload += frame->actions.capacity() * sizeof(OrderedAction) +
+                 frame->reveal_cards.capacity() * sizeof(int);
+      CSPLENDOR_PERF_MAX(SolverScratchActionCapacityMax, frame->actions.capacity());
+      CSPLENDOR_PERF_MAX(SolverScratchRevealCapacityMax, frame->reveal_cards.capacity());
+    }
+    CSPLENDOR_PERF_MAX(SolverScratchFrameCountMax, scratch_.frames().size());
+    CSPLENDOR_PERF_MAX(SolverScratchPayloadBytesMax, payload);
+#endif
 #ifdef CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE
     reveal_state_.verify_or_abort(game.board, hidden_catalog_);
 #else
@@ -447,6 +463,20 @@ private:
       return less_than(other);
     }
   };
+
+  struct SearchScratchFrame {
+    std::vector<OrderedAction> actions;
+    std::vector<int> reveal_cards;
+    void clear() noexcept {
+      actions.clear();
+      reveal_cards.clear();
+    }
+  };
+#ifdef CSPLENDOR_REUSE_SEARCH_SCRATCH
+  using SearchScratch =
+      csplendor::solver_internal::RecursionScratch<SearchScratchFrame>;
+  SearchScratch scratch_;
+#endif
 
   int attacker_ = 0;
   int depth_ = 0;
@@ -537,13 +567,29 @@ private:
       return resolved.status();
     }
 
+#ifdef CSPLENDOR_REUSE_SEARCH_SCRATCH
+    SearchScratch::Lease scratch_lease(scratch_);
+    auto &actions = scratch_lease.get().actions;
+    fill_ordered_actions(game, actions, exact_refinement);
+#else
     std::vector<OrderedAction> actions =
         exact_refinement ? proof_ordered_actions(game) : ordered_actions(game);
+#endif
     CSPLENDOR_PERF_INC(SolverTemporaryVectorAllocations);
     if (exact_refinement)
       prefer_iterative_action(state, depth, game.current_player(), actions);
-    if (game.current_player() == attacker_)
-      actions = forced_attacker_actions(game, actions, depth, path.empty());
+    if (game.current_player() == attacker_) {
+#ifdef CSPLENDOR_REUSE_SEARCH_SCRATCH
+      // The exhaustive path only reordered a copy. Keep this frame's capacity;
+      // constrained/filtering paths retain the existing selection algorithm.
+      if (exhaustive_attacker_actions_ && !strict_preferred_attacker_actions_ &&
+          strict_preferred_attacker_prefix_ == 0 &&
+          !(path.empty() && required_root_action_ != UINT64_MAX))
+        prefer_candidate_action(actions, depth);
+      else
+#endif
+        actions = forced_attacker_actions(game, actions, depth, path.empty());
+    }
     stats_.legal_moves += actions.size();
     if (actions.empty()) {
       ++stats_.terminal_nodes;
@@ -714,8 +760,13 @@ private:
     const int slot = visible_refill_slot(game.board, action);
     if (level < 0 || level >= 3 || slot < 0 || game.board.decks[level].empty())
       return false;
-    const std::vector<int> cards =
-        visible_refill_cards(game, action, level, slot);
+#ifdef CSPLENDOR_REUSE_SEARCH_SCRATCH
+    SearchScratch::Lease scratch_lease(scratch_);
+    auto &cards = scratch_lease.get().reveal_cards;
+#else
+    std::vector<int> cards;
+#endif
+    visible_refill_cards(game, action, level, slot, cards);
     if (cards.empty())
       return false;
     ScopedBranchRollback rollback(*this, game);
@@ -733,7 +784,13 @@ private:
   template <typename Visitor>
   bool for_each_deck_reserve_outcome(Game &game, const Action &action,
                                      Visitor visitor) {
-    const std::vector<int> cards = deck_reserve_cards(game, action);
+#ifdef CSPLENDOR_REUSE_SEARCH_SCRATCH
+    SearchScratch::Lease scratch_lease(scratch_);
+    auto &cards = scratch_lease.get().reveal_cards;
+#else
+    std::vector<int> cards;
+#endif
+    deck_reserve_cards(game, action, cards);
     stats_.deck_reserve_candidates += cards.size();
     if (cards.empty())
       return false;
@@ -783,12 +840,12 @@ private:
     return legacy_seen.insert(card_equivalence_key(card_id)).second;
   }
 
-  std::vector<int> deck_reserve_cards(const Game &game,
-                                      const Action &action) const {
+  void deck_reserve_cards(const Game &game, const Action &action,
+                          std::vector<int> &cards) const {
     const int level = action.deck_level;
-    std::vector<int> cards;
+    cards.clear();
     if (level < 0 || level >= 3 || game.board.decks[level].empty())
-      return cards;
+      return;
     std::set<CardEquivalenceKey> legacy_seen;
     CardEquivalenceMask class_seen;
     if (!csplendor::solver_internal::card_equivalence_classes_enabled)
@@ -806,7 +863,16 @@ private:
           });
     }
     CSPLENDOR_PERF_ADD(SolverRevealCandidates, cards.size());
-    return cards;
+    record_reveal_scratch_size(cards.size());
+  }
+
+  static void record_reveal_scratch_size(size_t count) {
+    if (count == 0)
+      CSPLENDOR_PERF_INC(SolverScratchReveals0);
+    else if (count <= 16)
+      CSPLENDOR_PERF_INC(SolverScratchReveals1To16);
+    else
+      CSPLENDOR_PERF_INC(SolverScratchReveals17Plus);
   }
 
   static int defender_reserved_card_threat_score(const Game &game,
@@ -847,11 +913,11 @@ private:
            gap * 100 + static_cast<int>(card.bonus);
   }
 
-  std::vector<int> visible_refill_cards(const Game &game, const Action &action,
-                                        int level, int slot) const {
-    std::vector<int> cards;
+  void visible_refill_cards(const Game &game, const Action &action,
+                             int level, int slot, std::vector<int> &cards) const {
+    cards.clear();
     if (level < 0 || level >= 3 || game.board.decks[level].empty())
-      return cards;
+      return;
     std::set<CardEquivalenceKey> legacy_seen;
     CardEquivalenceMask class_seen;
     if (!csplendor::solver_internal::card_equivalence_classes_enabled)
@@ -863,7 +929,7 @@ private:
     }
     CSPLENDOR_PERF_ADD(SolverRevealCandidates, cards.size());
     order_visible_refill_cards_by_blank_probe(game, action, level, slot, cards);
-    return cards;
+    record_reveal_scratch_size(cards.size());
   }
 
   void order_visible_refill_cards_by_blank_probe(
@@ -1273,11 +1339,18 @@ private:
   }
 
   std::vector<OrderedAction> ordered_actions(const Game &game) {
-    std::vector<OrderedAction> actions = ordinary_ordered_actions(game);
-    if (game.current_player() != attacker_ && !game.board.waiting_noble)
-      add_oracle_actions(game, actions);
-    std::sort(actions.begin(), actions.end());
+    std::vector<OrderedAction> actions;
+    fill_ordered_actions(game, actions, false);
     return actions;
+  }
+
+  void fill_ordered_actions(const Game &game,
+                             std::vector<OrderedAction> &actions, bool exact) {
+    ordinary_ordered_actions(game, actions);
+    if (!exact && game.current_player() != attacker_ && !game.board.waiting_noble)
+      add_oracle_actions(game, actions);
+    if (!exact)
+      std::sort(actions.begin(), actions.end());
   }
 
   static std::vector<OrderedAction> proof_ordered_actions(const Game &game) {
@@ -1286,12 +1359,24 @@ private:
 
   static std::vector<OrderedAction> ordinary_ordered_actions(const Game &game) {
     std::vector<OrderedAction> actions;
+    ordinary_ordered_actions(game, actions);
+    return actions;
+  }
+
+  static void ordinary_ordered_actions(const Game &game,
+                                       std::vector<OrderedAction> &actions) {
+    actions.clear();
     for (uint64_t code : game.legal_action_codes()) {
       const Action action = Action::unpack(code);
       actions.push_back(ordered_action(action, code));
     }
     std::sort(actions.begin(), actions.end());
-    return actions;
+    if (actions.empty())
+      CSPLENDOR_PERF_INC(SolverScratchActions0);
+    else if (actions.size() <= 16)
+      CSPLENDOR_PERF_INC(SolverScratchActions1To16);
+    else
+      CSPLENDOR_PERF_INC(SolverScratchActions17Plus);
   }
 
   void add_oracle_actions(const Game &game,

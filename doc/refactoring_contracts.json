@@ -111,6 +111,7 @@
       "solver_card_equivalence.h",
       "solver_path.h",
       "solver_reveal_order.h",
+      "solver_search_scratch.h",
       "solver_tt_types.h",
       "state_field_roles.h",
       "state_invariants.h",
