@@ -51,6 +51,18 @@ file(GENERATE OUTPUT "${scratch_header_source}"
      CONTENT "#include \"solver_search_scratch.h\"\nint main() { return 0; }\n")
 csplendor_add_native_test(header_solver_search_scratch "${scratch_header_source}"
                           "header;standalone;internal" 10)
+set(normal_rollback_header_source "${CMAKE_CURRENT_BINARY_DIR}/header_solver_normal_rollback.cpp")
+file(GENERATE OUTPUT "${normal_rollback_header_source}"
+     CONTENT "#include \"solver_normal_rollback.h\"\nint main() { return 0; }\n")
+csplendor_add_native_test(header_solver_normal_rollback "${normal_rollback_header_source}"
+                          "header;standalone;internal" 10)
+csplendor_add_native_test(solver_normal_rollback_unit solver_normal_rollback_unit.cpp
+                          "unit;solver;rollback;oracle" 30)
+set(rollback_fault_header_source "${CMAKE_CURRENT_BINARY_DIR}/header_solver_rollback_faults.cpp")
+file(GENERATE OUTPUT "${rollback_fault_header_source}"
+     CONTENT "#include \"solver_rollback_faults.h\"\nint main() { return 0; }\n")
+csplendor_add_native_test(header_solver_rollback_faults "${rollback_fault_header_source}"
+                          "header;standalone;internal" 10)
 
 csplendor_add_native_test(mcts_parallel_unit mcts_parallel_unit.cpp
                           "unit;replay" 30)

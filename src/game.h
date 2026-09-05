@@ -546,6 +546,7 @@ private:
     }
 
     csplendor::detail::grant_reserve_gold(board, mutation);
+    CSPLENDOR_ROLLBACK_FAULT(SourceRemoval);
     apply_gem_return(a, mutation);
     return true;
   }
@@ -558,6 +559,7 @@ private:
 
     const uint8_t card_id = mutation.pop_deck(a.deck_level);
     csplendor::detail::reserve_card_unchecked(board, mutation, card_id, true);
+    CSPLENDOR_ROLLBACK_FAULT(SourceRemoval);
     csplendor::detail::grant_reserve_gold(board, mutation);
     apply_gem_return(a, mutation);
     return true;
@@ -615,6 +617,7 @@ private:
         mutation.set_visible(visible_level, visible_slot, -1);
       }
     }
+    CSPLENDOR_ROLLBACK_FAULT(SourceRemoval);
     return true;
   }
 

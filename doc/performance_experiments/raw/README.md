@@ -32,6 +32,8 @@ Phase 3Cでは、solver TT圧縮の正式A/B、layout、再profile、gprof、san
 | `phase3b/` | 厳密めくれ探索の増分set-state/key、fallback、oracle検証 |
 | `phase3c/` | solver TT key/entry圧縮、layout、Stage 2再profile |
 | `phase3dp1/` | めくれscore一回計算、正式A/B・holdout・oracle・全回帰・sanitizer |
+| `phase3dp2/` | 再帰scratch再利用、正式A/B・holdout・保持容量・全回帰 |
+| `phase3d1/` | 通常着手rollback。直下v1・candidate_v2は棄却記録、candidate_v3がvisible-only採用版 |
 | `exploratory/` | Phase分類前のsolver・benchmark探索 |
 
 内容の確認例:

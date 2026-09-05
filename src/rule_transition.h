@@ -177,6 +177,7 @@ inline bool purchase_card(Board &board, Mutator &mutation, const Card &card,
     mutation.set_bank(
         color,
         static_cast<uint8_t>(static_cast<int>(board.bank[color]) + from_gems));
+    CSPLENDOR_ROLLBACK_FAULT(PaymentColour);
     gold_used += from_gold;
   }
   if constexpr (ValidatePayment) {
@@ -197,6 +198,7 @@ inline bool purchase_card(Board &board, Mutator &mutation, const Card &card,
   if (player.purchased_cards.capacity() != purchased_capacity_before)
     CSPLENDOR_PERF_INC(PurchasedCardVectorReallocations);
 #endif
+  CSPLENDOR_ROLLBACK_FAULT(ProvenanceAppend);
   mutation.set_player_purchased_count(
       player_index, static_cast<uint8_t>(player.purchased_count + 1));
   mutation.set_player_bonus(
@@ -239,6 +241,7 @@ inline void acquire_noble_unchecked(Board &board, Mutator &mutation,
     CSPLENDOR_PERF_INC(AcquiredNobleVectorReallocations);
 #endif
   mutation.remove_noble(static_cast<uint8_t>(noble_id));
+  CSPLENDOR_ROLLBACK_FAULT(NobleAcquired);
 }
 
 inline void check_game_end(Board &board) {

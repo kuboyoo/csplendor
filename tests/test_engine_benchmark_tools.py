@@ -825,6 +825,8 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
     for option in (
         "CSPLENDOR_CACHE_REVEAL_SCORES",
         "CSPLENDOR_REUSE_SEARCH_SCRATCH",
+        "CSPLENDOR_SOLVER_NORMAL_ROLLBACK",
+        "CSPLENDOR_VERIFY_SOLVER_ROLLBACK",
         "CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER",
     ):
         option_cache = tmp_path / f"{option}-CMakeCache.txt"
@@ -842,7 +844,7 @@ def test_manifest_allowlists_cache_and_compares_build_and_smt_metadata(tmp_path)
             option_metadata["benchmark_build_fingerprint_sha256"]
             == metadata["benchmark_build_fingerprint_sha256"]
         )
-        assert same_build == (option != "CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER")
+        assert same_build == (not option.startswith("CSPLENDOR_VERIFY_"))
 
     verify_cache = tmp_path / "verify-CMakeCache.txt"
     verify_cache.write_text(

@@ -7,6 +7,7 @@
 #include "perf_counters.h"
 #include "player.h"
 #include "portable_rng.h"
+#include "solver_rollback_faults.h"
 #include "types.h"
 #include "zobrist.h"
 #include <algorithm>
@@ -284,7 +285,12 @@ public:
       board_->winner = winner;
     }
 
+#ifdef CSPLENDOR_VERIFY_SOLVER_ROLLBACK
+    void commit() { // Verification-only fault injection may throw.
+#else
     void commit() noexcept {
+#endif
+      CSPLENDOR_ROLLBACK_FAULT(BeforeHashCommit);
       if constexpr (MaintainExactHash) {
         board_->cached_hash = hash_;
         board_->hash_valid = true;
@@ -308,6 +314,7 @@ public:
       }
 #endif
       committed_ = true;
+      CSPLENDOR_ROLLBACK_FAULT(AfterHashCommit);
     }
 
   private:

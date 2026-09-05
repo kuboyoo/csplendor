@@ -3,7 +3,9 @@
 #include "perf_counters.h"
 #include "solver_action_filter.h"
 #include "solver_path.h"
+#include "solver_normal_rollback.h"
 #include "solver_tt_types.h"
+#include "state_invariants.h"
 #include <algorithm>
 #include <chrono>
 #include <limits>
@@ -38,6 +40,10 @@ public:
     for (int level = 0; level < 3; ++level)
       game.board.decks[level].clear();
     root_ = game.clone_light();
+#ifdef CSPLENDOR_SOLVER_NORMAL_ROLLBACK
+    compact_rollback_ = csplendor::state::validate_invariants(
+        game.board, csplendor::state::Profile::Editor).ok();
+#endif
 
     VisibleOnlySearchResult result;
     result.simple_payment_mode = game.simple_payment_mode;
@@ -114,6 +120,7 @@ private:
   std::unordered_map<DepthStateKey, ForceEntry, DepthStateKeyHash> forced_memo_;
   std::unordered_map<StateKey, ForceBounds, StateKeyHash> forced_bounds_;
   Game root_{0};
+  bool compact_rollback_ = false;
   static constexpr int FORCED_WIN_MAX_DEPTH = 8;
   static constexpr size_t ATTACKER_TAKE_LIMIT = 6;
   static constexpr size_t ATTACKER_RESERVE_LIMIT = 3;
@@ -192,9 +199,8 @@ private:
     bool has_first_action = false;
     for (const OrderedAction &ordered : actions) {
       const Action action = Action::unpack(ordered.code);
-      CSPLENDOR_PERF_INC(BoardSnapshotCopies);
-      const Board previous = game.board;
-      if (!game.apply_action_code_trusted(ordered.code, false))
+      csplendor::solver_internal::NormalBranchRollback rollback(game, compact_rollback_);
+      if (!rollback.apply(action))
         continue;
       const int next_depth =
           depth - static_cast<int>(current_player == attacker &&
@@ -202,9 +208,7 @@ private:
       const ForceStatus child = forced_win(
           game, path, known_cards - static_cast<int>(action.type == PURCHASE),
           attacker, next_depth);
-      game.board = previous;
-      CSPLENDOR_PERF_INC(BoardRestores);
-      CSPLENDOR_PERF_INC(SolverBoardRollbacks);
+      rollback.restore();
 
       if (!has_first_action) {
         first_action = ordered.code;
@@ -309,16 +313,13 @@ private:
 
     for (const OrderedAction &ordered : actions) {
       const Action action = Action::unpack(ordered.code);
-      CSPLENDOR_PERF_INC(BoardSnapshotCopies);
-      const Board previous = game.board;
-      if (!game.apply_action_code_trusted(ordered.code, false))
+      csplendor::solver_internal::NormalBranchRollback rollback(game, compact_rollback_);
+      if (!rollback.apply(action))
         continue;
       const int child_score = minimax(
           game, path, known_cards - static_cast<int>(action.type == PURCHASE),
           alpha, beta);
-      game.board = previous;
-      CSPLENDOR_PERF_INC(BoardRestores);
-      CSPLENDOR_PERF_INC(SolverBoardRollbacks);
+      rollback.restore();
 
       if ((current_player == 0 && child_score > best_score) ||
           (current_player == 1 && child_score < best_score)) {
@@ -352,14 +353,11 @@ private:
       const Action action = Action::unpack(code);
       if (action.type == RESERVE_DECK)
         continue;
-      CSPLENDOR_PERF_INC(BoardSnapshotCopies);
-      const Board previous = game.board;
-      if (!game.apply_action_code_trusted(code, false))
+      csplendor::solver_internal::NormalBranchRollback rollback(game, compact_rollback_);
+      if (!rollback.apply(action))
         continue;
       const StateKey child_key = state_key(game);
-      game.board = previous;
-      CSPLENDOR_PERF_INC(BoardRestores);
-      CSPLENDOR_PERF_INC(SolverBoardRollbacks);
+      rollback.restore();
 
       const OrderedAction candidate = ordered_action(action, code);
       auto it = representatives.find(child_key);

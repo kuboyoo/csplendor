@@ -44,6 +44,10 @@ option(CSPLENDOR_CACHE_REVEAL_SCORES
        "Compute each action-local reveal candidate score once before sorting" ON)
 option(CSPLENDOR_REUSE_SEARCH_SCRATCH
        "Reuse reveal solver temporary vectors by live recursion invocation" ON)
+option(CSPLENDOR_SOLVER_NORMAL_ROLLBACK
+       "Use compact append-only rollback for solver ordinary Game transitions" ON)
+option(CSPLENDOR_VERIFY_SOLVER_ROLLBACK
+       "Verify solver child/parent fields against full snapshots" OFF)
 option(CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER
        "Compare cached reveal scores/order with the original comparator" OFF)
 if(CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER AND NOT CSPLENDOR_CACHE_REVEAL_SCORES)
@@ -86,10 +90,9 @@ set(CSPLENDOR_PYTHON_CORE_SOURCES
     src/perf_counters.cpp
     src/reveal_solver_components.cpp
     src/reveal_verified_solver.cpp
-    src/visible_only_solver.cpp)
-set(CSPLENDOR_CORE_SOURCES
-    ${CSPLENDOR_PYTHON_CORE_SOURCES}
+    src/visible_only_solver.cpp
     src/state_invariants.cpp)
+set(CSPLENDOR_CORE_SOURCES ${CSPLENDOR_PYTHON_CORE_SOURCES})
 add_library(csplendor_core STATIC EXCLUDE_FROM_ALL ${CSPLENDOR_CORE_SOURCES})
 set_target_properties(csplendor_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -184,6 +187,14 @@ endif()
 if(CSPLENDOR_REUSE_SEARCH_SCRATCH)
   target_compile_definitions(
       csplendor_core_config INTERFACE CSPLENDOR_REUSE_SEARCH_SCRATCH=1)
+endif()
+if(CSPLENDOR_SOLVER_NORMAL_ROLLBACK)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_SOLVER_NORMAL_ROLLBACK=1)
+endif()
+if(CSPLENDOR_VERIFY_SOLVER_ROLLBACK)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_VERIFY_SOLVER_ROLLBACK=1)
 endif()
 if(CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER)
   target_compile_definitions(

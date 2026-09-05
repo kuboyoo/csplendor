@@ -107,6 +107,12 @@ warm sessionは1.073倍です。同じ100万ノード探索の確保回数は約
 過去Phaseとの倍率は乗算していません。極小proofの単発測定に残る制約を含む詳細は
 [Phase 3D-P2測定記録](doc/performance_experiments/phase3dp2_search_scratch_20260905.md)を参照してください。
 
+Phase 3D-1では、visible-only詰み探索の通常着手を軽量なRAII復元へ変更しました。
+3D-P2比で代表sliceは1.182倍（独立再測定1.172倍）、確保回数は約255万回から81万回へ
+減少しました。めくれ込みsolverへの適用案はproofの回帰基準未達で採用せず、従来方式を維持します。
+5手/7手詰み・全回帰・ASan/UBSanを検証済みです。採用範囲と棄却判断の詳細は
+[Phase 3D-1測定記録](doc/performance_experiments/phase3d1_normal_rollback_20260905.md)を参照してください。
+
 ### 実験的な並列MCTS
 
 共有tree並列探索はStage Bのexperimental opt-inです。既定の`num_threads=1`はworker queueを

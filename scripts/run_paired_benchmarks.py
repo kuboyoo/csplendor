@@ -133,6 +133,10 @@ _CORRECTNESS_COUNTERS = frozenset(
 )
 _MEASUREMENT_COUNTERS = frozenset(
     {
+        "solver_compact_rollback_captures",
+        "solver_full_rollback_captures",
+        "solver_compact_rollback_restores",
+        "solver_full_rollback_restores",
         "solver_scratch_frame_count_max",
         "solver_scratch_payload_bytes_max",
         "solver_scratch_action_capacity_max",
