@@ -21,7 +21,6 @@ from .mate_depth import (
     search_reveal_verified_mate_depths,
 )
 
-
 MATE_SEARCH_SESSION_FORMAT = "csplendor_mate_search_session_v1"
 
 

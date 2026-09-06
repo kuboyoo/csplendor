@@ -1589,11 +1589,19 @@ private:
 
     std::vector<OrderedAction> filtered;
     if (csplendor::solver_internal::compact_forced_actions_enabled) {
-      filtered = csplendor::solver_internal::compact_forced_attacker_actions<
-          ATTACKER_TAKE_LIMIT, ATTACKER_RESERVE_LIMIT>(
-          actions, [&](const Action &action) {
-            return attacker_take_score(game, action);
-          });
+      const auto score = [&](const Action &action) {
+        return attacker_take_score(game, action);
+      };
+      const int index = depth_ - depth;
+      if (index >= 0 &&
+          index < static_cast<int>(preferred_attacker_actions_.size())) {
+        filtered = csplendor::solver_internal::compact_forced_attacker_actions<
+            ATTACKER_TAKE_LIMIT, ATTACKER_RESERVE_LIMIT, true>(
+            actions, score, preferred_attacker_actions_[index]);
+      } else {
+        filtered = csplendor::solver_internal::compact_forced_attacker_actions<
+            ATTACKER_TAKE_LIMIT, ATTACKER_RESERVE_LIMIT>(actions, score);
+      }
     } else {
       std::vector<OrderedAction> purchases;
       std::vector<std::pair<int, OrderedAction>> takes;
@@ -1626,6 +1634,9 @@ private:
                   return left.second < right.second;
                 });
       std::sort(reserves.begin(), reserves.end());
+      prefer_candidate_action_by(
+          takes, depth, [](const auto &item) { return item.second.code; });
+      prefer_candidate_action(reserves, depth);
 
       filtered.insert(filtered.end(), purchases.begin(), purchases.end());
       for (size_t index = 0;
@@ -1640,8 +1651,9 @@ private:
     return filtered;
   }
 
-  void prefer_candidate_action(std::vector<OrderedAction> &actions,
-                               int depth) const {
+  template <typename Candidate, typename CodeAccessor>
+  void prefer_candidate_action_by(std::vector<Candidate> &actions, int depth,
+                                  CodeAccessor code) const {
     const int index = depth_ - depth;
     if (index < 0 ||
         index >= static_cast<int>(preferred_attacker_actions_.size()))
@@ -1649,10 +1661,16 @@ private:
     const uint64_t preferred = preferred_attacker_actions_[index];
     const auto it =
         std::find_if(actions.begin(), actions.end(), [&](const auto &action) {
-          return action.code == preferred;
+          return code(action) == preferred;
         });
     if (it != actions.end())
       std::rotate(actions.begin(), it, it + 1);
+  }
+
+  void prefer_candidate_action(std::vector<OrderedAction> &actions,
+                               int depth) const {
+    prefer_candidate_action_by(
+        actions, depth, [](const auto &action) { return action.code; });
   }
 
   static int attacker_take_score(const Game &game, const Action &action) {

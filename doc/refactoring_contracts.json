@@ -66,6 +66,7 @@
       "card_data.h",
       "game.h",
       "game_snapshot.h",
+      "information_state.h",
       "mcts.h",
       "move_generator.h",
       "noble_data.h",

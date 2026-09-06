@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -32,11 +33,13 @@ void insert_bounded_best(std::array<Value, Capacity> &values, size_t &size,
   size = new_size;
 }
 
-template <size_t TakeLimit, size_t ReserveLimit, typename OrderedAction,
+template <size_t TakeLimit, size_t ReserveLimit, bool PreferHint = false,
+          typename OrderedAction,
           typename TakeScore>
 std::vector<OrderedAction>
 compact_forced_attacker_actions(const std::vector<OrderedAction> &actions,
-                                TakeScore take_score) {
+                                TakeScore take_score,
+                                uint64_t preferred_code = UINT64_MAX) {
   static_assert(TakeLimit > 0 && ReserveLimit > 0);
   using ScoredTake = std::pair<int, OrderedAction>;
   std::array<ScoredTake, TakeLimit> takes{};
@@ -44,13 +47,28 @@ compact_forced_attacker_actions(const std::vector<OrderedAction> &actions,
   size_t take_count = 0;
   size_t reserve_count = 0;
 
-  const auto take_less = [](const ScoredTake &left, const ScoredTake &right) {
+  const auto take_less = [preferred_code](const ScoredTake &left,
+                                        const ScoredTake &right) {
+    // Match the main/reference path's rotate-before-truncate semantics.
+    // The no-hint instantiation retains the original comparison operations.
+    if constexpr (PreferHint) {
+      const bool left_hint = left.second.code == preferred_code;
+      const bool right_hint = right.second.code == preferred_code;
+      if (left_hint != right_hint)
+        return left_hint;
+    }
     if (left.first != right.first)
       return left.first > right.first;
     return left.second < right.second;
   };
-  const auto reserve_less = [](const OrderedAction &left,
-                               const OrderedAction &right) {
+  const auto reserve_less = [preferred_code](const OrderedAction &left,
+                                           const OrderedAction &right) {
+    if constexpr (PreferHint) {
+      const bool left_hint = left.code == preferred_code;
+      const bool right_hint = right.code == preferred_code;
+      if (left_hint != right_hint)
+        return left_hint;
+    }
     return left < right;
   };
 

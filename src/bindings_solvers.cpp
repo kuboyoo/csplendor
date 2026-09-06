@@ -409,7 +409,8 @@ void bind_solvers(py::module_ &m) {
   m.def(
       "solve_reveal_verified_frontier_cpp",
       [](const Game &game, int attacker, int depth, uint64_t max_nodes,
-         double time_limit_seconds, size_t edge_limit) {
+         double time_limit_seconds, size_t edge_limit,
+         const std::vector<uint64_t> &preferred_attacker_actions) {
         if (attacker < 0 || attacker >= Board::NUM_PLAYERS)
           throw std::invalid_argument("attacker must be 0 or 1");
         if (depth < 0)
@@ -419,7 +420,8 @@ void bind_solvers(py::module_ &m) {
         {
           py::gil_scoped_release release;
           result = RevealVerifiedSolver(attacker, depth, max_nodes,
-                                        time_limit_seconds)
+                                        time_limit_seconds,
+                                        preferred_attacker_actions)
                        .expand_frontier(input_snapshot, edge_limit);
         }
 
@@ -476,7 +478,8 @@ void bind_solvers(py::module_ &m) {
       },
       py::arg("game"), py::arg("attacker"), py::arg("depth"),
       py::arg("max_nodes") = 0, py::arg("time_limit_seconds") = 0.0,
-      py::arg("edge_limit") = 250000);
+      py::arg("edge_limit") = 250000,
+      py::arg("preferred_attacker_actions") = std::vector<uint64_t>{});
 
   m.def(
       "solve_reveal_verified_root_split_cpp",

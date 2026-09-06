@@ -605,6 +605,74 @@ void test_compact_forced_action_filter_order_and_caps() {
   require(filtered[7].code < filtered[8].code &&
               filtered[8].code < filtered[9].code,
           "compact forced-action filter did not order reserves");
+
+  const auto score = [](const Action &action) {
+    return static_cast<int>(action.return_gems[0]) * 10 +
+           static_cast<int>(action.take[0]);
+  };
+  Action noble;
+  noble.type = VISIT_NOBLE;
+  actions.push_back(ordered_test_action(noble, 0, -3));
+  Action same;
+  same.type = TAKE_SAME;
+  same.take[2] = 2;
+  actions.push_back(ordered_test_action(same, 2, 0));
+  // Independent main-style oracle: sort entire categories, rotate the hint,
+  // then truncate. Include every hint (inside/outside caps), missing hints,
+  // short categories, empty input, and different input permutations.
+  for (int permutation = 0; permutation < 3; ++permutation) {
+    std::rotate(actions.begin(), actions.begin() + 1, actions.end());
+    if (permutation == 2)
+      std::reverse(actions.begin(), actions.end());
+    for (size_t count = 0; count <= actions.size(); ++count) {
+      const std::vector<ActionOrderKey> input(actions.begin(),
+                                              actions.begin() + count);
+      for (size_t hint_index = 0; hint_index <= actions.size(); ++hint_index) {
+        const uint64_t hint = hint_index == actions.size()
+                                  ? UINT64_MAX : actions[hint_index].code;
+        std::vector<ActionOrderKey> purchases, takes, reserves, other;
+        for (const auto &ordered : input) {
+          const auto type = Action::unpack(ordered.code).type;
+          if (type == PURCHASE || type == VISIT_NOBLE)
+            purchases.push_back(ordered);
+          else if (type == TAKE_DIFFERENT || type == TAKE_SAME)
+            takes.push_back(ordered);
+          else if (type == RESERVE_VISIBLE)
+            reserves.push_back(ordered);
+          else
+            other.push_back(ordered);
+        }
+        std::sort(takes.begin(), takes.end(), [&](const auto &left,
+                                                const auto &right) {
+          const int ls = score(Action::unpack(left.code));
+          const int rs = score(Action::unpack(right.code));
+          return ls == rs ? left < right : ls > rs;
+        });
+        std::sort(reserves.begin(), reserves.end());
+        for (auto *category : {&takes, &reserves}) {
+          const auto found = std::find_if(
+              category->begin(), category->end(),
+              [hint](const auto &item) { return item.code == hint; });
+          if (found != category->end())
+            std::rotate(category->begin(), found, found + 1);
+        }
+        takes.resize(std::min<size_t>(6, takes.size()));
+        reserves.resize(std::min<size_t>(3, reserves.size()));
+        auto expected = purchases;
+        for (const auto *category : {&takes, &reserves, &other})
+          expected.insert(expected.end(), category->begin(), category->end());
+        const auto actual =
+            csplendor::solver_internal::compact_forced_attacker_actions<6, 3, true>(
+                input, score, hint);
+        require(actual.size() == expected.size(), "hint changed category caps");
+        for (size_t i = 0; i < expected.size(); ++i)
+          require(actual[i].code == expected[i].code &&
+                      actual[i].rank == expected[i].rank &&
+                      actual[i].neg_points == expected[i].neg_points,
+                  "hint filter differs from main oracle");
+      }
+    }
+  }
 }
 
 void test_hidden_and_oracle_components() {

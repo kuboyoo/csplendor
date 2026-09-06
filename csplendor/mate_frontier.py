@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from ._csplendor import (
     Action,
@@ -78,9 +78,10 @@ def expand_mate_frontier(
     *,
     attacker: int,
     depth: int,
-    max_nodes: int = 1_500_000,
+    max_nodes: int = 5_000_000,
     time_limit_seconds: float = 30.0,
     edge_limit: int = 250_000,
+    preferred_attacker_actions: Sequence[int] = (),
 ) -> dict[str, Any]:
     """Verify ``game`` and materialize only its immediate proof frontier."""
     if attacker not in (0, 1):
@@ -97,6 +98,9 @@ def expand_mate_frontier(
         max_nodes=max_nodes,
         time_limit_seconds=time_limit_seconds,
         edge_limit=edge_limit,
+        preferred_attacker_actions=[
+            int(action) for action in preferred_attacker_actions
+        ],
     )
     edges: list[dict[str, Any]] = []
     for raw_edge in native["edges"]:
