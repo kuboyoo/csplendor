@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 import os
 import time
+from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 
 from ._csplendor import (
@@ -12,11 +12,10 @@ from ._csplendor import (
     MateSearchCancellationToken,
     get_card,
     get_noble,
-    solve_reveal_verified_root_split_cpp,
     solve_reveal_verified_mate_cpp,
+    solve_reveal_verified_root_split_cpp,
 )
 from .api.usi_kifu import action_to_usi
-
 
 MATE_DEPTH_SEARCH_FORMAT = "csplendor_mate_depth_search_v1"
 MATE_ANYTIME_SEARCH_FORMAT = "csplendor_mate_anytime_search_v1"
@@ -385,7 +384,8 @@ def _solve_depth_parallel(
                         if other is not future:
                             other.cancel()
                 continue
-            assert edge is not None and action_code is not None
+            if edge is None or action_code is None:
+                raise RuntimeError("branch result is missing its search context")
             group = groups[action_code]
             if group["status"] is not None:
                 continue
