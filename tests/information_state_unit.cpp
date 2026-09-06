@@ -54,7 +54,9 @@ void test_unordered_public_slots_are_canonical() {
   Game reordered = root.clone_light();
   for (auto &level : reordered.board.visible)
     std::reverse(level.begin(), level.end());
-  std::reverse(reordered.board.nobles.begin(), reordered.board.nobles.end());
+  require(reordered.board.nobles.size() >= 2,
+          "fixture needs at least two nobles");
+  std::swap(reordered.board.nobles[0], reordered.board.nobles[1]);
 
   for (uint8_t observer = 0; observer < Board::NUM_PLAYERS; ++observer) {
     require(csplendor::information_state::serialize(root, observer) ==
