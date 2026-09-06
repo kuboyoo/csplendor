@@ -112,6 +112,20 @@ uint16_t reference_noble_mask(const std::array<uint8_t, 5> &bonuses) {
 }
 
 void test_noble_eligibility_exhaustive_and_editor_range() {
+  check(noble_mask_table_is_exact());
+  // Check the compile-time partition independently of its recursive template.
+  std::array<unsigned, 3125> visits{};
+  for (uint32_t end = NOBLE_MASK_COMBINATIONS; end > 0;
+       end -= noble_mask_verification_detail::CHUNK_SIZE) {
+    const auto begin = end - noble_mask_verification_detail::CHUNK_SIZE;
+    check(noble_mask_combinations_are_exact(begin, end));
+    for (uint32_t encoded = begin; encoded < end; ++encoded)
+      ++visits[encoded];
+  }
+  for (unsigned count : visits)
+    check(count == 1);
+  check(!noble_mask_combinations_are_exact(1, 0));
+  check(!noble_mask_combinations_are_exact(0, 3126));
   constexpr uint32_t BASE = MAX_NOBLE_REQUIREMENT + 1U;
   uint32_t combinations = 1;
   for (int color = 0; color < 5; ++color)

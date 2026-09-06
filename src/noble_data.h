@@ -105,7 +105,7 @@ reference_noble_eligibility_mask(
   return mask;
 }
 
-constexpr bool noble_mask_table_is_exact() noexcept {
+constexpr bool noble_mask_entries_are_exact() noexcept {
   for (int color = 0; color < 5; ++color) {
     for (uint8_t bonus = 0; bonus <= MAX_NOBLE_REQUIREMENT; ++bonus) {
       for (int noble_id = 0; noble_id < NOBLE_COUNT; ++noble_id) {
@@ -119,22 +119,34 @@ constexpr bool noble_mask_table_is_exact() noexcept {
     }
   }
 
-  constexpr uint32_t BASE = MAX_NOBLE_REQUIREMENT + 1U;
-  uint32_t combinations = 1;
-  for (int color = 0; color < 5; ++color)
-    combinations *= BASE;
-  for (uint32_t encoded = 0; encoded < combinations; ++encoded) {
+  return true;
+}
+
+constexpr uint32_t NOBLE_MASK_BASE = MAX_NOBLE_REQUIREMENT + 1U;
+constexpr uint32_t NOBLE_MASK_COMBINATIONS =
+    NOBLE_MASK_BASE * NOBLE_MASK_BASE * NOBLE_MASK_BASE *
+    NOBLE_MASK_BASE * NOBLE_MASK_BASE;
+
+constexpr bool noble_mask_combinations_are_exact(uint32_t begin,
+                                                uint32_t end) noexcept {
+  if (begin > end || end > NOBLE_MASK_COMBINATIONS)
+    return false;
+  for (uint32_t encoded = begin; encoded < end; ++encoded) {
     uint32_t remaining = encoded;
     std::array<uint8_t, 5> bonuses{};
     for (int color = 0; color < 5; ++color) {
-      bonuses[color] = static_cast<uint8_t>(remaining % BASE);
-      remaining /= BASE;
+      bonuses[color] = static_cast<uint8_t>(remaining % NOBLE_MASK_BASE);
+      remaining /= NOBLE_MASK_BASE;
     }
     if (noble_eligibility_mask_from_bonuses(bonuses) !=
         reference_noble_eligibility_mask(bonuses))
       return false;
   }
 
+  return true;
+}
+
+constexpr bool noble_mask_out_of_range_is_exact() noexcept {
   for (int out_of_range_color = 0; out_of_range_color < 5;
        ++out_of_range_color) {
     std::array<uint8_t, 5> bonuses{};
@@ -148,10 +160,39 @@ constexpr bool noble_mask_table_is_exact() noexcept {
   return true;
 }
 
+// Keep the full verifier available, but do not evaluate all combinations in
+// one constant expression: Clang/AppleClang/MSVC have per-evaluation budgets.
+constexpr bool noble_mask_table_is_exact() noexcept {
+  return noble_mask_entries_are_exact() &&
+         noble_mask_combinations_are_exact(0, NOBLE_MASK_COMBINATIONS) &&
+         noble_mask_out_of_range_is_exact();
+}
+
 static_assert(MAX_NOBLE_REQUIREMENT == 4,
               "review the eligibility table range when noble data changes");
-static_assert(noble_mask_table_is_exact(),
-              "noble eligibility mask table must match the reference rules");
+static_assert(noble_mask_entries_are_exact(),
+              "every noble mask table entry must match the reference rules");
+static_assert(noble_mask_out_of_range_is_exact(),
+              "clamped noble masks must match the reference rules");
+
+namespace noble_mask_verification_detail {
+constexpr uint32_t CHUNK_SIZE = 25;
+static_assert(NOBLE_MASK_COMBINATIONS == 3125, "review exhaustive coverage");
+static_assert(NOBLE_MASK_COMBINATIONS % CHUNK_SIZE == 0,
+              "verification chunks must cover the complete range");
+
+// Instantiation recursively covers [0, End) with disjoint adjacent chunks.
+// Each specialization has its OWN static_assert evaluation (25 tuples),
+// including the last [3100, 3125); sizeof forces every base to instantiate.
+template <uint32_t End>
+struct Chunks : Chunks<End - CHUNK_SIZE> {
+  static_assert(noble_mask_combinations_are_exact(End - CHUNK_SIZE, End),
+                "noble eligibility masks must match the reference rules");
+};
+template <> struct Chunks<0> {};
+static_assert(sizeof(Chunks<NOBLE_MASK_COMBINATIONS>) > 0,
+              "instantiate all independent verification chunks");
+} // namespace noble_mask_verification_detail
 
 inline bool is_valid_noble_id(int id) { return id >= 0 && id < NOBLE_COUNT; }
 
