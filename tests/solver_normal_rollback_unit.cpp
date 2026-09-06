@@ -354,7 +354,11 @@ int main() {
             "allocation observer installation failed");
 #endif
     const auto before_probe = allocations.load();
-    void *probe = ::operator new(17);
+    // Observe a real allocation even with optimization. Indirection also keeps
+    // GCC from mistaking our valid malloc-backed replacement delete for an
+    // allocation/deallocation mismatch when it inlines the positive control.
+    void *(*volatile allocate_probe)(std::size_t) = ::operator new;
+    void *probe = allocate_probe(17);
     const auto after_probe = allocations.load();
     ::operator delete(probe);
     require(after_probe > before_probe, "allocation observer is inactive");
