@@ -229,9 +229,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--list-cases", action="store_true")
     parser.add_argument(
         "--rotate-binary-slots",
-        action=argparse.BooleanOptionalAction,
+        action="store_true",
         default=True,
         help="cross A/B over two fixed-inode executable slots (default: enabled)",
+    )
+    parser.add_argument(
+        "--no-rotate-binary-slots",
+        dest="rotate_binary_slots",
+        action="store_false",
+        help="disable fixed-inode slot crossover (last positive/negative flag wins)",
     )
     args = parser.parse_args(argv)
 

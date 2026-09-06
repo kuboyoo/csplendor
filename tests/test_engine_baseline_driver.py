@@ -63,7 +63,22 @@ def test_phase0_payload_schema_is_json_serializable():
     assert json.loads(json.dumps(payload))["schema"] == baseline.SCHEMA
 
 
-def test_phase0_enables_slot_crossover_and_22_pairs_by_default(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "flags, enabled, pairs",
+    [
+        ([], True, 22),
+        (["--rotate-binary-slots"], True, 22),
+        (["--no-rotate-binary-slots"], False, 22),
+        (["--rotate-binary-slots"] * 2, True, 22),
+        (["--no-rotate-binary-slots"] * 2, False, 22),
+        (["--rotate-binary-slots", "--no-rotate-binary-slots"], False, 22),
+        (["--no-rotate-binary-slots", "--rotate-binary-slots"], True, 22),
+        (["--no-rotate-binary-slots", "--pairs", "21"], False, 21),
+    ],
+)
+def test_phase0_enables_slot_crossover_and_22_pairs_by_default(
+    tmp_path, monkeypatch, flags, enabled, pairs
+):
     calls = []
     monkeypatch.setattr(baseline, "CASES", (baseline.CASES[0],))
 
@@ -108,23 +123,32 @@ def test_phase0_enables_slot_crossover_and_22_pairs_by_default(tmp_path, monkeyp
                 str(output_json),
                 "--output-csv",
                 str(output_csv),
+                *flags,
             ]
         )
         == 0
     )
-    assert calls[0]["pairs"] == 22
-    assert calls[0]["rotate_binary_slots"] is True
+    assert calls[0]["pairs"] == pairs
+    assert calls[0]["rotate_binary_slots"] is enabled
     payload = json.loads(output_json.read_text(encoding="utf-8"))
-    assert payload["settings"]["rotate_binary_slots"] is True
-    assert payload["settings"]["statistical_unit"] == "two_pair_crossover_block"
+    assert payload["settings"]["pairs"] == pairs
+    assert payload["settings"]["rotate_binary_slots"] is enabled
+    assert payload["settings"]["statistical_unit"] == (
+        "two_pair_crossover_block" if enabled else "pair"
+    )
     assert (
         payload["settings"]["binary_slot_policy"]
-        == "two_private_fixed_inodes_crossed_every_pair"
+        == ("two_private_fixed_inodes_crossed_every_pair" if enabled else "disabled")
     )
 
 
-def test_phase0_rejects_odd_pairs_when_slot_crossover_is_enabled(tmp_path):
-    with pytest.raises(SystemExit):
+@pytest.mark.parametrize(
+    "flags",
+    [[], ["--rotate-binary-slots"],
+     ["--no-rotate-binary-slots", "--rotate-binary-slots"]],
+)
+def test_phase0_rejects_odd_pairs_when_slot_crossover_is_enabled(tmp_path, flags, capsys):
+    with pytest.raises(SystemExit) as error:
         baseline.main(
             [
                 "--baseline-binary",
@@ -141,5 +165,8 @@ def test_phase0_rejects_odd_pairs_when_slot_crossover_is_enabled(tmp_path):
                 str(tmp_path / "baseline.csv"),
                 "--pairs",
                 "21",
+                *flags,
             ]
         )
+    assert error.value.code == 2
+    assert "requires an even number of pairs" in capsys.readouterr().err
