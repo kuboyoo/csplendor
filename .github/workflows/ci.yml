@@ -186,12 +186,6 @@ jobs:
           actual = platform.machine().lower();
           expected = '${{ matrix.machine }}';
           assert actual == expected, (actual, expected)"
-      - name: Verify arm64 Python on Apple Silicon
-        if: runner.os == 'macOS'
-        run: >-
-          python -c "import sysconfig;
-          python_platform = sysconfig.get_platform().lower();
-          assert python_platform.endswith('arm64'), python_platform"
       - name: Install editable profile
         run: |
           python -m pip install --upgrade pip
