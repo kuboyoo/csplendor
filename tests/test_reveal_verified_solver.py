@@ -1,6 +1,7 @@
 import pytest
 
 import csplendor as cs
+from csplendor.mate_frontier import expand_mate_frontier
 from scripts.dfpn_mate_solver import (
     compact_proof_dag_to_v1,
     solve_reveal_verified_mate,
@@ -15,6 +16,26 @@ BENCH_POSITION = (
     "nobles:[-,-,-];reserved:[68];bought:[_,_,_,_,_,_,_,_,_,_,_] | "
     "P1:name:Player1;gems:W0U0G0R0K2D1;bonuses:W3U1G0R0K3;points:8;"
     "nobles:[-,-,-];reserved:[85,44,43];bought:[_,_,_,_,_,_,_] | 0"
+)
+
+FRONTIER_HINT_POSITION = (
+    "bank:W1U2G2R2K1D5 | "
+    "visible:L1[7,28,14,3]L2[54,56,69,46]L3[73,86,85,76] | "
+    "decks:20,20,13 | nobles:[1,11,7] | "
+    "P0:gems:W1U1G0R1K2D0;bonuses:W0U4G1R4K2;points:6;"
+    "nobles:[];reserved:[74,89,88];bought:[9,10,13,20,5,2,22,37,6,45,51] | "
+    "P1:gems:W2U1G2R1K1D0;bonuses:W3U3G1R2K0;points:6;"
+    "nobles:[];reserved:[66,31];bought:[29,4,42,50,8,36,27,25,43] | 1"
+)
+
+FRONTIER_WIDE_DEFENDER_POSITION = (
+    "bank:W1U3G3R4K4D4 | "
+    "visible:L1[10,15,38,39]L2[57,66,67,55]L3[87,89,80,82] | "
+    "decks:18,19,13 | nobles:[7,1,0] | "
+    "P0:gems:W2U0G0R0K0D1;bonuses:W1U5G0R2K1;points:6;"
+    "nobles:[];reserved:[71,72,27];bought:[21,1,9,4,7,48,26,42,40] | "
+    "P1:gems:W1U1G1R0K0D0;bonuses:W2U4G3R2K2;points:4;"
+    "nobles:[];reserved:[60,20,81];bought:[18,24,5,28,0,22,33,64,50,2,35,46,3] | 1"
 )
 
 
@@ -749,6 +770,44 @@ def test_reveal_verified_frontier_expands_only_one_verified_layer():
     assert {
         int(edge["action_code"]) for edge in defender["edges"]
     } == {int(code) for code in child.legal_action_codes}
+
+
+def test_reveal_verified_frontier_uses_principal_line_action_hints():
+    game = load_game_from_usi_text(FRONTIER_HINT_POSITION)
+
+    result = expand_mate_frontier(
+        game,
+        attacker=1,
+        depth=5,
+        max_nodes=500000,
+        time_limit_seconds=5.0,
+        edge_limit=10000,
+        preferred_attacker_actions=[2184, 444],
+    )
+
+    assert result["proven"] is True
+    assert result["complete"] is True
+    assert result["unknown_reason"] is None
+    assert {int(edge["action_code"]) for edge in result["edges"]} == {2184}
+    assert result["stats"]["nodes"] < 500000
+
+
+def test_reveal_verified_frontier_default_budget_materializes_wide_defender():
+    game = load_game_from_usi_text(FRONTIER_WIDE_DEFENDER_POSITION)
+    assert game.apply_action_code(552, False)
+
+    result = expand_mate_frontier(
+        game,
+        attacker=1,
+        depth=4,
+        preferred_attacker_actions=[92],
+    )
+
+    assert result["proven"] is True
+    assert result["complete"] is True
+    assert result["unknown_reason"] is None
+    assert len(result["edges"]) == 77
+    assert result["stats"]["nodes"] < 5_000_000
 
 
 def test_reveal_verified_frontier_preserves_concrete_deck_reserve_outcome():
