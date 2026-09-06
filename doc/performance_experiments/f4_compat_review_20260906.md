@@ -1,5 +1,9 @@
 # F4互換性是正・再受入（2026-09-06）
 
+追記：本報告のBLOCKEDは当時の記録として保持する。後続の追加承認に基づく修正と
+最終CI仕上げは[新報告](f4_ci_finish_review_20260906.md)・
+[新manifest](f4_ci_finish_manifest_20260906.json)へ別記した。旧rawは変更していない。
+
 ## 判定：BLOCKED（元の3問題は解消、後続で別の互換性問題を検出）
 
 [PR #26](https://github.com/kuboyoo/csplendor/pull/26)の承認済み3原因を個別commitで最小修正した。

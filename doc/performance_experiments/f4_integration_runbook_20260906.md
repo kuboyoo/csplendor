@@ -1,5 +1,14 @@
 # F4統合・導入runbook：merge・導入は承認待ち
 
+2026-09-06 CI仕上げ追記：[最新是正報告](f4_ci_finish_review_20260906.md)・
+[manifest](f4_ci_finish_manifest_20260906.json)を現在の判定記録とする。
+後続互換性の修正・通常pushは追加承認に基づき実施済み。最終コード／clean wheel sourceは
+`8b6dd8b48526dfa1eda8ccbc00a9355f5abc8cdb`、origin/mainは下記f5ec6c5から進行なし。
+適用CI 16 jobsが成功し、clean wheel隔離受入もPASS。記録追加後headのCIはPR #26本文で照合する。
+F1との拡張・native .textはbyte不一致のため、旧倍率をそのまま移さずsolver限定paired guardを追加した。
+F1/F2の旧binary証跡と現binaryの新検証は区別する。以降のmainへの統合・常用環境更新は未承認。
+以下の過去の「是正未承認・BLOCKED」は経過記録であり、現在の互換性判定は最新報告を参照する。
+
 2026-09-06是正追記：[F4互換性是正](f4_compat_review_20260906.md)で元の3原因を修正し通常pushした。
 修正コード／新wheel sourceは`c725b5ed33e5ba4cd4cc99d9ccee8627550b754e`。
 本体header・計測driverにはF1から差分あり、同条件新拡張のbyte一致と新source digestを記録した。
