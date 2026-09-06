@@ -479,7 +479,9 @@ def _solve_depth_parallel(
                         if other is not future:
                             other.cancel()
     finally:
-        executor.shutdown(wait=True, cancel_futures=True)
+        for future in futures:
+            future.cancel()
+        executor.shutdown(wait=True)
 
     if global_status is None:
         global_status = "unknown"
