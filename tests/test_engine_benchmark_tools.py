@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import sys
 import time
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -951,8 +953,50 @@ def test_supplied_manifest_must_match_command_and_binary(tmp_path):
         )
 
 
+class _ReferenceSlotPermissions:
+    """Model only POSIX executable permissions, not the runner or byte I/O.
+
+    Windows exercises the same production allocation/hash/exception/cleanup/
+    statistics with real portable file I/O and modeled mode bits. It does NOT
+    execute ELF or validate POSIX permissions. POSIX runs both this model and
+    the unmodified real fd/fchmod/inode/SHA path below.
+    """
+
+    def __init__(self):
+        self.source_modes = {}
+        self.executable_fds = []
+
+    def require_supported(self):
+        pass
+
+    def source_stat(self, binary):
+        metadata = binary.lstat()
+        mode = stat.S_IFMT(metadata.st_mode) | self.source_modes.get(binary, 0o700)
+        return os.stat_result((mode, *tuple(metadata)[1:]))
+
+    def make_executable(self, descriptor):
+        metadata = os.fstat(descriptor)
+        assert stat.S_ISREG(metadata.st_mode)
+        self.executable_fds.append((metadata.st_dev, metadata.st_ino))
+
+
+@pytest.fixture(params=[
+    "reference-permissions",
+    pytest.param("posix-real-io", marks=pytest.mark.skipif(
+        os.name != "posix",
+        reason="real POSIX fchmod/executable-mode I/O; reference contract runs on all OS",
+    )),
+])
+def slot_permissions(request, monkeypatch):
+    if request.param == "reference-permissions":
+        model = _ReferenceSlotPermissions()
+        monkeypatch.setattr(runner, "_slot_permissions", model)
+        return model
+    return runner._slot_permissions
+
+
 def test_rotated_slots_keep_fixed_inodes_sha_and_original_manifests(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, slot_permissions
 ):
     baseline_binary = tmp_path / "baseline-bench"
     candidate_binary = tmp_path / "candidate-bench"
@@ -981,6 +1025,8 @@ def test_rotated_slots_keep_fixed_inodes_sha_and_original_manifests(
         content = Path(slot).read_bytes()
         side = "A" if content == baseline_binary.read_bytes() else "B"
         metadata = Path(slot).stat()
+        if isinstance(slot_permissions, runner._PosixSlotPermissions):
+            assert stat.S_IMODE(metadata.st_mode) == 0o700
         calls.append(
             {
                 "side": side,
@@ -1045,9 +1091,11 @@ def test_rotated_slots_keep_fixed_inodes_sha_and_original_manifests(
     ratio = result["comparison"][0]["B_over_A"]
     assert ratio["median"] == pytest.approx(1.1)
     assert ratio["crossover_blocks"] == 2
+    if isinstance(slot_permissions, _ReferenceSlotPermissions):
+        assert len(slot_permissions.executable_fds) == 10  # 2 creates + 8 stages
 
 
-def test_binary_slot_rotation_rejects_non_elf(tmp_path):
+def test_binary_slot_rotation_rejects_non_elf(tmp_path, slot_permissions):
     binaries = []
     manifests = []
     for name in ("a", "b"):
@@ -1073,7 +1121,9 @@ def test_binary_slot_rotation_rejects_non_elf(tmp_path):
         )
 
 
-def test_binary_slot_rotation_snapshots_sources_and_cleans_up_on_failure(tmp_path):
+def test_binary_slot_rotation_snapshots_sources_and_cleans_up_on_failure(
+    tmp_path, slot_permissions
+):
     binaries = {}
     commands = {}
     manifests = {}
@@ -1107,7 +1157,7 @@ def test_binary_slot_rotation_snapshots_sources_and_cleans_up_on_failure(tmp_pat
     assert all(not path.exists() for path in slot_paths)
 
 
-def test_binary_slot_rotation_rejects_origin_dependent_elf(tmp_path):
+def test_binary_slot_rotation_rejects_origin_dependent_elf(tmp_path, slot_permissions):
     binaries = []
     manifests = []
     for name, payload in (("a", b"\x7fELF$ORIGIN/lib"), ("b", b"\x7fELFplain")):
@@ -1131,6 +1181,53 @@ def test_binary_slot_rotation_rejects_origin_dependent_elf(tmp_path):
             candidate_manifest=manifests[1],
             rotate_binary_slots=True,
         )
+
+
+def test_real_binary_slots_reject_unsupported_platform_before_io(monkeypatch):
+    # Do not mutate the global os module or pathlib's platform selection.
+    monkeypatch.setattr(runner, "os", SimpleNamespace(name="nt"))
+    with pytest.raises(runner.BenchmarkContractError, match="unsupported on this platform"):
+        runner._native_binary_identity({}, [])
+
+
+@pytest.mark.parametrize("mode, message", [
+    (0o600, "requires an executable file"),
+    (0o4700, "rejects setuid/setgid"),
+])
+def test_binary_slots_reject_unsafe_permissions(tmp_path, slot_permissions, mode, message):
+    binary = tmp_path / "unsafe"
+    binary.write_bytes(b"\x7fELFfixture")
+    binary.chmod(mode)
+    if isinstance(slot_permissions, _ReferenceSlotPermissions):
+        slot_permissions.source_modes[binary] = mode
+    manifest = {"command": [str(binary)], "binary": {
+        "path": str(binary.resolve()), "sha256": manifest_tool.sha256_file(binary),
+    }}
+    with pytest.raises(runner.BenchmarkContractError, match=message):
+        runner._native_binary_identity(manifest, [str(binary)])
+
+
+@pytest.mark.parametrize("tampering", ["contents", "inode"])
+def test_binary_slots_detect_tampering_and_cleanup(tmp_path, slot_permissions, tampering):
+    binary = tmp_path / "original"
+    binary.write_bytes(b"\x7fELFfixture")
+    binary.chmod(0o700)
+    manifest = {"command": [str(binary)], "binary": {
+        "path": str(binary.resolve()), "sha256": manifest_tool.sha256_file(binary),
+    }}
+    rotator = runner._FixedBinarySlotRotator(
+        {side: [str(binary)] for side in ("A", "B")},
+        {side: manifest for side in ("A", "B")},
+    )
+    with pytest.raises(runner.BenchmarkContractError, match="content changed|inode changed"):
+        with rotator as slots:
+            layout = slots.prepare(0)
+            path = Path(layout["A"]["slot_path"])
+            if tampering == "inode":
+                path.rename(path.with_suffix(".old"))  # retain the original inode
+            path.write_bytes(b"changed")
+            slots.execution_command("A", layout["A"])
+    assert not path.parent.exists()
 
 
 @pytest.mark.skipif(not hasattr(os, "killpg"), reason="POSIX process groups required")

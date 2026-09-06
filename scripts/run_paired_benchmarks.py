@@ -682,10 +682,34 @@ def validate_manifest_matches_command(
         )
 
 
+class _PosixSlotPermissions:
+    """OS boundary for real ELF staging; never emulate permissions in production."""
+
+    @staticmethod
+    def require_supported() -> None:
+        if os.name != "posix":
+            raise BenchmarkContractError(
+                "binary-slot rotation requires POSIX executable permissions; "
+                "real ELF slot staging is unsupported on this platform"
+            )
+
+    @staticmethod
+    def source_stat(binary: Path) -> os.stat_result:
+        return binary.lstat()
+
+    @staticmethod
+    def make_executable(descriptor: int) -> None:
+        os.fchmod(descriptor, 0o700)
+
+
+_slot_permissions = _PosixSlotPermissions()
+
+
 def _native_binary_identity(
     manifest: Mapping[str, Any], command: Sequence[str]
 ) -> tuple[Path, str, bytes]:
     """Resolve and validate an original ELF executable before slot staging."""
+    _slot_permissions.require_supported()
     validate_manifest_matches_command(manifest, command)
     binary_metadata = manifest.get("binary")
     if not isinstance(binary_metadata, Mapping):
@@ -696,7 +720,7 @@ def _native_binary_identity(
         raise BenchmarkContractError("benchmark manifest binary identity is incomplete")
     binary = Path(path_value)
     try:
-        metadata = binary.lstat()
+        metadata = _slot_permissions.source_stat(binary)
     except OSError as error:
         raise BenchmarkContractError(
             f"cannot stat benchmark binary: {binary}"
@@ -808,7 +832,7 @@ class _FixedBinarySlotRotator:
                 path = root / f"{slot_id}.elf"
                 descriptor = os.open(path, create_flags, 0o700)
                 try:
-                    os.fchmod(descriptor, 0o700)
+                    _slot_permissions.make_executable(descriptor)
                     metadata = os.fstat(descriptor)
                     if not stat.S_ISREG(metadata.st_mode):
                         raise BenchmarkContractError(
@@ -893,7 +917,7 @@ class _FixedBinarySlotRotator:
                 raise BenchmarkContractError(f"binary slot inode changed: {slot_id}")
             digest.update(snapshot)
             self._write_all(target_fd, snapshot)
-            os.fchmod(target_fd, 0o700)
+            _slot_permissions.make_executable(target_fd)
             os.fsync(target_fd)
         finally:
             os.close(target_fd)
