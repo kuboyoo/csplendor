@@ -1230,8 +1230,11 @@ def test_binary_slots_detect_tampering_and_cleanup(tmp_path, slot_permissions, t
     assert not path.parent.exists()
 
 
+@pytest.mark.parametrize("rss_mode", ["auto", "unavailable"])
 @pytest.mark.skipif(not hasattr(os, "killpg"), reason="POSIX process groups required")
-def test_runner_timeout_kills_descendant_process_group(tmp_path):
+def test_runner_timeout_kills_descendant_process_group(tmp_path, monkeypatch, rss_mode):
+    if rss_mode == "unavailable":
+        monkeypatch.setattr(runner, "_gnu_time_supports_rss", lambda _path: False)
     child_pid_path = tmp_path / "child.pid"
     child_program = (
         "import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(30)"
@@ -1244,6 +1247,16 @@ def test_runner_timeout_kills_descendant_process_group(tmp_path):
         "time.sleep(30)"
     )
     cpu = min(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else 0
+    processes = []
+    real_popen = runner.subprocess.Popen
+
+    def track_target(command, **kwargs):
+        process = real_popen(command, **kwargs)
+        if command[-1] == parent_program:
+            processes.append(process)
+        return process
+
+    monkeypatch.setattr(runner.subprocess, "Popen", track_target)
     with pytest.raises(runner.subprocess.TimeoutExpired):
         runner._run_with_rss(
             [sys.executable, "-c", parent_program],
@@ -1251,6 +1264,7 @@ def test_runner_timeout_kills_descendant_process_group(tmp_path):
             timeout=0.3,
         )
     child_pid = int(child_pid_path.read_text(encoding="ascii"))
+    assert len(processes) == 1 and processes[0].poll() is not None
     process_state = Path(f"/proc/{child_pid}/stat")
     deadline = time.monotonic() + 2.0
     while process_state.exists() and time.monotonic() < deadline:
@@ -1261,6 +1275,163 @@ def test_runner_timeout_kills_descendant_process_group(tmp_path):
     if process_state.exists():
         fields = process_state.read_text(encoding="ascii").split()
         assert len(fields) >= 3 and fields[2] == "Z"
+    # macOS has no /proc. Verify the actual child's state there too. An orphan
+    # zombie is already terminated; the direct process above must be reaped.
+    deadline = time.monotonic() + 2.0
+    while True:
+        status = runner.subprocess.run(
+            ["ps", "-p", str(child_pid), "-o", "stat="],
+            capture_output=True, text=True, check=False,
+        )
+        if status.returncode == 1 and not status.stdout.strip():
+            break
+        assert status.returncode == 0, status.stderr
+        if status.stdout.strip().startswith("Z"):
+            break
+        assert time.monotonic() < deadline, "descendant is still running"
+        time.sleep(0.02)
+
+
+@pytest.mark.parametrize("returncode, payload, expected", [
+    (0, b"CSPLENDOR_PROBE_RSS_KIB=1234\n", True),
+    (1, b"", False),  # BSD time rejects GNU flags
+    (0, b"%M\n", False),
+    (0, b"CSPLENDOR_PROBE_RSS_KIB=unknown\n", False),
+    (0, b"\xff", False),
+])
+def test_gnu_time_capability_probe_contract(tmp_path, monkeypatch, returncode, payload, expected):
+    executable = tmp_path / "time-tool"
+    executable.write_bytes(b"capability model")
+    calls = []
+    outputs = []
+
+    class Probe:
+        pid = 12345
+
+        def __init__(self, command, **kwargs):
+            calls.append(command)
+            assert command[-3:] == [sys.executable, "-c", "pass"]
+            assert command[1:3] == ["-f", "CSPLENDOR_PROBE_RSS_KIB=%M"]
+            assert kwargs["start_new_session"] == hasattr(os, "setsid")
+            output = Path(command[command.index("-o") + 1])
+            output.write_bytes(payload)
+            outputs.append(output)
+            self.returncode = returncode
+
+        def communicate(self, timeout=None):
+            assert timeout == 5.0
+            return "", "unsupported" if returncode else ""
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(runner.subprocess, "Popen", Probe)
+    monkeypatch.setattr(runner, "_process_group_exists", lambda _pid: False)
+    assert runner._gnu_time_supports_rss(executable) is expected
+    assert len(calls) == 1
+    assert all(not path.parent.exists() for path in outputs)
+
+
+def test_gnu_time_missing_and_real_non_gnu_tool(tmp_path):
+    assert not runner._gnu_time_supports_rss(tmp_path / "missing")
+    # Python is a real executable on every supported OS, but rejects time's
+    # flags. Capability discovery never executes the benchmark to find out.
+    assert not runner._gnu_time_supports_rss(Path(sys.executable))
+
+
+def test_gnu_time_probe_timeout_cleans_up_without_running_target(tmp_path, monkeypatch):
+    executable = tmp_path / "time-tool"
+    executable.write_bytes(b"timeout capability model")
+    commands = []
+    cleaned = []
+
+    class HangingProbe:
+        returncode = None
+
+        def __init__(self, command, **_kwargs):
+            commands.append(command)
+
+        def communicate(self, timeout=None):
+            if self.returncode is None:
+                raise runner.subprocess.TimeoutExpired(commands[0], timeout)
+            return "", ""
+
+        def poll(self):
+            return self.returncode
+
+    def terminate(process):
+        cleaned.append(process)
+        process.returncode = -9
+
+    monkeypatch.setattr(runner.subprocess, "Popen", HangingProbe)
+    monkeypatch.setattr(runner, "_terminate_process_group", terminate)
+    assert not runner._gnu_time_supports_rss(executable)
+    assert len(commands) == len(cleaned) == 1
+    assert commands[0][-3:] == [sys.executable, "-c", "pass"]
+    assert not Path(commands[0][commands[0].index("-o") + 1]).parent.exists()
+
+
+def test_gnu_time_real_rss_format():
+    executable = Path("/usr/bin/time")
+    if not runner._gnu_time_supports_rss(executable):
+        pytest.skip("actual GNU time integration only; capability models run on all OS")
+    cpu = min(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else 0
+    stdout, rss, _ = runner._run_with_rss([sys.executable, "-c", "print('ok')"], [cpu], 10)
+    assert stdout.strip() == "ok" and isinstance(rss, int) and rss > 0
+
+
+def test_runner_missing_rss_is_none_and_affinity_is_preserved(monkeypatch):
+    monkeypatch.setattr(runner, "_gnu_time_supports_rss", lambda _path: False)
+    cpu = min(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else 0
+    command = [sys.executable, "-c", "import os; print(sorted(os.sched_getaffinity(0)) if hasattr(os,'sched_getaffinity') else 'unavailable')"]
+    stdout, rss, execution = runner._run_with_rss(command, [cpu], 10)
+    assert rss is None
+    assert execution[-3:] == command
+    assert stdout.strip() == (str([cpu]) if hasattr(os, "sched_getaffinity") else "unavailable")
+
+
+@pytest.mark.parametrize("with_rss", [False, True])
+def test_runner_target_failure_is_not_a_capability_retry(monkeypatch, with_rss):
+    monkeypatch.setattr(runner, "_gnu_time_supports_rss", lambda _path: with_rss)
+    monkeypatch.setattr(runner, "_process_group_exists", lambda _pid: False)
+    calls = []
+
+    class FailedTarget:
+        pid = 12345
+        returncode = 7
+
+        def __init__(self, command, **_kwargs):
+            calls.append(command)
+
+        def communicate(self, timeout=None):
+            return "", "target failure"
+
+    monkeypatch.setattr(runner.subprocess, "Popen", FailedTarget)
+    cpu = min(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else 0
+    with pytest.raises(RuntimeError, match="exited with 7: target failure"):
+        runner._run_with_rss(["target-program"], [cpu], 10)
+    assert len(calls) == 1
+    assert ("CSPLENDOR_MAX_RSS_KIB=%M" in calls[0]) is with_rss
+
+
+def test_runner_without_rss_times_out_and_reaps_real_process(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "_gnu_time_supports_rss", lambda _path: False)
+    started = tmp_path / "started"
+    program = f"import pathlib,time;pathlib.Path({str(started)!r}).write_text('started');time.sleep(30)"
+    processes = []
+    real_popen = runner.subprocess.Popen
+
+    def track(command, **kwargs):
+        process = real_popen(command, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(runner.subprocess, "Popen", track)
+    cpu = min(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else 0
+    with pytest.raises(runner.subprocess.TimeoutExpired):
+        runner._run_with_rss([sys.executable, "-c", program], [cpu], 1.0)
+    assert started.read_text() == "started"
+    assert len(processes) == 1 and processes[0].poll() is not None
 
 
 def test_atomic_json_replacement_never_exposes_partial_document(tmp_path, monkeypatch):

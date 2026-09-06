@@ -1211,6 +1211,47 @@ def _terminate_process_group(
         process.wait()
 
 
+def _gnu_time_supports_rss(executable: Path) -> bool:
+    """Probe the required flags/format with a disposable command, never the target.
+
+    BSD time or a missing/unusable tool leaves RSS unavailable. The actual
+    benchmark is still executed exactly once; its errors are not capability
+    failures and must never trigger a retry without the wrapper.
+    """
+    if not executable.is_file():
+        return False
+    with tempfile.TemporaryDirectory(prefix="csplendor-time-probe-") as directory:
+        output = Path(directory) / "rss.txt"
+        try:
+            process = subprocess.Popen(
+                [str(executable), "-f", "CSPLENDOR_PROBE_RSS_KIB=%M", "-o",
+                 str(output), "--", sys.executable, "-c", "pass"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                start_new_session=hasattr(os, "setsid"),
+            )
+        except OSError:
+            return False
+        try:
+            try:
+                process.communicate(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                return False
+            if process.returncode != 0 or not output.is_file():
+                return False
+            try:
+                value = output.read_text(encoding="ascii").strip()
+            except (OSError, UnicodeError):
+                return False
+            prefix = "CSPLENDOR_PROBE_RSS_KIB="
+            return value.startswith(prefix) and value[len(prefix):].isascii() and value[len(prefix):].isdigit()
+        finally:
+            if process.poll() is None or (
+                hasattr(os, "killpg") and _process_group_exists(process.pid)
+            ):
+                _terminate_process_group(process)
+                process.communicate()
+
+
 def _run_with_rss(
     command: Sequence[str], cpu_set: Sequence[int], timeout: float | None
 ) -> tuple[str, int | None, list[str]]:
@@ -1235,6 +1276,7 @@ def _run_with_rss(
         else benchmark_command
     )
     gnu_time = Path("/usr/bin/time")
+    use_gnu_time = _gnu_time_supports_rss(gnu_time)
     rss_path: Path | None = None
     preexec_fn = None
     if taskset is None and hasattr(os, "sched_setaffinity"):
@@ -1248,7 +1290,7 @@ def _run_with_rss(
             prefix="csplendor-rss-", delete=False
         ) as stream:
             rss_path = Path(stream.name)
-        if gnu_time.is_file():
+        if use_gnu_time:
             executed = [
                 str(gnu_time),
                 "-f",
@@ -1286,7 +1328,7 @@ def _run_with_rss(
                 f"benchmark command exited with {process.returncode}: {diagnostic}"
             )
         rss_kib = None
-        if gnu_time.is_file() and rss_path is not None:
+        if use_gnu_time and rss_path is not None:
             for line in rss_path.read_text(encoding="ascii").splitlines():
                 prefix = "CSPLENDOR_MAX_RSS_KIB="
                 if line.startswith(prefix):
