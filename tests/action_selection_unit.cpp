@@ -78,11 +78,15 @@ size_t verify_indices(const Game &game) {
   const auto actions = game.legal_actions();
   const auto codes = game.legal_action_codes();
   require(actions.size() == codes.size() && codes.size() == game.legal_action_count(), "count parity");
+  require(codes.size() <= UINT16_MAX, "test indices must be representable as uint16_t");
+  static_assert(MAX_MOVES <= UINT16_MAX, "MAX_MOVES boundary must be representable");
   for (size_t index = 0; index < actions.size(); ++index) {
-    require(codes[index] == actions[index].pack() && game.legal_action_code_at(index) == codes[index], "rank code parity");
+    // The size bound above proves representability, not legality of a rank.
+    const uint16_t action_index = static_cast<uint16_t>(index);
+    require(codes[index] == actions[index].pack() && game.legal_action_code_at(action_index) == codes[index], "rank code parity");
     Game expected = game.clone_light(), actual = game.clone_light();
     bool result = expected.apply_trusted(actions[index], true);
-    require(actual.apply_legal_action_index(index, true) == result &&
+    require(actual.apply_legal_action_index(action_index, true) == result &&
             csplendor::detail::UndoRecord::boards_equal(expected.board, actual.board), "rank child parity");
     require(actual.history.size() == expected.history.size() && actual.board_history.size() == expected.board_history.size(), "rank history parity");
     actual = game.clone_light();
