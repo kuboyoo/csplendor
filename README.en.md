@@ -3,12 +3,51 @@
 `csplendor` is a fast C++ based engine for the board game Splendor, optimized for 2-player competitive play and machine-learning workflows.
 
 ## Features
-- **Fast logic**: On the 250-legal-action midgame benchmark below, the C++17 implementation reaches approximately 26,000 Python `legal_actions` calls/sec, 980,000 C++ internal legal-action counts/sec, and 740,000 C++ internal self-play moves/sec.
+
+- **Fast logic**: C++17 rule transitions, legal-action generation and search. The latest cumulative comparison and historical measurements are separated below.
 - **Python bindings**: Seamless integration via `pybind11`.
 - **ML ready**: Built-in state featurization and action-space encoders.
 - **Web API**: FastAPI integration for GUI development.
 
 ### Performance reference
+
+#### Final candidate versus main (2026-09-06)
+
+Direct paired A/B: `main f5ec6c5` versus measured engine `b202e6a`, Ryzen 9 7900X,
+GCC 15.2, portable Release, 22 pairs / 11 blocks. Native LTO is OFF; both Python
+extensions retain their pre-existing pybind11 LTO. Later documentation commits
+are not different measured engine implementations.
+
+| Workload | main | Candidate | Speedup [95% CI] |
+|---|---:|---:|---:|
+| Native legal count, 200k calls | 1,185,093 calls/s | 3,112,934 calls/s | 2.629 [2.615–2.651] |
+| Native legal codes, 200k calls | 155,366 calls/s | 378,400 calls/s | 2.438 [2.429–2.447] |
+| Native legal actions, 200k calls | 172,136 calls/s | 346,226 calls/s | 2.008 [1.959–2.057] |
+| Exact reveal, depth 7, 1M nodes, independent repeat | 2,505.49 ms | 1,051.16 ms | 2.373 [2.361–2.403] |
+| Python StateFeaturizer, 50k calls, independent repeat | 372.14 ms | 29.04 ms | 12.808 [12.514–13.048] |
+| Python features + environment step, 50k moves, repeat | 529.33 ms | 89.37 ms | 6.044 [5.732–6.164] |
+
+The generation rows measure native calls, not Python `legal_actions` retrieval.
+Speedups are medians of crossover-block ratios, not ratios of the displayed
+time/rate medians. The depth-7 fixture ends UNKNOWN at its node limit: this is
+not the time to complete a seven-ply mate proof. Current solver RSS fell about
+30%. Do not extrapolate these numbers to whole-AI or puzzle-saving throughput,
+or multiply historical phase ratios.
+
+Cumulative parallel-MCTS gains and the incremental benefit of opt-in LTO remain
+unconfirmed. `CSPLENDOR_ENABLE_LTO` stays OFF by default. See the
+[F1 report, CSV and manifest](doc/performance_experiments/final_main_vs_candidate_20260906.md).
+
+F2 exercised real selfplay12/selfplay17 checkpoints on CPU through the existing
+consumer: **Python MCTS, V3/3133 actions, canonical/public 313-feature encoding**,
+not native 48-action MCTS or the optimized StateFeaturizer path. Real-model A/B,
+browser rendering and GPU acceptance were not performed. F3 found candidate-only
+CI lint violations; shipment is **BLOCKED**, not approved by these smoke checks.
+See [acceptance/review](doc/performance_experiments/f2_f3_shipping_review_20260906.md)
+and [integration/rollback preparation](doc/performance_experiments/f4_integration_runbook_20260906.md).
+No main merge, push or production installation has been executed.
+
+#### Historical generation measurements (not the current candidate)
 
 Measured on 2026-07-13 with a Ryzen 9 7900X, GCC 13.3, a Release build,
 Python 3.12.1, and one pinned logical CPU. The representative legal-action
@@ -35,7 +74,7 @@ Compared numerically with the old README claims, the new values are 1.33x for
 981,149 calls/sec), and 4.63x for self-play (160,000 to 740,538 moves/sec).
 Use the same-condition table or paired A/B ratios to assess the refactoring.
 
-#### MCTS search performance
+#### Historical MCTS search performance
 
 Measured on 2026-08-04 on the same Ryzen 9 7900X with GCC 13 and a portable
 Release build. The table compares the pre-optimization `main` (`6ddb47c`) with

@@ -5,21 +5,55 @@
 `csplendor` は、ボードゲーム Splendor 向けの高速な C++ ベースのエンジンです。2人対戦と機械学習の学習用途に最適化されています。
 
 ## 特長
-- **高速なロジック**: C++17 実装により、合法手250件の中盤局面で Python の `legal_actions` 取得は約 27,000 回/秒、C++ 内部の合法手カウントは約 1,012,000 回/秒、C++ 内部適用の自己対戦は約 893,000 moves/sec で動作します（測定条件は下記）。
+
+- **高速なロジック**: C++17による合法手生成・局面更新・探索。最新候補とmainの同条件比較、および過去の測定を下記で区別しています。
 - **Python バインディング**: `pybind11` によりシームレスに連携できます。
 - **機械学習対応**: 状態の特徴量化と行動空間のエンコードを内蔵しています。
 - **Web API**: GUI 開発向けの FastAPI 連携を備えています。
 
 ### 性能目安
 
-`Phase 0--7 後`は2026-07-13にRyzen 9 7900X、GCC 13.3で、`現行`は
+#### 最終候補とmainの累積比較（2026-09-06）
+
+`main f5ec6c5`対、計測コード`b202e6a`の直接paired A/Bです。Ryzen 9 7900X、
+GCC 15.2、portable Release、22 pairs / 11 blocks。nativeはLTOなし、Python拡張は
+両側とも既存pybind11 LTOを維持しています。記録追加後のcommitは計測コードと区別します。
+
+| 処理 | main | 最終候補 | 倍率［95%信頼区間］ |
+|---|---:|---:|---:|
+| C++内部合法手count（20万回） | 1,185,093 回/秒 | 3,112,934 回/秒 | 2.629［2.615–2.651］ |
+| C++内部合法手codes（20万回） | 155,366 回/秒 | 378,400 回/秒 | 2.438［2.429–2.447］ |
+| C++内部合法手actions（20万回） | 172,136 回/秒 | 346,226 回/秒 | 2.008［1.959–2.057］ |
+| 厳密めくれ・深さ7・100万node（独立再測定） | 2,505.49 ms | 1,051.16 ms | 2.373［2.361–2.403］ |
+| Python StateFeaturizer・5万回（独立再測定） | 372.14 ms | 29.04 ms | 12.808［12.514–13.048］ |
+| Python特徴量＋環境step・5万手（独立再測定） | 529.33 ms | 89.37 ms | 6.044［5.732–6.164］ |
+
+生成速度3行はnative benchmarkであり、Pythonの`legal_actions`取得速度ではありません。
+倍率はcrossover block比の中央値で、上表の速度・時間中央値の比とは必ずしも一致しません。
+深さ7の速度fixtureはnode上限でUNKNOWNです。7手詰めの完遂時間、AI全体、問題保存速度へは
+外挿しません。探索のcurrent RSSは約30%減少しました。
+
+並列MCTSの累積高速化とLTO単独の追加効果は未確定です。`CSPLENDOR_ENABLE_LTO`は
+既定OFFを維持し、全用途に推奨しません。詳しくは[F1報告・CSV・manifest](doc/performance_experiments/final_main_vs_candidate_20260906.md)。
+
+F2では実モデルselfplay12/selfplay17をCPUで小さく検証しました。利用側は**Python MCTS＋V3**、
+canonical/public特徴量313次元で、native 48手やStateFeaturizerの測定経路とは異なります。
+実モデルのmain対速度比較、ブラウザ描画、GPU受入は未実施です。
+F3で候補固有のCI lint違反が見つかったため、出荷判定は**BLOCKED**。
+[受入・最終レビュー](doc/performance_experiments/f2_f3_shipping_review_20260906.md)と
+[F4準備・復帰手順](doc/performance_experiments/f4_integration_runbook_20260906.md)を参照してください。
+main統合・push・常用環境更新は未実行です。
+
+#### 過去の生成速度（2026-07/08、現行候補の再測定ではない）
+
+`Phase 0--7 後`は2026-07-13にRyzen 9 7900X、GCC 13.3で、`2026-08-30`は
 2026-08-30に同じCPU、GCC 15.2で測定しました。いずれもRelease build、Python 3.12.1、
 CPU 1論理コア固定です。代表値は `tests/test_perf.py` と同じseed 42・12手・
-合法手250件の中盤局面です。`Phase 0--7 後`はbest-of-5を7回、`現行`は同じ測定を
+合法手250件の中盤局面です。`Phase 0--7 後`はbest-of-5を7回、`2026-08-30`は同じ測定を
 3 batch実行した21標本の中央値です。自己対戦行はseed 0--9の10 gameを1標本とし、
 それぞれ30標本、90標本を測定した別workloadです。
 
-| 処理 | リファクタ前 | Phase 0--7 後 | 現行 | 現行/リファクタ前 |
+| 処理 | リファクタ前 | Phase 0--7 後 | 2026-08-30 | 2026-08-30/リファクタ前 |
 |---|---:|---:|---:|---:|
 | Python `legal_actions` | 21,473 回/秒 | 26,586 回/秒 | 27,084 回/秒 | 1.26倍 |
 | C++ `legal_action_codes` | 61,313 回/秒 | 118,594 回/秒 | 125,444 回/秒 | 2.05倍 |
@@ -33,12 +67,12 @@ Phase 0--7 後を測定した同じ250件局面の30-pair sustained A/Bでは、
 codesは9.17倍、countは9.62倍です。したがって合法手生成が一律5倍になったわけではなく、
 Python Action object生成の割合と合法手数で倍率が変わります。
 
-現行値とリファクタ前の単純比較は、`legal_actions` が1.26倍、codesが2.05倍、
-countが3.19倍、自己対戦が5.56倍です。現行列はcompiler更新を含む再測定値であり、
+2026-08-30とリファクタ前の単純比較は、`legal_actions` が1.26倍、codesが2.05倍、
+countが3.19倍、自己対戦が5.56倍です。2026-08-30列はcompiler更新を含む再測定値であり、
 Phase 0--7 後との差だけを個別最適化の効果とはみなしません。厳密な変更評価には、
 同一build条件のpaired A/Bを用いてください。
 
-#### MCTS探索性能
+#### 過去のMCTS探索性能
 
 2026-08-04に同じRyzen 9 7900X、GCC 13、portable Release buildで、高速化前の`main`
 （`6ddb47c`）とMCTSホットパス高速化後を同一host・seed・tree size・batch sizeで比較した
@@ -63,7 +97,7 @@ action decodeが3,240.5 nsから15.4 ns（210.07倍）、dense mask走査が22.0
 実モデル込みの速度向上はNN推論時間の割合に依存します。測定方法、O(1)監査、compact
 edgeの詳細は[MCTSホットパス高速化](https://github.com/kuboyoo/csplendor/blob/main/doc/mcts_hotpath_optimizations.md)を参照してください。
 
-#### めくれ厳密詰み探索性能
+#### 過去のめくれ厳密詰み探索・Phase別測定
 
 2026-08-30にRyzen 9 7900X、GCC 15.2、portable Release build、Python 3.12.1、
 CPU 1論理コア固定で測定しました。5手詰め収集局面の初手を固定し、深さ7、
