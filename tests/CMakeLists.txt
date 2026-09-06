@@ -11,6 +11,9 @@ function(csplendor_add_native_test target source labels timeout)
   endif()
 endfunction()
 
+csplendor_add_native_test(state_feature_table_unit state_feature_table_unit.cpp
+                          "unit;features;bitwise;oracle" 120)
+
 csplendor_add_native_test(action_selection_unit action_selection_unit.cpp
                           "unit;selection;oracle" 120)
 target_compile_definitions(action_selection_unit PRIVATE CSPLENDOR_ACTION_ENCODER_REFERENCE=1)

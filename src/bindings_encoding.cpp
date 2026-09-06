@@ -92,6 +92,14 @@ void bind_encoding(py::module_ &m) {
           py::arg("game"), py::arg("observer") = -1,
           "Encode game state to feature vector")
       .def_static(
+          "encode_numpy",
+          [](const Game &game, int8_t observer) {
+            return owning_array_copy(StateEncoder::encode(game, observer));
+          },
+          py::arg("game"), py::arg("observer") = -1,
+          "Encode to an independent owning C-contiguous float32 array of shape (196,). "
+          "Keeps the GIL; never exposes stack or reusable search storage.")
+      .def_static(
           "encode_canonical",
           [](const Game &game, int player, int8_t observer) {
             auto features =

@@ -15,9 +15,7 @@ class StateFeaturizer:
         pass
 
     def featurize(self, game: core.Game, observer: int = -1) -> np.ndarray:
-        return np.asarray(
-            core.StateEncoder.encode(game, observer), dtype=np.float32
-        )
+        return core.StateEncoder.encode_numpy(game, observer)
 
     def _featurize_card(self, card_id: int) -> np.ndarray:
         if card_id == -1:

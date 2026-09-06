@@ -145,6 +145,12 @@ Phase 3E・5E・5Aも採否評価を完了しました。3Eのtake代表化は�
 別経路の倍率を掛け合わせたり、実NN・問題保存速度の改善率として扱ったりはしません。
 詳細は[3E・5E・5A測定記録](doc/performance_experiments/phase3e5e5a_action_selection_20260906.md)を参照してください。
 
+Phase 5C-Bでは `StateEncoder.encode_numpy` を追加し、既存`StateFeaturizer`のlist経由変換を
+省きました。Python特徴量取得は12.55倍（独立再測定13.43倍）、特徴量取得＋ランダム着手の
+Python経路は約5.97倍です。native MCTS・実NN全体の倍率ではありません。
+固定特徴量の定数表案はMCTSで改善が再現せず撤去しました。
+詳細は[Phase 5C-B測定記録](doc/performance_experiments/phase5cb_features_20260906.md)を参照してください。
+
 ### 実験的な並列MCTS
 
 共有tree並列探索はStage Bのexperimental opt-inです。既定の`num_threads=1`はworker queueを
