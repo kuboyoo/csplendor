@@ -3,25 +3,114 @@
 `csplendor` is a fast C++ based engine for the board game Splendor, optimized for 2-player competitive play and machine-learning workflows.
 
 ## Features
-- **Fast logic**: On the 250-legal-action midgame benchmark below, the C++17 implementation reaches approximately 26,000 Python `legal_actions` calls/sec, 980,000 C++ internal legal-action counts/sec, and 740,000 C++ internal self-play moves/sec.
+
+- **Fast logic**: C++17 rule transitions, legal-action generation and search. The F1 candidate-versus-main comparison, CI-compatible solver checks and historical measurements are separated below.
 - **Python bindings**: Seamless integration via `pybind11`.
 - **ML ready**: Built-in state featurization and action-space encoders.
 - **Web API**: FastAPI integration for GUI development.
 
 ### Performance reference
 
-Measured on 2026-07-13 with a Ryzen 9 7900X, GCC 13.3, a Release build,
-Python 3.12.1, and one pinned logical CPU. The representative legal-action
-workload is the same seed-42, 12-ply, 250-action position used by
-`tests/test_perf.py`; the table reports the median of seven best-of-five runs.
-The self-play row uses a separate 30-sample workload of ten games (seeds 0--9).
+#### Cumulative benchmarks (F1 measured candidate, 2026-09-06)
 
-| Operation | Before refactoring | After phases 0--7 | Speedup |
+Direct paired A/B compares main `f5ec6c545c9a2727ca708bc4c6822daf07a2c4dc`
+with F1 measured code `b202e6a0cbb2eded9bc2ee5e59f750428e73ca49`.
+These are independent repeat series on the same fixed inputs; times are medians
+per run. Ratios are candidate/main throughput: higher is faster.
+
+| Workload (independent repeat) | main | F1 measured candidate | Speedup [95% CI] |
 |---|---:|---:|---:|
-| Python `legal_actions` | 21,473 calls/sec | 26,586 calls/sec | 1.24x |
-| C++ `legal_action_codes` | 61,313 calls/sec | 118,594 calls/sec | 1.93x |
-| C++ `legal_action_count` | 316,991 calls/sec | 981,149 calls/sec | 3.10x |
-| C++ internal self-play | 160,545 moves/sec | 740,538 moves/sec | 4.61x |
+| Exact reveal, depth 7, 1M-node limit | 2,505.49 ms | 1,051.16 ms | 2.373 [2.361–2.403] |
+| Python StateFeaturizer, 50k calls | 372.14 ms | 29.04 ms | 12.808 [12.514–13.048] |
+| Python features + environment step, 50k moves | 529.33 ms | 89.37 ms | 6.044 [5.732–6.164] |
+
+**These values measure the F1 binaries.** Subsequent CI compatibility fixes
+changed the native executable and Python extension bytes. They are not direct
+measurements of the final PR head or post-merge binaries. The F1 evidence commit,
+`49878b661298bf45e39c5f5ca5afa6d0e363736a`, is also distinct from the measured code.
+
+The exact-reveal fixture is `hidden_reserve`: a cold, fixed-work search that ends
+**UNKNOWN** at the node limit, not a completed seven-ply mate proof. The two Python
+rows measure their respective `reachable_32_seed42` paths, not real-NN, GPU,
+whole-AI or puzzle-saving speedups. In the same independent repeat, median Linux
+**current RSS**, read by the native benchmark after search, fell from 70,152 to
+49,208 KiB (about 30%); the formal series measured 70,192 to 49,188 KiB.
+This is not peak RSS or cumulative allocation bytes, nor a guarantee for other positions.
+
+Conditions: Ryzen 9 7900X, Linux x86_64, GCC 15.2.0, Python 3.12.1, CMake 4.2.3,
+pybind11 3.0.1; portable Release `-O3 -DNDEBUG -std=c++17`, PERF/VERIFY OFF,
+one thread pinned to CPU4. Additional native LTO is OFF; both Python extensions
+retain pre-existing pybind11 LTO. Two warmups, 22 pairs / 11 two-pair fixed-slot
+crossover blocks, 10,000 block-bootstrap iterations. Speedups are medians of
+block ratios, not necessarily ratios of the displayed time medians.
+Sources: [F1 details and reproduction](doc/performance_experiments/final_main_vs_candidate_20260906.md),
+[CSV](doc/performance_experiments/final_main_vs_candidate_20260906.csv),
+[manifest](doc/performance_experiments/final_main_vs_candidate_manifest_20260906.json).
+
+#### Additional CI-compatible solver checks (2026-09-06)
+
+CI-compatible code `8b6dd8b48526dfa1eda8ccbc00a9355f5abc8cdb` was compared
+directly with the saved F1 candidate binary under the same portable conditions,
+CPU4 affinity and 22 pairs / 11 blocks.
+
+| Fixed-order solver and fixture | CI-compatible/F1 candidate throughput [95% CI] |
+|---|---:|
+| exact_reveal, hidden_reserve, depth 7, 1M-node limit | 1.0103 [0.9981–1.0269] |
+| visible_solver, five_moves, 100k-node limit | 1.0192 [0.9973–1.0444] |
+
+Semantic digests and correctness counters matched in every pair. Both intervals
+include 1: these limited solver checks detected no clear regression, but establish
+neither an additional speedup nor non-inferiority across all paths. Do not multiply
+these ratios by F1 ratios. All 16 applicable final-code CI jobs passed, including
+Python 3.8–3.12, Clang/GCC strict, executed ASan/UBSan and TSan, macOS/Windows
+native tests and applicable wheel checks; isolated clean-wheel acceptance also passed.
+See the [CI finishing report](doc/performance_experiments/f4_ci_finish_review_20260906.md)
+and [manifest](doc/performance_experiments/f4_ci_finish_manifest_20260906.json).
+[PR #26](https://github.com/kuboyoo/csplendor/pull/26) records CI and integration
+status for subsequent evidence/README heads. BLOCKED and pending-approval notes
+in older F3/F4 reports and the runbook describe their historical recording points.
+
+Cumulative parallel-MCTS speedup, additional LTO benefit for the final candidate,
+and current-binary real-model speed remain unconfirmed. `CSPLENDOR_ENABLE_LTO`
+stays OFF by default; historical opt-in native-solver LTO results are not new
+Python-extension gains. [F2 consumer acceptance](doc/performance_experiments/f2_f3_shipping_review_20260906.md)
+used the old binary for CPU functional checks of selfplay12/selfplay17:
+Python MCTS, V3/3133 actions and canonical/public 313 features. This differs from
+native 48-action MCTS and the StateFeaturizer benchmark path; even a successful
+real-model smoke is not a speed A/B. GPU, browser rendering and real-model paired
+speed comparisons were not performed. Production switching requires separate
+approval; see the [installation/rollback runbook](doc/performance_experiments/f4_integration_runbook_20260906.md).
+
+#### Other F1 reference measurements (2026-09-06, formal series)
+
+Native generation on `midgame_250`, 200k calls, with the same F1 main/candidate
+and build conditions. This is a separate series from the independent repeats
+above, not Python `legal_actions` retrieval or current CI-compatible-binary speed.
+The detailed F1 report retains self-play, MCTS and other measurements.
+
+| Native operation | main | F1 measured candidate | Speedup [95% CI] |
+|---|---:|---:|---:|
+| Legal count | 1,185,093 calls/s | 3,112,938 calls/s | 2.629 [2.615–2.651] |
+| Legal codes | 155,366 calls/s | 378,400 calls/s | 2.438 [2.429–2.447] |
+| Legal actions | 172,136 calls/s | 346,226 calls/s | 2.008 [1.959–2.057] |
+
+#### Historical generation measurements (2026-07/08, not the current candidate)
+
+The after-phases-0--7 column was measured on 2026-07-13 with a Ryzen 9 7900X
+and GCC 13.3; the 2026-08-30 column used the same CPU and GCC 15.2.
+Both used Release builds, Python 3.12.1 and one pinned logical CPU.
+The representative legal-action workload is the same seed-42, 12-ply,
+250-action position used by `tests/test_perf.py`. The July column is the median
+of seven best-of-five runs; August repeats that in three batches (21 samples).
+Self-play is a separate workload of ten games (seeds 0--9) per sample,
+with 30 samples in July and 90 in August.
+
+| Operation | Before refactoring | After phases 0--7 | 2026-08-30 | August/before |
+|---|---:|---:|---:|---:|
+| Python `legal_actions` | 21,473 calls/sec | 26,586 calls/sec | 27,084 calls/sec | 1.26x |
+| C++ `legal_action_codes` | 61,313 calls/sec | 118,594 calls/sec | 125,444 calls/sec | 2.05x |
+| C++ `legal_action_count` | 316,991 calls/sec | 981,149 calls/sec | 1,011,935 calls/sec | 3.19x |
+| C++ internal self-play | 160,545 moves/sec | 740,538 moves/sec | 892,607 moves/sec | 5.56x |
 
 On the same 250-action position, a 30-pair sustained A/B measured about 1.19x
 for `legal_actions` (95% CI: 1.11--1.19x), 1.97x for codes, and 3.11x for
@@ -30,12 +119,12 @@ fixed-buffer setup has a larger effect: 5.07x, 9.17x, and 9.62x respectively.
 The speedup therefore depends on branching factor and on how much time is
 spent constructing Python Action objects.
 
-Compared numerically with the old README claims, the new values are 1.33x for
-`legal_actions` (20,000 to 26,586 calls/sec), 2.97x for count (330,000 to
-981,149 calls/sec), and 4.63x for self-play (160,000 to 740,538 moves/sec).
-Use the same-condition table or paired A/B ratios to assess the refactoring.
+The August/before ratios are simple historical comparisons, including a compiler
+update; the July-to-August change is not the effect of an isolated optimization.
+Use same-condition paired A/B for strict change evaluation, not these values
+multiplied by F1 ratios.
 
-#### MCTS search performance
+#### Historical MCTS search performance
 
 Measured on 2026-08-04 on the same Ryzen 9 7900X with GCC 13 and a portable
 Release build. The table compares the pre-optimization `main` (`6ddb47c`) with

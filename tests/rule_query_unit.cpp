@@ -96,6 +96,117 @@ bool legacy_validate_payment(const PlayerState &player, const Card &card,
   return gold_used <= player.gems[GOLD];
 }
 
+uint16_t brute_return_count(const std::array<uint8_t, 6> &available,
+                            int remaining, int color_idx) {
+  if (remaining == 0)
+    return 1;
+  if (color_idx == 6)
+    return 0;
+
+  uint16_t count = 0;
+  const int maximum =
+      std::min(remaining, static_cast<int>(available[color_idx]));
+  for (int amount = 0; amount <= maximum; ++amount) {
+    count = static_cast<uint16_t>(count + brute_return_count(available,
+                                                             remaining - amount,
+                                                             color_idx + 1));
+  }
+  return count;
+}
+
+void test_packed_return_code_helper() {
+  constexpr std::array<ActionType, 4> RETURN_TYPES = {
+      TAKE_DIFFERENT, TAKE_SAME, RESERVE_VISIBLE, RESERVE_DECK};
+  constexpr uint32_t CASES = 4 * 4 * 4 * 4 * 4 * 4;
+  for (ActionType type : RETURN_TYPES) {
+    Action base;
+    base.type = type;
+    base.take = {1, 0, 2, 0, 1};
+    base.card_id = 37;
+    base.deck_level = 2;
+    const uint64_t base_code = base.pack();
+    for (uint32_t encoded = 0; encoded < CASES; ++encoded) {
+      Action expected = base;
+      uint32_t remainder = encoded;
+      for (uint8_t &amount : expected.return_gems) {
+        amount = static_cast<uint8_t>(remainder % 4);
+        remainder /= 4;
+      }
+      check(Action::pack_return_gems(base_code, type, expected.return_gems) ==
+            expected.pack());
+    }
+  }
+}
+
+void test_small_return_pattern_table() {
+  using Pattern = std::array<uint8_t, 6>;
+  constexpr uint32_t CASES = 4 * 4 * 4 * 4 * 4 * 4;
+  const auto &table = csplendor::move_generation_detail::SMALL_RETURN_PATTERNS;
+
+  for (uint32_t encoded = 0; encoded < CASES; ++encoded) {
+    std::array<uint8_t, 6> available{};
+    uint32_t remainder = encoded;
+    for (uint8_t &amount : available) {
+      amount = static_cast<uint8_t>(remainder % 4);
+      remainder /= 4;
+    }
+
+    for (int excess = 1; excess <= 3; ++excess) {
+      std::array<Pattern, 56> oracle{};
+      uint8_t oracle_count = 0;
+      for (int a0 = 0; a0 <= std::min<int>(excess, available[0]); ++a0)
+        for (int a1 = 0; a1 <= std::min<int>(excess, available[1]); ++a1)
+          for (int a2 = 0; a2 <= std::min<int>(excess, available[2]); ++a2)
+            for (int a3 = 0; a3 <= std::min<int>(excess, available[3]); ++a3)
+              for (int a4 = 0; a4 <= std::min<int>(excess, available[4]); ++a4)
+                for (int a5 = 0; a5 <= std::min<int>(excess, available[5]);
+                     ++a5) {
+                  if (a0 + a1 + a2 + a3 + a4 + a5 == excess) {
+                    oracle[oracle_count++] = {
+                        static_cast<uint8_t>(a0), static_cast<uint8_t>(a1),
+                        static_cast<uint8_t>(a2), static_cast<uint8_t>(a3),
+                        static_cast<uint8_t>(a4), static_cast<uint8_t>(a5)};
+                  }
+                }
+
+      uint8_t actual_count = 0;
+      for (uint8_t index = 0; index < table.counts[excess]; ++index) {
+        const Pattern &pattern = table.patterns[excess][index];
+        bool valid = true;
+        for (int color = 0; color < 6; ++color)
+          valid = valid && pattern[color] <= available[color];
+        if (valid)
+          check(pattern == oracle[actual_count++]);
+      }
+      check(actual_count == oracle_count);
+    }
+  }
+}
+
+void test_small_return_count_closed_form() {
+  constexpr std::array<uint16_t, 9> limits = {0,  1,  2,  3,        7,
+                                              17, 31, 56, MAX_MOVES};
+  constexpr uint32_t RADIX = 5;
+  constexpr uint32_t CASES = RADIX * RADIX * RADIX * RADIX * RADIX * RADIX;
+
+  for (uint32_t encoded = 0; encoded < CASES; ++encoded) {
+    std::array<uint8_t, 6> available{};
+    uint32_t remainder = encoded;
+    for (uint8_t &amount : available) {
+      amount = static_cast<uint8_t>(remainder % RADIX);
+      remainder /= RADIX;
+    }
+    for (int excess = 0; excess <= 3; ++excess) {
+      const uint16_t oracle = brute_return_count(available, excess, 0);
+      for (uint16_t limit : limits) {
+        const uint16_t expected = std::min(oracle, limit);
+        check(csplendor::move_generation_detail::count_small_token_returns(
+                  available, excess, limit) == expected);
+      }
+    }
+  }
+}
+
 csplendor::rules::EligibleNobles legacy_eligible_nobles(const Board &board,
                                                         int player_index) {
   csplendor::rules::EligibleNobles result;
@@ -235,6 +346,46 @@ void test_reachable_differential_and_golden() {
   check(digest == REACHABLE_ACTION_DIGEST);
 }
 
+void test_large_reachable_move_generation_corpus() {
+  uint64_t state_count = 0;
+  uint64_t action_count = 0;
+
+  for (uint32_t seed = 0; seed < 144; ++seed) {
+    Game game(10'000 + seed);
+    game.simple_payment_mode = (seed & 1U) != 0;
+    for (uint32_t ply = 0; ply < 96; ++ply) {
+      const auto actions = game.legal_actions();
+      const auto codes = game.legal_action_codes();
+      check(actions.size() == codes.size());
+      check(codes.size() == game.legal_action_count());
+
+      for (size_t index = 0; index < actions.size(); ++index) {
+        check(actions[index].pack() == codes[index]);
+        check(game.is_legal(actions[index]));
+
+        Game by_action = game.clone_light();
+        Game by_code = game.clone_light();
+        check(by_action.apply(actions[index], false));
+        check(by_code.apply_action_code(codes[index], false));
+        check(csplendor::snapshot::serialize(by_action) ==
+              csplendor::snapshot::serialize(by_code));
+      }
+
+      ++state_count;
+      action_count += codes.size();
+      if (codes.empty())
+        break;
+      const size_t selected =
+          (static_cast<size_t>(seed) * 257 + static_cast<size_t>(ply) * 29) %
+          codes.size();
+      check(game.apply_action_code_trusted(codes[selected], false));
+    }
+  }
+
+  check(state_count >= 10'000);
+  check(action_count >= 100'000);
+}
+
 void test_editor_edges_and_rejections() {
   Game game(7);
   Board &board = game.board.begin_editor_mutation();
@@ -270,7 +421,11 @@ void test_editor_edges_and_rejections() {
 } // namespace
 
 int main() {
+  test_packed_return_code_helper();
+  test_small_return_pattern_table();
+  test_small_return_count_closed_form();
   test_reachable_differential_and_golden();
+  test_large_reachable_move_generation_corpus();
   test_editor_edges_and_rejections();
   return 0;
 }

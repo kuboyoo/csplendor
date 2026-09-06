@@ -9,6 +9,18 @@
 #include <array>
 #include <vector>
 
+namespace csplendor::config {
+
+// Volatile prevents compile-time folding so OFF/ON benchmark builds retain
+// identical executable code. C++17 inline storage preserves header-only use.
+#ifdef CSPLENDOR_NOBLE_ELIGIBILITY_TABLE
+inline const volatile bool noble_eligibility_table_enabled = true;
+#else
+inline const volatile bool noble_eligibility_table_enabled = false;
+#endif
+
+} // namespace csplendor::config
+
 struct PlayerState {
   std::array<uint8_t, 6> gems = {
       0};                   // Diamond, Sapphire, Emerald, Ruby, Onyx, Gold
@@ -50,6 +62,10 @@ struct PlayerState {
   }
 
   void update_noble_eligibility() {
+    if (csplendor::config::noble_eligibility_table_enabled) {
+      noble_eligibility_mask = noble_eligibility_mask_from_bonuses(bonuses);
+      return;
+    }
     noble_eligibility_mask = 0;
     for (int noble_id = 0; noble_id < NOBLE_COUNT; ++noble_id) {
       const Noble &noble = get_noble(noble_id);

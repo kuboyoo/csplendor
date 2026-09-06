@@ -5,9 +5,83 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(CSPLENDOR_ENABLE_LTO "Enable checked Release IPO on native and Python targets" OFF)
+if(CSPLENDOR_ENABLE_LTO)
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT CSPLENDOR_IPO_SUPPORTED OUTPUT CSPLENDOR_IPO_ERROR LANGUAGES CXX)
+  if(NOT CSPLENDOR_IPO_SUPPORTED)
+    message(FATAL_ERROR "Release LTO is unsupported: ${CSPLENDOR_IPO_ERROR}")
+  endif()
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+endif()
+
 option(CSPLENDOR_BUILD_PYTHON_MODULE "Build the pybind11 extension" ON)
+option(CSPLENDOR_GROUP_TAKE_CANDIDATES "Group visible solver take deltas" ON)
+option(CSPLENDOR_RETURN_RANK_SELECTION "Skip full-action return prefixes by count" ON)
 option(CSPLENDOR_BUILD_NATIVE_TESTS "Build native C++ tests" OFF)
 option(CSPLENDOR_BUILD_PARALLEL_BENCHMARK "Build native MCTS benchmark" OFF)
+option(CSPLENDOR_BUILD_ENGINE_BENCHMARK
+       "Build native rule/search/solver hotpath benchmark" OFF)
+option(CSPLENDOR_PERF_INSTRUMENTATION
+       "Enable internal performance counters for diagnostic builds" OFF)
+option(CSPLENDOR_INCREMENTAL_EXACT_HASH
+       "Maintain the exact Zobrist hash across trusted game transitions" ON)
+option(CSPLENDOR_VERIFY_INCREMENTAL_HASH
+       "Verify trusted-transition hashes against the uncached oracle" OFF)
+option(CSPLENDOR_NOBLE_ELIGIBILITY_TABLE
+       "Use the constexpr per-colour noble eligibility mask table" ON)
+option(CSPLENDOR_SINGLE_PASS_LEGAL_CODES
+       "Materialize legal action codes with one fixed-scratch enumeration" ON)
+option(CSPLENDOR_CLOSED_FORM_RETURN_COUNT
+       "Count token returns of excess zero through three in closed form" ON)
+option(CSPLENDOR_RETURN_PATTERN_TABLE
+       "Emit small token-return combinations from a constexpr table" ON)
+option(CSPLENDOR_PACKED_CODE_SINK
+       "Emit token-return action codes without materializing wide actions" ON)
+option(CSPLENDOR_SOLVER_PATH_STACK
+       "Track shallow recursive solver paths in a contiguous stack" ON)
+option(CSPLENDOR_CARD_EQUIVALENCE_CLASSES
+       "Deduplicate solver reveal cards with constexpr class masks" ON)
+option(CSPLENDOR_COMPACT_FORCED_ACTIONS
+       "Filter solver attacker actions with bounded contiguous scratch" ON)
+option(CSPLENDOR_COMPACT_SOLVER_REASONS
+       "Store visible-solver TT reasons as compact enums" ON)
+option(CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE
+       "Maintain reveal-solver set state and rule hash incrementally" ON)
+option(CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE
+       "Verify incremental reveal-solver state against scan oracles" OFF)
+option(CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
+       "Compact and specialize solver transposition-table keys and entries" ON)
+option(CSPLENDOR_CACHE_REVEAL_SCORES
+       "Compute each action-local reveal candidate score once before sorting" ON)
+option(CSPLENDOR_REUSE_SEARCH_SCRATCH
+       "Reuse reveal solver temporary vectors by live recursion invocation" ON)
+option(CSPLENDOR_SOLVER_NORMAL_ROLLBACK
+       "Use compact append-only rollback for solver ordinary Game transitions" ON)
+option(CSPLENDOR_VERIFY_SOLVER_ROLLBACK
+       "Verify solver child/parent fields against full snapshots" OFF)
+option(CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER
+       "Compare cached reveal scores/order with the original comparator" OFF)
+option(CSPLENDOR_MCTS_LEGACY_TREE_RECORDS
+       "Store legacy MCTS node, auxiliary policy and LRU time in one record" ON)
+if(CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER AND NOT CSPLENDOR_CACHE_REVEAL_SCORES)
+  message(FATAL_ERROR "Reveal score verification requires cached scores")
+endif()
+
+if(CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE AND
+   NOT CSPLENDOR_INCREMENTAL_EXACT_HASH)
+  message(WARNING
+          "CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE requires "
+          "CSPLENDOR_INCREMENTAL_EXACT_HASH; the reveal fast path will "
+          "fall back to scan-based state keys")
+endif()
+if(CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE AND
+   (NOT CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE OR
+    NOT CSPLENDOR_INCREMENTAL_EXACT_HASH))
+  message(FATAL_ERROR
+          "CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE requires both incremental "
+          "reveal state and incremental exact hash")
+endif()
 set(CSPLENDOR_CPU_TARGET "portable" CACHE STRING
     "CPU target: portable or native")
 set_property(CACHE CSPLENDOR_CPU_TARGET PROPERTY STRINGS portable native)
@@ -19,6 +93,8 @@ set_property(CACHE CSPLENDOR_SANITIZER PROPERTY STRINGS
 find_package(Threads REQUIRED)
 
 add_library(csplendor_core_config INTERFACE)
+target_compile_definitions(csplendor_core_config INTERFACE
+  CSPLENDOR_MCTS_LEGACY_TREE_RECORDS=$<BOOL:${CSPLENDOR_MCTS_LEGACY_TREE_RECORDS}>)
 target_include_directories(
     csplendor_core_config
     INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
@@ -28,12 +104,12 @@ set(CSPLENDOR_PYTHON_CORE_SOURCES
     src/game_snapshot.cpp
     src/information_state.cpp
     src/mcts_parallel_trace.cpp
+    src/perf_counters.cpp
     src/reveal_solver_components.cpp
     src/reveal_verified_solver.cpp
-    src/visible_only_solver.cpp)
-set(CSPLENDOR_CORE_SOURCES
-    ${CSPLENDOR_PYTHON_CORE_SOURCES}
+    src/visible_only_solver.cpp
     src/state_invariants.cpp)
+set(CSPLENDOR_CORE_SOURCES ${CSPLENDOR_PYTHON_CORE_SOURCES})
 add_library(csplendor_core STATIC EXCLUDE_FROM_ALL ${CSPLENDOR_CORE_SOURCES})
 set_target_properties(csplendor_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -43,6 +119,103 @@ if(MSVC)
 else()
   target_compile_options(csplendor_warnings INTERFACE
                          -Wall -Wextra -Wpedantic -Werror)
+endif()
+
+if(CSPLENDOR_PERF_INSTRUMENTATION)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_PERF_INSTRUMENTATION=1)
+endif()
+
+if(CSPLENDOR_INCREMENTAL_EXACT_HASH)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_INCREMENTAL_EXACT_HASH=1)
+endif()
+
+if(CSPLENDOR_VERIFY_INCREMENTAL_HASH)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_VERIFY_INCREMENTAL_HASH=1)
+endif()
+
+if(CSPLENDOR_NOBLE_ELIGIBILITY_TABLE)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_NOBLE_ELIGIBILITY_TABLE=1)
+endif()
+
+if(CSPLENDOR_SINGLE_PASS_LEGAL_CODES)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_SINGLE_PASS_LEGAL_CODES=1)
+endif()
+
+if(CSPLENDOR_CLOSED_FORM_RETURN_COUNT)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_CLOSED_FORM_RETURN_COUNT=1)
+endif()
+
+if(CSPLENDOR_RETURN_PATTERN_TABLE)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_RETURN_PATTERN_TABLE=1)
+endif()
+
+if(CSPLENDOR_PACKED_CODE_SINK)
+  target_compile_definitions(csplendor_core_config
+                             INTERFACE CSPLENDOR_PACKED_CODE_SINK=1)
+endif()
+
+if(CSPLENDOR_SOLVER_PATH_STACK)
+  target_compile_definitions(csplendor_core_config
+                             INTERFACE CSPLENDOR_SOLVER_PATH_STACK=1)
+endif()
+
+if(CSPLENDOR_CARD_EQUIVALENCE_CLASSES)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_CARD_EQUIVALENCE_CLASSES=1)
+endif()
+
+if(CSPLENDOR_COMPACT_FORCED_ACTIONS)
+  target_compile_definitions(csplendor_core_config
+                             INTERFACE CSPLENDOR_COMPACT_FORCED_ACTIONS=1)
+endif()
+
+if(CSPLENDOR_COMPACT_SOLVER_REASONS)
+  target_compile_definitions(csplendor_core_config
+                             INTERFACE CSPLENDOR_COMPACT_SOLVER_REASONS=1)
+endif()
+
+if(CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE)
+  target_compile_definitions(
+      csplendor_core_config
+      INTERFACE CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE=1)
+endif()
+
+if(CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_VERIFY_REVEAL_SEARCH_STATE=1)
+endif()
+
+if(CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES=1)
+endif()
+
+if(CSPLENDOR_CACHE_REVEAL_SCORES)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_CACHE_REVEAL_SCORES=1)
+endif()
+if(CSPLENDOR_REUSE_SEARCH_SCRATCH)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_REUSE_SEARCH_SCRATCH=1)
+endif()
+if(CSPLENDOR_SOLVER_NORMAL_ROLLBACK)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_SOLVER_NORMAL_ROLLBACK=1)
+endif()
+if(CSPLENDOR_VERIFY_SOLVER_ROLLBACK)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_VERIFY_SOLVER_ROLLBACK=1)
+endif()
+if(CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER)
+  target_compile_definitions(
+      csplendor_core_config INTERFACE CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER=1)
 endif()
 
 if(CSPLENDOR_CPU_TARGET STREQUAL "portable")
@@ -83,6 +256,12 @@ else()
 endif()
 
 add_library(csplendor_sanitizer INTERFACE)
+if(CSPLENDOR_GROUP_TAKE_CANDIDATES)
+  target_compile_definitions(csplendor_core_config INTERFACE CSPLENDOR_GROUP_TAKE_CANDIDATES=1)
+endif()
+if(CSPLENDOR_RETURN_RANK_SELECTION)
+  target_compile_definitions(csplendor_core_config INTERFACE CSPLENDOR_RETURN_RANK_SELECTION=1)
+endif()
 if(CSPLENDOR_SANITIZER STREQUAL "none")
   # No instrumentation.
 elseif(CSPLENDOR_SANITIZER STREQUAL "thread")
@@ -148,4 +327,12 @@ if(CSPLENDOR_BUILD_PARALLEL_BENCHMARK)
       benchmark_mcts_optimizations
       PRIVATE csplendor_core csplendor_sanitizer csplendor_warnings
               Threads::Threads)
+endif()
+
+if(CSPLENDOR_BUILD_ENGINE_BENCHMARK)
+  add_executable(benchmark_engine_hotpaths
+                 scripts/benchmark_engine_hotpaths.cpp)
+  target_link_libraries(
+      benchmark_engine_hotpaths PRIVATE csplendor_core csplendor_sanitizer
+                                        csplendor_warnings Threads::Threads)
 endif()

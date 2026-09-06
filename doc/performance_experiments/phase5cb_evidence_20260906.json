@@ -1,0 +1,888 @@
+{
+  "api": {
+    "C_contiguous": true,
+    "GIL": "retained",
+    "caller_out_buffer": "not accepted; no partial writes",
+    "consumer": "csplendor.features.StateFeaturizer.featurize",
+    "dtype": "float32",
+    "new": "StateEncoder.encode_numpy(game, observer=-1)",
+    "ownership": "independent owning writable ndarray; no stack/reusable-buffer alias",
+    "shape": [
+      196
+    ],
+    "unchanged": [
+      "list encode",
+      "canonical encode",
+      "public-card-statistics",
+      "schema",
+      "observer semantics",
+      "float operation order"
+    ]
+  },
+  "artifacts": [
+    {
+      "bytes": 362,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/binary_identity.json.gz",
+      "sha256": "16a6b6c5d547b950b6ceb37225069d8d4a88d3298f1d9bc6f2a3729b0c3f4138"
+    },
+    {
+      "bytes": 476,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/build_buffer.json.gz",
+      "sha256": "82af97e88d090c633567785aea1487369b3c07779dbb9ce6d149c45f21b9e3c3"
+    },
+    {
+      "bytes": 497,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/build_final-asan.json.gz",
+      "sha256": "aefd8e908ee527cecf1e6ed36261788baeebd81c0b275ed6238b1dd3145b26d8"
+    },
+    {
+      "bytes": 483,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/build_final-diagnostic.json.gz",
+      "sha256": "b0b3ccde48d1c0f56bb157077f2d7c53322a8d21668828fc96f54ae426c5643f"
+    },
+    {
+      "bytes": 1540,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/build_python.json.gz",
+      "sha256": "d8afa0f56b550f06db8ed9a66498f2a7ff318cf7b70b74e8a246c1c5b174cf41"
+    },
+    {
+      "bytes": 485,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/configure_buffer.json.gz",
+      "sha256": "91f5024011e989419ac15aca46ddea95cf03d558b7e5418e2c7b8fb0647be163"
+    },
+    {
+      "bytes": 509,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/configure_final-asan.json.gz",
+      "sha256": "b8214e32f661667aefb00a4627a8c5326fe62467b9d6f7cfac84d5c31e460719"
+    },
+    {
+      "bytes": 510,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/configure_final-diagnostic.json.gz",
+      "sha256": "4b4255a6ba961f2563b55980892ac6aeaa06f6e83e394eba6667014deca89250"
+    },
+    {
+      "bytes": 541,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/configure_python.json.gz",
+      "sha256": "1b2b85f64b057f80de53c1cbd6b7c42624fdd090a63bb91f6eb98a9fb61a6625"
+    },
+    {
+      "bytes": 28260,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/final_source.json.gz",
+      "sha256": "7e250f24afe2f20c7cc05caac709a891dcd0414e8613613d928a93ee1954b2bd"
+    },
+    {
+      "bytes": 11313,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/formal_features.json.gz",
+      "sha256": "83ae09b8b2928d0f222d3068c82360d8f68d4f214be58ed30148d881eb18df62"
+    },
+    {
+      "bytes": 440,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/formal_features_invocation.json.gz",
+      "sha256": "7f1a5778b6dfe3aa322cac82cc227434957d5e7b722a74b25d3e919827f406b7"
+    },
+    {
+      "bytes": 11395,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/formal_features_matched.json.gz",
+      "sha256": "2026facc39277f7c88776517a5a5ded621e1eaaac7e9db38d511191e76eebdcc"
+    },
+    {
+      "bytes": 415,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/formal_features_matched_invocation.json.gz",
+      "sha256": "353b78fd37c7c66032cc4732e7d19a350f7c0dff959cc823a7f99d5efad747bf"
+    },
+    {
+      "bytes": 11237,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/formal_pipeline.json.gz",
+      "sha256": "f589466f665f361910668cf4f562d7948d1b8ffe7baec23f07b9ce5f8ca0a789"
+    },
+    {
+      "bytes": 445,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/formal_pipeline_invocation.json.gz",
+      "sha256": "2a2bacb51b9c1810943f36f7e83b2e22c3e633acf7caa48ca5d6e06d623ad4c3"
+    },
+    {
+      "bytes": 11287,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/holdout_features.json.gz",
+      "sha256": "778be29d0d48ca9fbca4a149d8ae9ca4904e486e59a528de606ecd86088db12e"
+    },
+    {
+      "bytes": 441,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/holdout_features_invocation.json.gz",
+      "sha256": "dc3337fe3df763b192dba2303f5b09836b3bdcf64b9d6062203a63cd112376ec"
+    },
+    {
+      "bytes": 11280,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/holdout_pipeline.json.gz",
+      "sha256": "d1f6266fad69b3f6af19dcca805389e15b0a71d55bad03f66886358576d6e18e"
+    },
+    {
+      "bytes": 447,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/holdout_pipeline_invocation.json.gz",
+      "sha256": "5fc3a36832f3af0b5edaa442feaf77c7c8bb26c462f5af478e7a361969c3c8a2"
+    },
+    {
+      "bytes": 331,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/launcher_candidate.json.gz",
+      "sha256": "b2a06bc0373c7ee081510d15cd58ddb6d9cedf4deaa1fc0252466ee02b659721"
+    },
+    {
+      "bytes": 340,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/launcher_matched.json.gz",
+      "sha256": "bbdd541d31d8d43784ea29cf0d6d19a9289cfbecde452e3ebfa1060ce5c75d18"
+    },
+    {
+      "bytes": 340,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/launcher_reference.json.gz",
+      "sha256": "dc64d3d2c5d16588856df7c6f6cb4b7e982a7f07365512c454066a3dac33aac8"
+    },
+    {
+      "bytes": 1567,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/native_full.json.gz",
+      "sha256": "ad81587d3d8eb8a837ad7eb80068be08819eacfa13dac2ffe15d59ff7ce50b59"
+    },
+    {
+      "bytes": 239,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/orchestration_compile.json.gz",
+      "sha256": "b746ec33ee005f4c7ec776e3d630f9ef8670443a5cb01c3011e584d3d28b3f25"
+    },
+    {
+      "bytes": 612,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/perf_environment.json.gz",
+      "sha256": "91ca83ef13c924b50ff2bcd2c54e9327cae31d43eaff6f9551db9da1fc540da6"
+    },
+    {
+      "bytes": 234,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/python_compile.json.gz",
+      "sha256": "2c218e780e4d848986820368d67426498e6ae2a6ce4cf5c779f762a33aa84006"
+    },
+    {
+      "bytes": 757,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/python_focused.json.gz",
+      "sha256": "9c7d27531cc10ff66f002e0e8410229f17c28591787d006a867053570e10c96b"
+    },
+    {
+      "bytes": 236,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/python_focused_fixed.json.gz",
+      "sha256": "bd03b5901ab200f22ce0aee71d635c25d144131b2974b9000a8bfd64e8923ba7"
+    },
+    {
+      "bytes": 357,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/python_full.json.gz",
+      "sha256": "81b87822d347bdc805eb3684d513d94ae0bd3c4adba4a03aa6150a5b4c3c4134"
+    },
+    {
+      "bytes": 223,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/python_performance.json.gz",
+      "sha256": "40057c99d9daa63979815054ba164dce8b8d5fae5af818c07bec4beb1aca8a27"
+    },
+    {
+      "bytes": 661,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/smoke_features_invocation.json.gz",
+      "sha256": "25947967cce93b4024fb137744ade821c461f9176dc0dad33f8f39bddb4a1013"
+    },
+    {
+      "bytes": 11266,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/smoke_fixed_features.json.gz",
+      "sha256": "fec3c81ddda9743b9b874ff398b19c9252c4379b336a70c4758fa3e75ed96e83"
+    },
+    {
+      "bytes": 444,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/smoke_fixed_features_invocation.json.gz",
+      "sha256": "89b580a6aa942d7f1f0e39b591faa3a30370d9d2129580f1136684dba15e1633"
+    },
+    {
+      "bytes": 11239,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/smoke_fixed_pipeline.json.gz",
+      "sha256": "8e8907b05ec0a41091613b0c0f393d045613d6e14c790f284959f1b067990e01"
+    },
+    {
+      "bytes": 450,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/smoke_fixed_pipeline_invocation.json.gz",
+      "sha256": "c19f15d8d794b57efc8bbd32d982ab35fe34a663fc36b4720c2a42e17a8a5933"
+    },
+    {
+      "bytes": 418,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/unit_buffer.json.gz",
+      "sha256": "4001141156da495e17e0b21dd160caacd3fbba885acc828aed6576e26406c5b4"
+    },
+    {
+      "bytes": 538,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/unit_final-asan.json.gz",
+      "sha256": "d7d78a0705753ff4a9d3319dc14c889a1dd80796be65b496ef8e835bdfa89eac"
+    },
+    {
+      "bytes": 428,
+      "path": "doc/performance_experiments/raw/phase5cb/buffer/unit_final-diagnostic.json.gz",
+      "sha256": "7c262dc9fcd9a62e71ab97659357bab686d588ca920bb367fd466682080a8266"
+    },
+    {
+      "bytes": 588,
+      "path": "doc/performance_experiments/raw/phase5cb/table/boundary_baseline_probe.json.gz",
+      "sha256": "d431dc5866f96966ae4774915e2fe819531c071f2e52a2e60f6f42a648215b5e"
+    },
+    {
+      "bytes": 483,
+      "path": "doc/performance_experiments/raw/phase5cb/table/build_table-diagnostic.json.gz",
+      "sha256": "8a4eed6b6961180252038be2e68957d77a05f645fcb4c57a60be845dc979a85b"
+    },
+    {
+      "bytes": 482,
+      "path": "doc/performance_experiments/raw/phase5cb/table/build_table-reference.json.gz",
+      "sha256": "7e0d141415f3db021e66e16440a9c71b0ab70725242369cc42f78f80c687266a"
+    },
+    {
+      "bytes": 478,
+      "path": "doc/performance_experiments/raw/phase5cb/table/build_table.json.gz",
+      "sha256": "44223c134bb95914248eab70e805d7682b8ef37eda5d8432714ed952aab86e87"
+    },
+    {
+      "bytes": 508,
+      "path": "doc/performance_experiments/raw/phase5cb/table/configure_table-diagnostic.json.gz",
+      "sha256": "ebd54dc3a4babc40ce44712b790ab3f399e93f2ac76a801818e70d9ce5260d09"
+    },
+    {
+      "bytes": 502,
+      "path": "doc/performance_experiments/raw/phase5cb/table/configure_table-reference.json.gz",
+      "sha256": "af6d573be2d25ba3f1ed6e3be55461128eec808a1f238590249d17f7242a0081"
+    },
+    {
+      "bytes": 479,
+      "path": "doc/performance_experiments/raw/phase5cb/table/configure_table.json.gz",
+      "sha256": "9bb14cb8640fd35d5c87f8b9544d918206307021dcbb92028a293b571789440e"
+    },
+    {
+      "bytes": 11841,
+      "path": "doc/performance_experiments/raw/phase5cb/table/formal_features.json.gz",
+      "sha256": "15c37003efe1851445922ab8038c16a0f8745f220d36b1caf8ce1e002b744764"
+    },
+    {
+      "bytes": 477,
+      "path": "doc/performance_experiments/raw/phase5cb/table/formal_features_invocation.json.gz",
+      "sha256": "66c8298837e63e0452f5fc91a38371c060bce33f03f10af9819bddd4a99edd77"
+    },
+    {
+      "bytes": 14646,
+      "path": "doc/performance_experiments/raw/phase5cb/table/formal_primary.json.gz",
+      "sha256": "6708e274761e03df37219818165409d8dce1633d0545a0a1ba4f47ffbb7febd2"
+    },
+    {
+      "bytes": 490,
+      "path": "doc/performance_experiments/raw/phase5cb/table/formal_primary_invocation.json.gz",
+      "sha256": "10624cf19b0a1bac7915b2d92f60d108c716ef2b2c8afe6ce3d48d955a22ed5e"
+    },
+    {
+      "bytes": 14686,
+      "path": "doc/performance_experiments/raw/phase5cb/table/holdout_primary.json.gz",
+      "sha256": "97556e078a8530282fdf46192664c4df0aceaff6ddba90d0ecd789687dd28d12"
+    },
+    {
+      "bytes": 492,
+      "path": "doc/performance_experiments/raw/phase5cb/table/holdout_primary_invocation.json.gz",
+      "sha256": "4f509a9dafbc1da2a992dd443996b3ba921c64d03c14d9afe034791ffa1f795f"
+    },
+    {
+      "bytes": 13582,
+      "path": "doc/performance_experiments/raw/phase5cb/table/rejected_prototype.json.gz",
+      "sha256": "a91a82e2407785beb9255f9b6deddec842aada64e19bbed5c58a525c2a49cb00"
+    },
+    {
+      "bytes": 8515,
+      "path": "doc/performance_experiments/raw/phase5cb/table/smoke_features.json.gz",
+      "sha256": "53e2c4376946f5c162f37a30b58b77aefce540084fd2f013fd596d76ec1944dd"
+    },
+    {
+      "bytes": 478,
+      "path": "doc/performance_experiments/raw/phase5cb/table/smoke_features_invocation.json.gz",
+      "sha256": "a9ffaadfffd80d69f198bc5e064a4635193b6ed32db1f64e5a4a046a10f5d1a3"
+    },
+    {
+      "bytes": 9956,
+      "path": "doc/performance_experiments/raw/phase5cb/table/smoke_primary.json.gz",
+      "sha256": "e53b8aa85370ed593bc1639a715af04c8f937f403904818a0e765c6524bd3793"
+    },
+    {
+      "bytes": 490,
+      "path": "doc/performance_experiments/raw/phase5cb/table/smoke_primary_invocation.json.gz",
+      "sha256": "44e80b877674b1895da89533579f424417daf4029fa7a0faecd433baf7035400"
+    },
+    {
+      "bytes": 15430,
+      "path": "doc/performance_experiments/raw/phase5cb/table/starting_sources.json.gz",
+      "sha256": "b14f6e109e7967a7355a7062edb88cbc5c0c9e5218a98148949cd3c7b77b23f8"
+    },
+    {
+      "bytes": 422,
+      "path": "doc/performance_experiments/raw/phase5cb/table/unit_table-diagnostic.json.gz",
+      "sha256": "e0de7438c9765f74513e156b4af3c970ef80fd212cb248976ea1e04e06852881"
+    },
+    {
+      "bytes": 418,
+      "path": "doc/performance_experiments/raw/phase5cb/table/unit_table-reference.json.gz",
+      "sha256": "ce129fef7705ab9faf925445e27e85ac81fafaa76a0941fca99d584325b6369e"
+    },
+    {
+      "bytes": 414,
+      "path": "doc/performance_experiments/raw/phase5cb/table/unit_table.json.gz",
+      "sha256": "7a9310e3bac7eb0d5a2e1e66690af80241d7d014d66b3053ff55b02a08feafef"
+    }
+  ],
+  "baseline_commit": "1980b541bfde2db4d7f8fdba368b12013354881c",
+  "baseline_source_digest": "8efea08e588f8ddb3e05cbb4fef5c2bff3b7e64d98851904f3405687d2d4bbd9",
+  "binary_identity": {
+    "extension_baseline": {
+      "path": "/home/kuboyu/workspace/repos/csplendor-action-selection/csplendor/_csplendor.cpython-312-x86_64-linux-gnu.so",
+      "sha256": "43e6ae32e59ed19fc1ee6aa92e03a5439130b3e5e77a34edd3205ac16a43bbf3"
+    },
+    "extension_candidate": {
+      "path": "/home/kuboyu/workspace/repos/csplendor-feature-table/csplendor/_csplendor.cpython-312-x86_64-linux-gnu.so",
+      "sha256": "26805816d49354b7d4bb4635579238f88f451c39b11b52f731010c9916a8a64d"
+    },
+    "native_baseline": {
+      "path": "/home/kuboyu/workspace/repos/csplendor-action-selection/build/final-release/benchmark_engine_hotpaths",
+      "sha256": "d8bf634fc0d5c52c3e841419bf121e0d3fa2ed76a0a29cbd16e49184cd230e54"
+    },
+    "native_candidate": {
+      "path": "/home/kuboyu/workspace/repos/csplendor-feature-table/build/5cb-buffer/benchmark_engine_hotpaths",
+      "sha256": "d8bf634fc0d5c52c3e841419bf121e0d3fa2ed76a0a29cbd16e49184cd230e54"
+    }
+  },
+  "branch": "perf/feature-table",
+  "candidate_parent_commit": "1980b541bfde2db4d7f8fdba368b12013354881c",
+  "candidate_source_digest": "f4ccee37c9ee63fd538b7ad6303f62b36f36925121a9cad8e589f2eb39b72b8d",
+  "decisions": {
+    "action_mask_numpy": "SKIP_ALREADY_DONE",
+    "immutable_feature_table": "REJECT_AND_REVERT",
+    "legal_code_buffers_and_fill": "DEFER_NO_ACTUAL_CONSUMER",
+    "owning_feature_numpy_api": "ADOPT"
+  },
+  "failures": [
+    {
+      "classification": "ENVIRONMENT_NA: hardware perf unavailable; no system permission change",
+      "raw": "doc/performance_experiments/raw/phase5cb/buffer/perf_environment.json.gz"
+    },
+    {
+      "classification": "FIXED_TEST_FIXTURE: public editor rejects invalid card IDs before encoding; native invalid-card oracle already passes",
+      "raw": "doc/performance_experiments/raw/phase5cb/buffer/python_focused.json.gz"
+    },
+    {
+      "classification": "HARNESS_INPUT_REJECTED: --repo differs; no timing admitted. Fixed ELF launchers retain strict runner argument validation",
+      "raw": "doc/performance_experiments/raw/phase5cb/buffer/smoke_features_invocation.json.gz"
+    }
+  ],
+  "hardware_perf": "N/A",
+  "launcher_scope": "exec Python before timing, compile-time repo and legacy axis, identical CLI args; ELF launcher inode rotates, loaded extension does not. Extension SHA recorded separately; same-extension reference also measured",
+  "measurement_method": "existing paired runner, CPU4, warmups2, 22 pairs/11 fixed ELF slot crossover blocks, bootstrap10000; table smoke4; Python fixed-launcher screening22",
+  "measurements": {
+    "buffer/formal_features": {
+      "absolute_medians": {
+        "A_elapsed_ns": 450746605.0,
+        "A_rate_per_second": 110927.06978019529,
+        "A_runner_rss_kib": 40522.0,
+        "B_elapsed_ns": 34249843.0,
+        "B_rate_per_second": 1460121.5726668574,
+        "B_runner_rss_kib": 40526.0
+      },
+      "binary_sha256": {
+        "A": "129ca6f35a78242f36bf742e1ca42988fad3ddf8e2b1ff4c19a98a24334defc9",
+        "B": "278cb3ffa0ea41e92cf36effe918b1ad13d55b9a28867c1dc1e5585d4d992116"
+      },
+      "blocks": 11,
+      "ci95": [
+        11.210669409271388,
+        13.046332667588135
+      ],
+      "contract": "S0",
+      "digest": "ba3bdb35e651e7bf9144f36d5745361c5ab5cd4cc539f57e0c5d182ba65f93fb",
+      "fixture": "reachable_32_seed42",
+      "pairs": 22,
+      "ratio": 12.554869859164713,
+      "raw": "doc/performance_experiments/raw/phase5cb/buffer/formal_features.json.gz",
+      "settings": {
+        "binary_slot_policy": "two_private_fixed_inodes_crossed_every_pair",
+        "bootstrap_iterations": 10000,
+        "cpu_set": [
+          4
+        ],
+        "order": "ABBA",
+        "pairs": 22,
+        "rotate_binary_slots": true,
+        "rss_scope": "process; per-workload only for single-row commands",
+        "statistical_unit": "two_pair_crossover_block",
+        "timeout_seconds": 45.0,
+        "warmups_per_side": 2
+      },
+      "workload": "python_featurize"
+    },
+    "buffer/formal_features_matched": {
+      "absolute_medians": {
+        "A_elapsed_ns": 360679803.5,
+        "A_rate_per_second": 138628.16524034448,
+        "A_runner_rss_kib": 40536.0,
+        "B_elapsed_ns": 27461450.5,
+        "B_rate_per_second": 1820734.726413155,
+        "B_runner_rss_kib": 40518.0
+      },
+      "binary_sha256": {
+        "A": "588d2b6f06b51727883d7107dabbc11534c63551eb1e4f8a834b32d21f05d622",
+        "B": "278cb3ffa0ea41e92cf36effe918b1ad13d55b9a28867c1dc1e5585d4d992116"
+      },
+      "blocks": 11,
+      "ci95": [
+        12.846803498831823,
+        13.353831440938913
+      ],
+      "contract": "S0",
+      "digest": "ba3bdb35e651e7bf9144f36d5745361c5ab5cd4cc539f57e0c5d182ba65f93fb",
+      "fixture": "reachable_32_seed42",
+      "pairs": 22,
+      "ratio": 13.083885773042947,
+      "raw": "doc/performance_experiments/raw/phase5cb/buffer/formal_features_matched.json.gz",
+      "settings": {
+        "binary_slot_policy": "two_private_fixed_inodes_crossed_every_pair",
+        "bootstrap_iterations": 10000,
+        "cpu_set": [
+          4
+        ],
+        "order": "ABBA",
+        "pairs": 22,
+        "rotate_binary_slots": true,
+        "rss_scope": "process; per-workload only for single-row commands",
+        "statistical_unit": "two_pair_crossover_block",
+        "timeout_seconds": 45.0,
+        "warmups_per_side": 2
+      },
+      "workload": "python_featurize"
+    },
+    "buffer/formal_pipeline": {
+      "absolute_medians": {
+        "A_elapsed_ns": 80361162.5,
+        "A_rate_per_second": 124440.4034213007,
+        "A_runner_rss_kib": 40532.0,
+        "B_elapsed_ns": 13294646.0,
+        "B_rate_per_second": 752182.53090904,
+        "B_runner_rss_kib": 40524.0
+      },
+      "binary_sha256": {
+        "A": "129ca6f35a78242f36bf742e1ca42988fad3ddf8e2b1ff4c19a98a24334defc9",
+        "B": "278cb3ffa0ea41e92cf36effe918b1ad13d55b9a28867c1dc1e5585d4d992116"
+      },
+      "blocks": 11,
+      "ci95": [
+        5.865401327465865,
+        6.112329625331325
+      ],
+      "contract": "S0",
+      "digest": "10b4c531d0c6cc023ca9a59bdcda158988592be2a5692813c0f868e98b7aad7a",
+      "fixture": "reachable_32_seed42",
+      "pairs": 22,
+      "ratio": 5.972304907978947,
+      "raw": "doc/performance_experiments/raw/phase5cb/buffer/formal_pipeline.json.gz",
+      "settings": {
+        "binary_slot_policy": "two_private_fixed_inodes_crossed_every_pair",
+        "bootstrap_iterations": 10000,
+        "cpu_set": [
+          4
+        ],
+        "order": "ABBA",
+        "pairs": 22,
+        "rotate_binary_slots": true,
+        "rss_scope": "process; per-workload only for single-row commands",
+        "statistical_unit": "two_pair_crossover_block",
+        "timeout_seconds": 45.0,
+        "warmups_per_side": 2
+      },
+      "workload": "python_feature_pipeline"
+    },
+    "buffer/holdout_features": {
+      "absolute_medians": {
+        "A_elapsed_ns": 364190677.0,
+        "A_rate_per_second": 137290.91604991257,
+        "A_runner_rss_kib": 40524.0,
+        "B_elapsed_ns": 27511999.5,
+        "B_rate_per_second": 1817388.8099186094,
+        "B_runner_rss_kib": 40534.0
+      },
+      "binary_sha256": {
+        "A": "129ca6f35a78242f36bf742e1ca42988fad3ddf8e2b1ff4c19a98a24334defc9",
+        "B": "278cb3ffa0ea41e92cf36effe918b1ad13d55b9a28867c1dc1e5585d4d992116"
+      },
+      "blocks": 11,
+      "ci95": [
+        12.934788031523613,
+        13.606849243749535
+      ],
+      "contract": "S0",
+      "digest": "ba3bdb35e651e7bf9144f36d5745361c5ab5cd4cc539f57e0c5d182ba65f93fb",
+      "fixture": "reachable_32_seed42",
+      "pairs": 22,
+      "ratio": 13.426044573891126,
+      "raw": "doc/performance_experiments/raw/phase5cb/buffer/holdout_features.json.gz",
+      "settings": {
+        "binary_slot_policy": "two_private_fixed_inodes_crossed_every_pair",
+        "bootstrap_iterations": 10000,
+        "cpu_set": [
+          4
+        ],
+        "order": "ABBA",
+        "pairs": 22,
+        "rotate_binary_slots": true,
+        "rss_scope": "process; per-workload only for single-row commands",
+        "statistical_unit": "two_pair_crossover_block",
+        "timeout_seconds": 45.0,
+        "warmups_per_side": 2
+      },
+      "workload": "python_featurize"
+    },
+    "buffer/holdout_pipeline": {
+      "absolute_medians": {
+        "A_elapsed_ns": 82352275.0,
+        "A_rate_per_second": 121429.59102928135,
+        "A_runner_rss_kib": 40530.0,
+        "B_elapsed_ns": 13371160.5,
+        "B_rate_per_second": 747878.4581426103,
+        "B_runner_rss_kib": 40532.0
+      },
+      "binary_sha256": {
+        "A": "129ca6f35a78242f36bf742e1ca42988fad3ddf8e2b1ff4c19a98a24334defc9",
+        "B": "278cb3ffa0ea41e92cf36effe918b1ad13d55b9a28867c1dc1e5585d4d992116"
+      },
+      "blocks": 11,
+      "ci95": [
+        5.835626080139792,
+        6.39018181970552
+      ],
+      "contract": "S0",
+      "digest": "10b4c531d0c6cc023ca9a59bdcda158988592be2a5692813c0f868e98b7aad7a",
+      "fixture": "reachable_32_seed42",
+      "pairs": 22,
+      "ratio": 5.971652630511322,
+      "raw": "doc/performance_experiments/raw/phase5cb/buffer/holdout_pipeline.json.gz",
+      "settings": {
+        "binary_slot_policy": "two_private_fixed_inodes_crossed_every_pair",
+        "bootstrap_iterations": 10000,
+        "cpu_set": [
+          4
+        ],
+        "order": "ABBA",
+        "pairs": 22,
+        "rotate_binary_slots": true,
+        "rss_scope": "process; per-workload only for single-row commands",
+        "statistical_unit": "two_pair_crossover_block",
+        "timeout_seconds": 45.0,
+        "warmups_per_side": 2
+      },
+      "workload": "python_feature_pipeline"
+    },
+    "buffer/smoke_fixed_features": {
+      "absolute_medians": {
+        "A_elapsed_ns": 359816502.5,
+        "A_rate_per_second": 138959.96301099157,
+        "A_runner_rss_kib": 40530.0,
+        "B_elapsed_ns": 27573975.5,
+        "B_rate_per_second": 1813314.2980664573,
+        "B_runner_rss_kib": 40536.0
+      },
+      "binary_sha256": {
+        "A": "129ca6f35a78242f36bf742e1ca42988fad3ddf8e2b1ff4c19a98a24334defc9",
+        "B": "278cb3ffa0ea41e92cf36effe918b1ad13d55b9a28867c1dc1e5585d4d992116"
+      },
+      "blocks": 11,
+      "ci95": [
+        12.417308936301652,
+        13.21617696367251
+      ],
+      "contract": "S0",
+      "digest": "ba3bdb35e651e7bf9144f36d5745361c5ab5cd4cc539f57e0c5d182ba65f93fb",
+      "fixture": "reachable_32_seed42",
+      "pairs": 22,
+      "ratio": 12.857068591336818,
+      "raw": "doc/performance_experiments/raw/phase5cb/buffer/smoke_fixed_features.json.gz",
+      "settings": {
+        "binary_slot_policy": "two_private_fixed_inodes_crossed_every_pair",
+        "bootstrap_iterations": 10000,
+        "cpu_set": [
+          4
+        ],
+        "order": "ABBA",
+        "pairs": 22,
+        "rotate_binary_slots": true,
+        "rss_scope": "process; per-workload only for single-row commands",
+        "statistical_unit": "two_pair_crossover_block",
+        "timeout_seconds": 45.0,
+        "warmups_per_side": 2
+      },
+      "workload": "python_featurize"
+    },
+    "buffer/smoke_fixed_pipeline": {
+      "absolute_medians": {
+        "A_elapsed_ns": 83049515.5,
+        "A_rate_per_second": 120427.15688562891,
+        "A_runner_rss_kib": 40524.0,
+        "B_elapsed_ns": 13348399.5,
+        "B_rate_per_second": 749153.521630604,
+        "B_runner_rss_kib": 40532.0
+      },
+      "binary_sha256": {
+        "A": "129ca6f35a78242f36bf742e1ca42988fad3ddf8e2b1ff4c19a98a24334defc9",
+        "B": "278cb3ffa0ea41e92cf36effe918b1ad13d55b9a28867c1dc1e5585d4d992116"
+      },
+      "blocks": 11,
+      "ci95": [
+        5.900154029892233,
+        6.226707559761261
+      ],
+      "contract": "S0",
+      "digest": "10b4c531d0c6cc023ca9a59bdcda158988592be2a5692813c0f868e98b7aad7a",
+      "fixture": "reachable_32_seed42",
+      "pairs": 22,
+      "ratio": 6.0647742449788336,
+      "raw": "doc/performance_experiments/raw/phase5cb/buffer/smoke_fixed_pipeline.json.gz",
+      "settings": {
+        "binary_slot_policy": "two_private_fixed_inodes_crossed_every_pair",
+        "bootstrap_iterations": 10000,
+        "cpu_set": [
+          4
+        ],
+        "order": "ABBA",
+        "pairs": 22,
+        "rotate_binary_slots": true,
+        "rss_scope": "process; per-workload only for single-row commands",
+        "statistical_unit": "two_pair_crossover_block",
+        "timeout_seconds": 45.0,
+        "warmups_per_side": 2
+      },
+      "workload": "python_feature_pipeline"
+    },
+    "table/formal_features": {
+      "absolute_medians": {
+        "A_elapsed_ns": 64169473.5,
+        "A_native_rss_kib": 5698.0,
+        "A_rate_per_second": 1558374.0972055132,
+        "A_runner_rss_kib": 5724.0,
+        "B_elapsed_ns": 61127814.5,
+        "B_native_rss_kib": 5706.0,
+        "B_rate_per_second": 1635916.8320905431,
+        "B_runner_rss_kib": 5710.0
+      },
+      "binary_sha256": {
+        "A": "d8bf634fc0d5c52c3e841419bf121e0d3fa2ed76a0a29cbd16e49184cd230e54",
+        "B": "37f56daa2749af7914507870b27d943e1f5653883f82ac72f364b97edf1bd5a0"
+      },
+      "blocks": 11,
+      "ci95": [
+        1.033016320320498,
+        1.0591496731949406
+      ],
+      "contract": "S0",
+      "digest": "6fce2c9748533dc3",
+      "fixture": "midgame_250",
+      "pairs": 22,
+      "ratio": 1.050302354928512,
+      "raw": "doc/performance_experiments/raw/phase5cb/table/formal_features.json.gz",
+      "settings": {
+        "binary_slot_policy": "two_private_fixed_inodes_crossed_every_pair",
+        "bootstrap_iterations": 10000,
+        "cpu_set": [
+          4
+        ],
+        "order": "ABBA",
+        "pairs": 22,
+        "rotate_binary_slots": true,
+        "rss_scope": "process; per-workload only for single-row commands",
+        "statistical_unit": "two_pair_crossover_block",
+        "timeout_seconds": 45.0,
+        "warmups_per_side": 2
+      },
+      "workload": "state_encoder"
+    },
+    "table/formal_primary": {
+      "absolute_medians": {
+        "A_elapsed_ns": 94810660.0,
+        "A_native_rss_kib": 26910.0,
+        "A_rate_per_second": 210947.30473050015,
+        "A_runner_rss_kib": 26766.0,
+        "B_elapsed_ns": 93206493.0,
+        "B_native_rss_kib": 26890.0,
+        "B_rate_per_second": 214577.46291121712,
+        "B_runner_rss_kib": 26764.0
+      },
+      "binary_sha256": {
+        "A": "d8bf634fc0d5c52c3e841419bf121e0d3fa2ed76a0a29cbd16e49184cd230e54",
+        "B": "37f56daa2749af7914507870b27d943e1f5653883f82ac72f364b97edf1bd5a0"
+      },
+      "blocks": 11,
+      "ci95": [
+        1.0091179836706021,
+        1.0487522405034126
+      ],
+      "contract": "S0",
+      "digest": "343d6c7c5dace4cd",
+      "fixture": "five_moves",
+      "pairs": 22,
+      "ratio": 1.022887664516377,
+      "raw": "doc/performance_experiments/raw/phase5cb/table/formal_primary.json.gz",
+      "settings": {
+        "binary_slot_policy": "two_private_fixed_inodes_crossed_every_pair",
+        "bootstrap_iterations": 10000,
+        "cpu_set": [
+          4
+        ],
+        "order": "ABBA",
+        "pairs": 22,
+        "rotate_binary_slots": true,
+        "rss_scope": "process; per-workload only for single-row commands",
+        "statistical_unit": "two_pair_crossover_block",
+        "timeout_seconds": 45.0,
+        "warmups_per_side": 2
+      },
+      "workload": "parallel_scheduler"
+    },
+    "table/holdout_primary": {
+      "absolute_medians": {
+        "A_elapsed_ns": 93772838.0,
+        "A_native_rss_kib": 26878.0,
+        "A_rate_per_second": 213281.51767953503,
+        "A_runner_rss_kib": 26766.0,
+        "B_elapsed_ns": 94262620.5,
+        "B_native_rss_kib": 26914.0,
+        "B_rate_per_second": 212173.55913957173,
+        "B_runner_rss_kib": 26786.0
+      },
+      "binary_sha256": {
+        "A": "d8bf634fc0d5c52c3e841419bf121e0d3fa2ed76a0a29cbd16e49184cd230e54",
+        "B": "37f56daa2749af7914507870b27d943e1f5653883f82ac72f364b97edf1bd5a0"
+      },
+      "blocks": 11,
+      "ci95": [
+        0.939595949394847,
+        1.0135407498235733
+      ],
+      "contract": "S0",
+      "digest": "343d6c7c5dace4cd",
+      "fixture": "five_moves",
+      "pairs": 22,
+      "ratio": 0.9796460684602664,
+      "raw": "doc/performance_experiments/raw/phase5cb/table/holdout_primary.json.gz",
+      "settings": {
+        "binary_slot_policy": "two_private_fixed_inodes_crossed_every_pair",
+        "bootstrap_iterations": 10000,
+        "cpu_set": [
+          4
+        ],
+        "order": "ABBA",
+        "pairs": 22,
+        "rotate_binary_slots": true,
+        "rss_scope": "process; per-workload only for single-row commands",
+        "statistical_unit": "two_pair_crossover_block",
+        "timeout_seconds": 45.0,
+        "warmups_per_side": 2
+      },
+      "workload": "parallel_scheduler"
+    },
+    "table/smoke_features": {
+      "absolute_medians": {
+        "A_elapsed_ns": 63900848.0,
+        "A_native_rss_kib": 5704.0,
+        "A_rate_per_second": 1564924.945669083,
+        "A_runner_rss_kib": 5616.0,
+        "B_elapsed_ns": 60966567.5,
+        "B_native_rss_kib": 5746.0,
+        "B_rate_per_second": 1640243.4842393082,
+        "B_runner_rss_kib": 5650.0
+      },
+      "binary_sha256": {
+        "A": "d8bf634fc0d5c52c3e841419bf121e0d3fa2ed76a0a29cbd16e49184cd230e54",
+        "B": "37f56daa2749af7914507870b27d943e1f5653883f82ac72f364b97edf1bd5a0"
+      },
+      "blocks": 2,
+      "ci95": [
+        1.0489405416029483,
+        1.0493480920616978
+      ],
+      "contract": "S0",
+      "digest": "6fce2c9748533dc3",
+      "fixture": "midgame_250",
+      "pairs": 4,
+      "ratio": 1.0491443168323231,
+      "raw": "doc/performance_experiments/raw/phase5cb/table/smoke_features.json.gz",
+      "settings": {
+        "binary_slot_policy": "two_private_fixed_inodes_crossed_every_pair",
+        "bootstrap_iterations": 10000,
+        "cpu_set": [
+          4
+        ],
+        "order": "ABBA",
+        "pairs": 4,
+        "rotate_binary_slots": true,
+        "rss_scope": "process; per-workload only for single-row commands",
+        "statistical_unit": "two_pair_crossover_block",
+        "timeout_seconds": 45.0,
+        "warmups_per_side": 2
+      },
+      "workload": "state_encoder"
+    },
+    "table/smoke_primary": {
+      "absolute_medians": {
+        "A_elapsed_ns": 93765410.5,
+        "A_native_rss_kib": 26842.0,
+        "A_rate_per_second": 213359.5401266581,
+        "A_runner_rss_kib": 26760.0,
+        "B_elapsed_ns": 92883643.0,
+        "B_native_rss_kib": 26866.0,
+        "B_rate_per_second": 215327.5919216763,
+        "B_runner_rss_kib": 26758.0
+      },
+      "binary_sha256": {
+        "A": "d8bf634fc0d5c52c3e841419bf121e0d3fa2ed76a0a29cbd16e49184cd230e54",
+        "B": "37f56daa2749af7914507870b27d943e1f5653883f82ac72f364b97edf1bd5a0"
+      },
+      "blocks": 2,
+      "ci95": [
+        0.9999570212232847,
+        1.0106394154229537
+      ],
+      "contract": "S0",
+      "digest": "343d6c7c5dace4cd",
+      "fixture": "five_moves",
+      "pairs": 4,
+      "ratio": 1.0052982183231192,
+      "raw": "doc/performance_experiments/raw/phase5cb/table/smoke_primary.json.gz",
+      "settings": {
+        "binary_slot_policy": "two_private_fixed_inodes_crossed_every_pair",
+        "bootstrap_iterations": 10000,
+        "cpu_set": [
+          4
+        ],
+        "order": "ABBA",
+        "pairs": 4,
+        "rotate_binary_slots": true,
+        "rss_scope": "process; per-workload only for single-row commands",
+        "statistical_unit": "two_pair_crossover_block",
+        "timeout_seconds": 45.0,
+        "warmups_per_side": 2
+      },
+      "workload": "parallel_scheduler"
+    }
+  },
+  "native_engine_binary_identical_to_baseline": true,
+  "original_dirty_worktree_preserved": true,
+  "performance_scope": "Python feature consumer/pipeline, not NN throughput, game strength or native MCTS speedup",
+  "preserved": [
+    "3E/5E adopted",
+    "5A rejected",
+    "3B/3C/3D/4B-1 contracts",
+    "4A deferred",
+    "4C/5B-R/5D rejected"
+  ],
+  "schema": "csplendor.phase5cb.evidence.v1",
+  "source_digest_algorithm": "sha256(sorted file SHA256 + two spaces + relative path + LF), safe source extensions",
+  "source_file_manifest": "doc/performance_experiments/raw/phase5cb/buffer/final_source.json.gz",
+  "tsan": "not applicable; no concurrency changes",
+  "validation": {
+    "asan_ubsan": "4 native suites; binding ownership checked in Python",
+    "native": "42 tests",
+    "oracle": "all196 bitwise, all90 cards, empty, hidden, observer/canonical, random reachable, invalid native editor",
+    "python": "581 passed, 1 skipped, 4 performance deselected",
+    "python_performance": "4 passed"
+  }
+}

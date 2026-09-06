@@ -92,3 +92,18 @@ Represents a game move.
 - `csplendor.search_reveal_verified_mate_anytime(game, *, attacker, min_depth, max_depth, jobs=..., ...) -> dict`: Deadline-oriented positive-proof search. It may advance after an inconclusive depth and therefore never reports bounded no-mate or minimality.
 - `csplendor.MateSearchSession(attacker, *, jobs=..., max_cache_states=2_000_000)`: Reusable AI-facing search session with cooperative cancellation and a bounded exact transposition table retained across depths and turns. It reuses exact descendant results and shallower-depth move ordering. Use `search_anytime()` for live play, `search()` for minimal-depth analysis, and `clear()` between games.
 - `csplendor.MateSearchCancellationToken`: Cooperative cancellation token accepted by the stateless mate-search APIs.
+
+## State feature arrays
+
+- `StateEncoder.encode(game, observer=-1) -> list[float]`: The existing list API is unchanged.
+- `StateEncoder.encode_numpy(game, observer=-1) -> numpy.ndarray`: Returns an independent,
+  owning, writable, C-contiguous `float32` array of shape `(196,)`.
+- `StateFeaturizer.featurize(game, observer=-1) -> numpy.ndarray`: Uses `encode_numpy`
+  directly, without an intermediate Python list.
+
+The feature schema, numerical operations, and observer rules are identical to `encode`.
+Use observer 0 or 1 to hide the opponent's private reservation identities; -1 requests full information.
+Changing a returned array never changes the game or another result. Retained arrays remain valid
+after subsequent calls, game mutation/destruction, and MCTS searches. The GIL stays held.
+No caller-owned output buffer is accepted, so there is no partial-write or capacity contract to manage.
+Existing invalid-argument/card exceptions remain; an unsuccessful call does not modify earlier arrays.

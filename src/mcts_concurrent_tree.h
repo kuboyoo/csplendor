@@ -2,6 +2,7 @@
 #define CSPLENDOR_MCTS_CONCURRENT_TREE_H
 
 #include "mcts_parallel_types.h"
+#include "perf_counters.h"
 
 #include <algorithm>
 #include <atomic>
@@ -18,6 +19,9 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+#include <chrono>
+#endif
 
 namespace mcts_parallel {
 
@@ -26,6 +30,52 @@ struct PendingEvaluation;
 namespace detail {
 
 struct ConcurrentTreeState;
+
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+class LockTimer {
+public:
+  LockTimer(csplendor::perf::Counter acquisitions,
+            csplendor::perf::Counter wait,
+            csplendor::perf::Counter hold, bool node_operation = false) noexcept
+      : acquisitions_(acquisitions), wait_(wait), hold_(hold),
+        started_(Clock::now()), depth_(node_operation ? csplendor::perf::traversal_depth() : -1) {}
+
+  void acquired() noexcept {
+    acquired_ = Clock::now();
+    csplendor::perf::add(acquisitions_);
+    csplendor::perf::add(
+        wait_, static_cast<uint64_t>(
+                   std::chrono::duration_cast<std::chrono::nanoseconds>(
+                       acquired_ - started_)
+                       .count()));
+    locked_ = true;
+    csplendor::perf::record_traversal_lock(depth_, true,
+        static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(acquired_ - started_).count()));
+  }
+
+  ~LockTimer() {
+    if (!locked_)
+      return;
+    csplendor::perf::record_traversal_lock(depth_, false,
+        static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - acquired_).count()));
+    csplendor::perf::add(
+        hold_, static_cast<uint64_t>(
+                   std::chrono::duration_cast<std::chrono::nanoseconds>(
+                       Clock::now() - acquired_)
+                       .count()));
+  }
+
+private:
+  using Clock = std::chrono::steady_clock;
+  csplendor::perf::Counter acquisitions_;
+  csplendor::perf::Counter wait_;
+  csplendor::perf::Counter hold_;
+  Clock::time_point started_;
+  Clock::time_point acquired_{};
+  bool locked_ = false;
+  int depth_ = -1;
+};
+#endif
 
 struct EdgeStats64 {
   uint64_t N = 0;
@@ -98,10 +148,26 @@ decltype(auto) with_node_lock(const std::shared_ptr<ConcurrentTreeState> &tree,
   if (!node || node->owner.lock().get() != tree.get())
     throw std::logic_error("node handle belongs to a different tree");
   if (tree->backend == TreeBackend::Coarse) {
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    LockTimer timer(csplendor::perf::Counter::ParallelShardLockAcquisitions,
+                    csplendor::perf::Counter::ParallelShardLockWaitNanoseconds,
+                    csplendor::perf::Counter::ParallelShardLockHoldNanoseconds, true);
+#endif
     std::lock_guard<std::mutex> lock(tree->coarse_mutex);
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+    timer.acquired();
+#endif
     return std::forward<Function>(function)(*node);
   }
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+  LockTimer timer(csplendor::perf::Counter::ParallelNodeLockAcquisitions,
+                  csplendor::perf::Counter::ParallelNodeLockWaitNanoseconds,
+                  csplendor::perf::Counter::ParallelNodeLockHoldNanoseconds, true);
+#endif
   std::lock_guard<std::mutex> lock(node->mutex);
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+  timer.acquired();
+#endif
   return std::forward<Function>(function)(*node);
 }
 
@@ -124,15 +190,19 @@ inline uint64_t claim_monotonic_id(std::atomic<uint64_t> &next,
 }
 
 inline auto find_edge(NodeRecord &record, size_t action) {
+  CSPLENDOR_PERF_INC(ParallelEdgeLookups);
   return std::lower_bound(record.edges.begin(), record.edges.end(), action,
                           [](const EdgeStats64 &edge, size_t requested) {
+                            CSPLENDOR_PERF_INC(ParallelEdgeComparisons);
                             return static_cast<size_t>(edge.action) < requested;
                           });
 }
 
 inline auto find_edge(const NodeRecord &record, size_t action) {
+  CSPLENDOR_PERF_INC(ParallelEdgeLookups);
   return std::lower_bound(record.edges.begin(), record.edges.end(), action,
                           [](const EdgeStats64 &edge, size_t requested) {
+                            CSPLENDOR_PERF_INC(ParallelEdgeComparisons);
                             return static_cast<size_t>(edge.action) < requested;
                           });
 }
@@ -260,8 +330,10 @@ private:
         tree_->generation.load(std::memory_order_acquire) !=
             expected_tree_generation ||
         node_generation_ != expected_tree_generation) {
-      if (ledger_)
+      if (ledger_) {
+        CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerErrorAtomicIncrements, 1);
         ledger_->stale_result.fetch_add(1, std::memory_order_relaxed);
+      }
       throw std::logic_error("stale reservation generation");
     }
     prevalidate_token();
@@ -299,6 +371,7 @@ private:
     detail::decrement_nonzero(tree_->live_reservation_count);
     state_ = ReservationState::Committed;
     if (ledger_) {
+      CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerReservationAtomicIncrements, 2);
       ledger_->virtual_loss_released.fetch_add(1, std::memory_order_relaxed);
       ledger_->reservations_committed.fetch_add(1, std::memory_order_relaxed);
     }
@@ -323,9 +396,11 @@ private:
     state_ = ReservationState::Aborted;
     if (ledger_) {
       if (released) {
+        CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerReservationAtomicIncrements, 2);
         ledger_->virtual_loss_released.fetch_add(1, std::memory_order_relaxed);
         ledger_->reservations_aborted.fetch_add(1, std::memory_order_relaxed);
       } else {
+        CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerErrorAtomicIncrements, 1);
         ledger_->integrity_errors.fetch_add(1, std::memory_order_relaxed);
       }
     }
@@ -499,31 +574,62 @@ public:
   }
 
   NodeHandle find(const TreeKey &key) const {
+    CSPLENDOR_PERF_INC(ParallelTreeLookups);
     NodeHandle result;
     if (state_->backend == TreeBackend::Coarse) {
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+      detail::LockTimer timer(
+          csplendor::perf::Counter::ParallelShardLockAcquisitions,
+          csplendor::perf::Counter::ParallelShardLockWaitNanoseconds,
+          csplendor::perf::Counter::ParallelShardLockHoldNanoseconds);
+#endif
       std::lock_guard<std::mutex> lock(state_->coarse_mutex);
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+      timer.acquired();
+#endif
       const auto iterator = state_->coarse_nodes.find(key);
       if (iterator != state_->coarse_nodes.end())
         result = iterator->second;
     } else {
       auto &shard = *state_->shards[detail::shard_index(*state_, key)];
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+      detail::LockTimer timer(
+          csplendor::perf::Counter::ParallelShardLockAcquisitions,
+          csplendor::perf::Counter::ParallelShardLockWaitNanoseconds,
+          csplendor::perf::Counter::ParallelShardLockHoldNanoseconds);
+#endif
       std::lock_guard<std::mutex> lock(shard.mutex);
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+      timer.acquired();
+#endif
       const auto iterator = shard.nodes.find(key);
       if (iterator != shard.nodes.end())
         result = iterator->second;
     }
-    if (result)
+    if (result) {
+      CSPLENDOR_PERF_INC(ParallelAccessEpochUpdates);
       result->last_access.store(
           state_->access_epoch.fetch_add(1, std::memory_order_relaxed) + 1,
           std::memory_order_relaxed);
+    }
     return result;
   }
 
   NodeHandle find_or_create(const TreeKey &key) {
+    CSPLENDOR_PERF_INC(ParallelTreeLookups);
     const uint64_t current_generation = generation();
     NodeHandle result;
     if (state_->backend == TreeBackend::Coarse) {
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+      detail::LockTimer timer(
+          csplendor::perf::Counter::ParallelShardLockAcquisitions,
+          csplendor::perf::Counter::ParallelShardLockWaitNanoseconds,
+          csplendor::perf::Counter::ParallelShardLockHoldNanoseconds);
+#endif
       std::lock_guard<std::mutex> lock(state_->coarse_mutex);
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+      timer.acquired();
+#endif
       auto iterator = state_->coarse_nodes.find(key);
       if (iterator == state_->coarse_nodes.end()) {
         if (state_->coarse_nodes.size() >= state_->capacity)
@@ -535,7 +641,16 @@ public:
       result = iterator->second;
     } else {
       auto &shard = *state_->shards[detail::shard_index(*state_, key)];
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+      detail::LockTimer timer(
+          csplendor::perf::Counter::ParallelShardLockAcquisitions,
+          csplendor::perf::Counter::ParallelShardLockWaitNanoseconds,
+          csplendor::perf::Counter::ParallelShardLockHoldNanoseconds);
+#endif
       std::lock_guard<std::mutex> lock(shard.mutex);
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+      timer.acquired();
+#endif
       auto iterator = shard.nodes.find(key);
       if (iterator == shard.nodes.end()) {
         // Capacity is a hard upper bound. A small transient underfill is
@@ -561,6 +676,7 @@ public:
       }
       result = iterator->second;
     }
+    CSPLENDOR_PERF_INC(ParallelAccessEpochUpdates);
     result->last_access.store(
         state_->access_epoch.fetch_add(1, std::memory_order_relaxed) + 1,
         std::memory_order_relaxed);
@@ -771,6 +887,7 @@ public:
         const uint64_t remaining_visits = counter_max - record.total_visits;
         if (record.live_reservations.size() >= remaining_visits)
           throw std::overflow_error("parallel node visit counter is exhausted");
+        CSPLENDOR_PERF_RESERVATION_OCCUPANCY(record.live_reservations.size());
 
         const ActionMaskBits missing =
             world_mask & ~record.information_set_union;
@@ -779,10 +896,17 @@ public:
         reservation_id = detail::claim_monotonic_id(
             state_->next_reservation_id,
             "parallel reservation identifier is exhausted");
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+        const size_t reservation_buckets_before =
+            record.live_reservations.bucket_count();
+#endif
         const auto inserted =
             record.live_reservations.insert(reservation_id).second;
         if (!inserted)
           throw std::logic_error("duplicate reservation identifier");
+        CSPLENDOR_PERF_LIVE_RESERVATION_INSERT(
+            reservation_buckets_before,
+            record.live_reservations.bucket_count());
       }
 
       detail::ensure_edges(record, world_mask);
@@ -802,7 +926,9 @@ public:
     state_->live_reservation_count.fetch_add(1, std::memory_order_relaxed);
     state_->virtual_loss_count.fetch_add(1, std::memory_order_relaxed);
     if (ledger) {
+      CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerSelectionAtomicIncrements, 1);
       ledger->selected.fetch_add(1, std::memory_order_relaxed);
+      CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerReservationAtomicIncrements, 1);
       ledger->virtual_loss_added.fetch_add(1, std::memory_order_relaxed);
     }
     return SelectionReservation(state_, node, selected_action, player,
@@ -876,6 +1002,7 @@ public:
       state_->evaluating_node_count.fetch_add(1, std::memory_order_relaxed);
       state_->pending_evaluation_count.fetch_add(1, std::memory_order_relaxed);
       if (ledger) {
+        CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerEvaluationAtomicIncrements, 2);
         ledger->evaluation_owner.fetch_add(1, std::memory_order_relaxed);
         ledger->expansion_claimed.fetch_add(1, std::memory_order_relaxed);
       }
@@ -902,6 +1029,7 @@ public:
     // deliberately ticket-local and are not a deduplication discriminator.
     result.pending->attached_ticket_ids.push_back(ticket_id);
     if (ledger) {
+      CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerEvaluationAtomicIncrements, 2);
       ledger->evaluation_waiter.fetch_add(1, std::memory_order_relaxed);
       ledger->expansion_waited.fetch_add(1, std::memory_order_relaxed);
     }
@@ -937,6 +1065,7 @@ public:
     auto tickets = finish_pending(pending, PendingState::Published);
     detail::decrement_nonzero(state_->pending_evaluation_count);
     if (ledger) {
+      CSPLENDOR_PERF_LEDGER_ADD(ParallelLedgerEvaluationAtomicIncrements, 3);
       ledger->expansion_published.fetch_add(1, std::memory_order_relaxed);
       ledger->evaluation_requested.fetch_add(1, std::memory_order_relaxed);
       ledger->evaluated_boards.fetch_add(1, std::memory_order_relaxed);

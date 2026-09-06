@@ -1,0 +1,24 @@
+{
+  "schema": "csplendor.phase0_fixtures.v1",
+  "command_template": "benchmark_engine_hotpaths --workload legal_count,legal_codes --fixture <name> --iterations 16 --warmup 0 --seed 42 --fixture-plies 12",
+  "notes": [
+    "editor_fallback is deliberately noncanonical but editor-compatible",
+    "all other fixtures passed reachable and editor invariant checks",
+    "legal_count and legal_codes reported identical fixture semantics"
+  ],
+  "fixtures": [
+    {"name":"initial","category":"initial","construction":"seeded","seed":42,"setup_actions":0,"canonical":true,"legal_count":30,"ordered_legal_digest":"416e4e84e9d93ca5","exact_hash":"5474852821403087369","observable_hash_0":"4635697991872751710","observable_hash_1":"4635697991872751710"},
+    {"name":"midgame_250","category":"high_legal_count","construction":"fixed_legal_replay","seed":42,"setup_actions":12,"canonical":true,"legal_count":250,"ordered_legal_digest":"f05af3b244e08b82","exact_hash":"14707374328533802645","observable_hash_0":"11956935861795463816","observable_hash_1":"4997747067739671915"},
+    {"name":"five_moves","category":"low_legal_count","construction":"fixed_legal_replay","seed":42,"setup_actions":12,"canonical":true,"legal_count":5,"ordered_legal_digest":"16e0e690f4abb9e6","exact_hash":"13684725691275296037","observable_hash_0":"11167490305115859042","observable_hash_1":"13782163118936808622"},
+    {"name":"random","category":"random_midgame","construction":"seeded_legal_replay","seed":42,"setup_actions":12,"canonical":true,"legal_count":296,"ordered_legal_digest":"bf4663ed702d1b89","exact_hash":"17358191116576151574","observable_hash_0":"11123744676172608010","observable_hash_1":"18387199915400601969"},
+    {"name":"token_return","category":"token_return","construction":"canonical_editor_setup","seed":123,"setup_actions":0,"canonical":true,"legal_count":421,"ordered_legal_digest":"bcc61aa510ce1683","exact_hash":"11388063500092306099","observable_hash_0":"15603097497072503504","observable_hash_1":"15603097497072503504"},
+    {"name":"gold_payment","category":"gold_payment","construction":"canonical_editor_setup","seed":42,"setup_actions":0,"canonical":true,"legal_count":84,"ordered_legal_digest":"a728228750d36c8e","exact_hash":"4722994976344561769","observable_hash_0":"5342581464820040254","observable_hash_1":"5342581464820040254"},
+    {"name":"reserve_limit","category":"reserve_limit","construction":"seeded_legal_replay","seed":1,"setup_actions":6,"canonical":true,"legal_count":14,"ordered_legal_digest":"ac9c26205298b31e","exact_hash":"16187681123545536971","observable_hash_0":"7926415554261828911","observable_hash_1":"7926415554261828911"},
+    {"name":"multi_noble","category":"multi_noble","construction":"canonical_editor_setup","seed":5,"setup_actions":0,"canonical":true,"legal_count":2,"ordered_legal_digest":"f207a3f74c135b69","exact_hash":"11113443554613896364","observable_hash_0":"3013212492974379328","observable_hash_1":"3013212492974379328"},
+    {"name":"final_round","category":"final_round","construction":"canonical_editor_setup","seed":9,"setup_actions":0,"canonical":true,"legal_count":30,"ordered_legal_digest":"8b316b2c3d0e83c8","exact_hash":"1919366715746973061","observable_hash_0":"18279510949184068689","observable_hash_1":"18279510949184068689"},
+    {"name":"forced_pass","category":"forced_pass","construction":"fixed_legal_replay","seed":10,"setup_actions":25,"canonical":true,"legal_count":1,"ordered_legal_digest":"92159f6a18baa844","exact_hash":"14505820130726921903","observable_hash_0":"3009219518949288461","observable_hash_1":"7070362520015396997"},
+    {"name":"editor_fallback","category":"editor_fallback","construction":"noncanonical_editor_setup","seed":42,"setup_actions":0,"canonical":false,"editor_compatible":true,"reachable_invariants":"token_conservation_mismatch,player_token_limit_exceeded","legal_count":2048,"ordered_legal_digest":"346a628730d42413","exact_hash":"9338783209042507355","observable_hash_0":"9959111036806884364","observable_hash_1":"9959111036806884364"},
+    {"name":"hidden_reserve","category":"hidden_reserve","construction":"seeded_legal_replay","seed":20260726,"setup_actions":1,"canonical":true,"legal_count":30,"ordered_legal_digest":"0272d7bb8b5da361","exact_hash":"3211380434463917065","observable_hash_0":"13010334762969200903","observable_hash_1":"9391323289829470304"},
+    {"name":"reveal_heavy","category":"reveal_heavy","construction":"canonical_editor_setup","seed":5,"setup_actions":0,"canonical":true,"legal_count":28,"ordered_legal_digest":"4e04e7e97ced3776","exact_hash":"6201006196206738378","observable_hash_0":"1166943581983465934","observable_hash_1":"1166943581983465934"}
+  ]
+}

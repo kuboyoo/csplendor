@@ -11,6 +11,13 @@ function(csplendor_add_native_test target source labels timeout)
   endif()
 endfunction()
 
+csplendor_add_native_test(state_feature_table_unit state_feature_table_unit.cpp
+                          "unit;features;bitwise;oracle" 120)
+
+csplendor_add_native_test(action_selection_unit action_selection_unit.cpp
+                          "unit;selection;oracle" 120)
+target_compile_definitions(action_selection_unit PRIVATE CSPLENDOR_ACTION_ENCODER_REFERENCE=1)
+
 set(CSPLENDOR_STANDALONE_HEADERS
     action.h
     action_encoder.h
@@ -38,6 +45,32 @@ foreach(header IN LISTS CSPLENDOR_STANDALONE_HEADERS)
   csplendor_add_native_test(
     "header_${header_stem}" "${source}" "header;standalone;api" 10)
 endforeach()
+
+# Internal helpers get standalone checks without expanding the public API
+# header matrix (which is versioned in doc/refactoring_contracts.json).
+set(reveal_order_header_source
+    "${CMAKE_CURRENT_BINARY_DIR}/header_solver_reveal_order.cpp")
+file(GENERATE OUTPUT "${reveal_order_header_source}"
+     CONTENT "#include \"solver_reveal_order.h\"\nint main() { return 0; }\n")
+csplendor_add_native_test(header_solver_reveal_order "${reveal_order_header_source}"
+                          "header;standalone;internal" 10)
+set(scratch_header_source "${CMAKE_CURRENT_BINARY_DIR}/header_solver_search_scratch.cpp")
+file(GENERATE OUTPUT "${scratch_header_source}"
+     CONTENT "#include \"solver_search_scratch.h\"\nint main() { return 0; }\n")
+csplendor_add_native_test(header_solver_search_scratch "${scratch_header_source}"
+                          "header;standalone;internal" 10)
+set(normal_rollback_header_source "${CMAKE_CURRENT_BINARY_DIR}/header_solver_normal_rollback.cpp")
+file(GENERATE OUTPUT "${normal_rollback_header_source}"
+     CONTENT "#include \"solver_normal_rollback.h\"\nint main() { return 0; }\n")
+csplendor_add_native_test(header_solver_normal_rollback "${normal_rollback_header_source}"
+                          "header;standalone;internal" 10)
+csplendor_add_native_test(solver_normal_rollback_unit solver_normal_rollback_unit.cpp
+                          "unit;solver;rollback;oracle" 30)
+set(rollback_fault_header_source "${CMAKE_CURRENT_BINARY_DIR}/header_solver_rollback_faults.cpp")
+file(GENERATE OUTPUT "${rollback_fault_header_source}"
+     CONTENT "#include \"solver_rollback_faults.h\"\nint main() { return 0; }\n")
+csplendor_add_native_test(header_solver_rollback_faults "${rollback_fault_header_source}"
+                          "header;standalone;internal" 10)
 
 csplendor_add_native_test(mcts_parallel_unit mcts_parallel_unit.cpp
                           "unit;replay" 30)
@@ -76,6 +109,9 @@ csplendor_add_native_test(mcts_parallel_replay mcts_parallel_replay.cpp
                           "unit;replay;deterministic;root-parallel" 90)
 csplendor_add_native_test(mcts_optimization_unit mcts_optimization_unit.cpp
                           "unit;optimization;equivalence" 90)
+csplendor_add_native_test(mcts_legacy_records_unit mcts_legacy_records_unit.cpp
+                          "unit;mcts;ownership;prune;equivalence" 90)
+target_compile_definitions(mcts_legacy_records_unit PRIVATE CSPLENDOR_MCTS_TESTING=1)
 target_compile_definitions(
   mcts_optimization_unit
   PRIVATE CSPLENDOR_MCTS_TESTING=1 CSPLENDOR_ACTION_ENCODER_REFERENCE=1)
@@ -89,11 +125,17 @@ csplendor_add_native_test(state_invariants_unit state_invariants_unit.cpp
                           "unit;state;invariants;hash" 30)
 csplendor_add_native_test(domain_state_unit domain_state_unit.cpp
                           "unit;state;editor;mutation;fixed-capacity" 30)
+csplendor_add_native_test(incremental_hash_unit incremental_hash_unit.cpp
+                          "unit;state;hash;incremental;differential" 120)
 csplendor_add_native_test(state_copy_unit state_copy_unit.cpp
                           "unit;state;copy;snapshot;undo" 30)
+csplendor_add_native_test(perf_counters_unit perf_counters_unit.cpp
+                          "unit;performance;instrumentation" 30)
 csplendor_add_native_test(rule_query_unit rule_query_unit.cpp
                           "unit;rules;query;validation;transition;equivalence" 90)
 csplendor_add_native_test(encoding_schema_unit encoding_schema_unit.cpp
                           "unit;encoding;schema;equivalence;golden" 90)
+csplendor_add_native_test(v3_payment_codec_unit v3_payment_codec_unit.cpp
+                          "unit;encoding;v3;oracle;equivalence" 90)
 csplendor_add_native_test(solver_components_unit solver_components_unit.cpp
                           "unit;solver;ownership;limits;proof;standalone-header" 30)

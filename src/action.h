@@ -37,6 +37,31 @@ struct Action {
     return return_gems[GOLD] == 0;
   }
 
+  static uint64_t
+  pack_return_gems(uint64_t base_code, ActionType action_type,
+                   const std::array<uint8_t, 6> &returned) noexcept {
+    int shift = 0;
+    switch (action_type) {
+    case TAKE_DIFFERENT:
+    case TAKE_SAME:
+      shift = 13;
+      break;
+    case RESERVE_VISIBLE:
+      shift = 10;
+      break;
+    case RESERVE_DECK:
+      shift = 5;
+      break;
+    default:
+      return base_code;
+    }
+    for (uint8_t amount : returned) {
+      base_code |= (static_cast<uint64_t>(amount) & 0xFULL) << shift;
+      shift += 4;
+    }
+    return base_code;
+  }
+
   uint64_t pack() const {
     uint64_t code = static_cast<uint64_t>(type) & 0x7ULL;
 

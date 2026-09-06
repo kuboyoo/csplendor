@@ -1,0 +1,5 @@
+workload,fixture,payment_mode,A_median_rate_per_second,B_median_rate_per_second,B_over_A_median,ci95_low,ci95_high,RSS_A_KiB,RSS_B_KiB,digest
+legal_count,midgame_250,full,3043277.626489,2944962.669474,0.964820,0.961229,0.968842,5674,5674,6d9802c2ed236f83
+legal_count,gold_payment,full,2792083.476110,2518232.533023,0.898852,0.894264,0.905878,5664,5664,9c7be20f4b104783
+legal_count,gold_payment,simple,2662383.837075,3085329.502521,1.154487,1.148681,1.161419,5664,5664,0deb63dc6d0e5983
+random_selfplay_apply,initial,full,1847729.055243,1809213.079223,0.982524,0.970985,0.990107,5668,5664,3c120106773c3dee

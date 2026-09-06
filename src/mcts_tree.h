@@ -17,6 +17,10 @@
 #include <unordered_map>
 #include <vector>
 
+#ifndef CSPLENDOR_MCTS_LEGACY_TREE_RECORDS
+#define CSPLENDOR_MCTS_LEGACY_TREE_RECORDS 1
+#endif
+
 class Game;
 class IActionEncoder;
 
@@ -136,8 +140,10 @@ public:
     config_ = config;
     if (changes_tree_domain) {
       nodes_.clear();
+#if !CSPLENDOR_MCTS_LEGACY_TREE_RECORDS
       node_aux_.clear();
       access_count_.clear();
+#endif
       access_counter_ = 0;
       const uint64_t next_generation = current_generation + 1;
       tree_generation_.store(next_generation, std::memory_order_release);
@@ -155,8 +161,10 @@ public:
     if (current_generation == std::numeric_limits<uint64_t>::max())
       throw std::overflow_error("MCTS tree generation is exhausted");
     nodes_.clear();
+#if !CSPLENDOR_MCTS_LEGACY_TREE_RECORDS
     node_aux_.clear();
     access_count_.clear();
+#endif
     access_counter_ = 0;
     const uint64_t next_generation = current_generation + 1;
     tree_generation_.store(next_generation, std::memory_order_release);
@@ -168,7 +176,7 @@ public:
     const auto iterator = nodes_.find(hash);
     if (iterator == nodes_.end())
       return std::nullopt;
-    return iterator->second;
+    return node_value(iterator->second);
   }
 
   std::optional<mcts_parallel::MCTSNodeSnapshot64>
@@ -246,8 +254,8 @@ public:
     auto it = nodes_.find(hash);
     if (it != nodes_.end()) {
       // Update access count for LRU
-      access_count_[hash] = ++access_counter_;
-      return &it->second;
+      touch_node(it);
+      return &node_value(it->second);
     }
     return nullptr;
   }
@@ -255,8 +263,12 @@ public:
   // Create or get node
   MCTSNode &get_or_create_node(uint64_t hash) {
     reject_if_parallel_active("create legacy node");
+#if CSPLENDOR_MCTS_LEGACY_TREE_RECORDS
+    return get_or_create_record(hash).node;
+#else
     access_count_[hash] = ++access_counter_;
     return nodes_[hash];
+#endif
   }
 
   // Select action using PUCT formula
@@ -333,7 +345,7 @@ public:
     if (it == nodes_.end())
       return -1;
 
-    MCTSNode &node = it->second;
+    MCTSNode &node = node_value(it->second);
     float best_ucb = -1e9f;
     int best_action = -1;
 
@@ -434,8 +446,8 @@ public:
     if (node_it == nodes_.end())
       return -1;
 
-    MCTSNode &node = node_it->second;
-    LegacyNodeAux &aux = node_aux_[hash];
+    MCTSNode &node = node_value(node_it->second);
+    LegacyNodeAux &aux = node_aux(node_it);
     world_mask &= mcts_action_mask::ALL;
     float policy_sum = 0.0f;
     mcts_action_mask::for_each(world_mask, [&](size_t action) {
@@ -520,7 +532,7 @@ public:
     auto it = nodes_.find(hash);
     if (it != nodes_.end() && action >= 0 &&
         action < static_cast<int>(MAX_ACTIONS)) {
-      it->second.virtual_loss[action]++;
+      node_value(it->second).virtual_loss[action]++;
     }
   }
 
@@ -532,8 +544,8 @@ public:
         action < static_cast<int>(MAX_ACTIONS)) {
       // Applying a stale result twice or an explicit extra removal must not
       // create a negative visit penalty and poison the subsequent sqrt/PUCT.
-      if (it->second.virtual_loss[action] > 0)
-        it->second.virtual_loss[action]--;
+      if (node_value(it->second).virtual_loss[action] > 0)
+        node_value(it->second).virtual_loss[action]--;
     }
   }
 
@@ -542,7 +554,7 @@ public:
     reject_if_parallel_active("clear legacy virtual loss");
     for (auto &kv : nodes_) {
       for (size_t a = 0; a < MAX_ACTIONS; ++a) {
-        kv.second.virtual_loss[a] = 0;
+        node_value(kv.second).virtual_loss[a] = 0;
       }
     }
   }
@@ -559,7 +571,7 @@ public:
     std::array<float, MAX_ACTIONS> noise = {0};
     auto it = nodes_.find(hash);
     if (it != nodes_.end()) {
-      generate_dirichlet_noise(it->second, noise);
+      generate_dirichlet_noise(node_value(it->second), noise);
     }
     return noise;
   }
@@ -594,12 +606,21 @@ public:
                    const std::array<float, NUM_PLAYERS> &value,
                    const std::array<uint8_t, MAX_ACTIONS> &valid_actions) {
     reject_if_parallel_active("expand legacy node");
+#if CSPLENDOR_MCTS_LEGACY_TREE_RECORDS
+    auto &record = get_or_create_record(hash);
+    MCTSNode &node = record.node;
+#else
     MCTSNode &node = get_or_create_node(hash);
+#endif
     node.valid_actions = valid_actions;
     node.value = value;
     node.is_expanded = true;
 
+#if CSPLENDOR_MCTS_LEGACY_TREE_RECORDS
+    LegacyNodeAux &aux = record.aux;
+#else
     LegacyNodeAux &aux = node_aux_[hash];
+#endif
     aux.base_policy = policy;
     aux.has_base_policy = true;
     const ActionMaskBits valid_bits =
@@ -654,7 +675,7 @@ public:
       return probs;
     }
 
-    const MCTSNode &node = it->second;
+    const MCTSNode &node = node_value(it->second);
 
     if (temperature < EPS) {
       // Greedy: pick best action(s)
@@ -702,10 +723,16 @@ public:
 
     // Find threshold access count to keep PRUNE_THRESHOLD nodes
     std::vector<uint64_t> access_counts;
+#if CSPLENDOR_MCTS_LEGACY_TREE_RECORDS
+    access_counts.reserve(nodes_.size());
+    for (const auto &kv : nodes_)
+      access_counts.push_back(kv.second.last_access);
+#else
     access_counts.reserve(access_count_.size());
     for (const auto &kv : access_count_) {
       access_counts.push_back(kv.second);
     }
+#endif
     std::sort(access_counts.begin(), access_counts.end(),
               std::greater<uint64_t>());
 
@@ -717,24 +744,35 @@ public:
     // Remove nodes below threshold
     std::vector<uint64_t> to_remove;
     for (const auto &kv : nodes_) {
+#if CSPLENDOR_MCTS_LEGACY_TREE_RECORDS
+      if (kv.second.last_access < threshold) {
+#else
       auto it = access_count_.find(kv.first);
       if (it == access_count_.end() || it->second < threshold) {
+#endif
         to_remove.push_back(kv.first);
       }
     }
 
     for (uint64_t hash : to_remove) {
       nodes_.erase(hash);
+#if !CSPLENDOR_MCTS_LEGACY_TREE_RECORDS
       node_aux_.erase(hash);
       access_count_.erase(hash);
+#endif
     }
 
     // Reset access counter if needed
     if (access_counter_ > 1000000) {
       access_counter_ = 0;
+#if CSPLENDOR_MCTS_LEGACY_TREE_RECORDS
+      for (auto &kv : nodes_)
+        kv.second.last_access = 0;
+#else
       for (auto &kv : access_count_) {
         kv.second = 0;
       }
+#endif
     }
   }
 
@@ -745,7 +783,7 @@ public:
     if (it == nodes_.end())
       return;
 
-    MCTSNode &node = it->second;
+    MCTSNode &node = node_value(it->second);
     if (action < 0 || action >= static_cast<int>(MAX_ACTIONS))
       return;
 
@@ -905,6 +943,44 @@ private:
     }
   };
 
+  // unordered_map preserves references/pointers to record members on rehash.
+  // The public mutable node is this member itself, never a cached snapshot.
+  struct LegacyTreeRecord {
+    MCTSNode node;
+    LegacyNodeAux aux;
+    uint64_t last_access = 0;
+  };
+#if CSPLENDOR_MCTS_LEGACY_TREE_RECORDS
+  using LegacyNodeMap = std::unordered_map<uint64_t, LegacyTreeRecord>;
+  static MCTSNode &node_value(LegacyTreeRecord &record) { return record.node; }
+  static const MCTSNode &node_value(const LegacyTreeRecord &record) {
+    return record.node;
+  }
+  LegacyNodeAux &node_aux(LegacyNodeMap::iterator it) { return it->second.aux; }
+  void touch_node(LegacyNodeMap::iterator it) {
+    it->second.last_access = ++access_counter_;
+  }
+  LegacyTreeRecord &get_or_create_record(uint64_t hash) {
+    const uint64_t access = ++access_counter_;
+    auto &record = nodes_[hash];
+    record.last_access = access;
+    return record;
+  }
+#else
+  using LegacyNodeMap = std::unordered_map<uint64_t, MCTSNode>;
+  static MCTSNode &node_value(MCTSNode &node) { return node; }
+  static const MCTSNode &node_value(const MCTSNode &node) { return node; }
+  LegacyNodeAux &node_aux(LegacyNodeMap::iterator it) {
+    return node_aux_[it->first];
+  }
+  void touch_node(LegacyNodeMap::iterator it) {
+    access_count_[it->first] = ++access_counter_;
+  }
+#endif
+#ifdef CSPLENDOR_MCTS_TESTING
+  friend struct MCTSLegacyRecordTestAccess;
+#endif
+
   void generate_dirichlet_noise(const MCTSNode &node,
                                 std::array<float, MAX_ACTIONS> &noise) {
     // Count valid actions
@@ -977,9 +1053,11 @@ private:
   uint64_t default_parallel_seed_ = 0;
   std::atomic<uint64_t> active_search_id_{0};
   mcts_parallel::ConcurrentTree parallel_tree_;
-  std::unordered_map<uint64_t, MCTSNode> nodes_;
+  LegacyNodeMap nodes_;
+#if !CSPLENDOR_MCTS_LEGACY_TREE_RECORDS
   std::unordered_map<uint64_t, LegacyNodeAux> node_aux_;
   std::unordered_map<uint64_t, uint64_t> access_count_;
+#endif
   uint64_t access_counter_ = 0;
   std::mt19937 rng_;
 };

@@ -3,6 +3,7 @@
 #include "mcts_root_parallel.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -26,6 +27,7 @@ struct Arguments {
   uint64_t seed = 42;
   bool determinization = false;
   std::string backend = "all";
+  std::string fixture = "five_moves";
 };
 
 std::vector<uint32_t> parse_threads(const std::string &text) {
@@ -65,6 +67,8 @@ Arguments parse_arguments(int argc, char **argv) {
       arguments.seed = std::stoull(value);
     else if (key == "--backend")
       arguments.backend = value;
+    else if (key == "--fixture")
+      arguments.fixture = value;
     else if (key == "--determinization")
       arguments.determinization = value == "1" || value == "true";
     else
@@ -79,6 +83,8 @@ Arguments parse_arguments(int argc, char **argv) {
       arguments.backend != "root")
     throw std::invalid_argument(
         "backend must be all/legacy/coarse/sharded/root");
+  if (arguments.fixture != "five_moves" && arguments.fixture != "midgame_250")
+    throw std::invalid_argument("fixture must be five_moves/midgame_250");
   return arguments;
 }
 
@@ -114,27 +120,50 @@ struct Measurement {
   uint64_t waiters = 0;
 };
 
-Game make_midgame(uint64_t seed) {
-  Game game(seed);
-  for (int ply = 0; ply < 12 && !game.is_game_over(); ++ply) {
-    const auto codes = game.legal_action_codes();
-    if (codes.empty())
-      break;
-    const size_t index = (static_cast<size_t>(ply) * 7U + 3U) % codes.size();
-    if (!game.apply_action_code_trusted(codes[index], false))
-      throw std::runtime_error("failed to construct benchmark midgame");
+constexpr std::array<uint64_t, 12> kMidgame250Actions = {
+    530ULL,  648ULL, 168ULL,     11ULL,      2592ULL,  2208ULL,
+    2208ULL, 26ULL,  2361864ULL, 8389652ULL, 25128ULL, 19ULL};
+constexpr std::array<uint64_t, 12> kFiveMoveActions = {
+    648ULL, 65ULL,  506ULL, 19ULL,   2568ULL, 26ULL,
+    666ULL, 168ULL, 18ULL,  2088ULL, 4228ULL, 9128905224ULL};
+
+template <size_t Size>
+Game replay_fixture(const std::string &name,
+                    const std::array<uint64_t, Size> &actions,
+                    uint16_t expected_legal_count,
+                    uint64_t expected_exact_hash) {
+  Game game(42);
+  for (size_t index = 0; index < actions.size(); ++index) {
+    if (!game.apply_action_code(actions[index], false)) {
+      throw std::runtime_error(name + " fixture action " +
+                               std::to_string(index) + " is not legal");
+    }
   }
+  if (game.legal_action_count() != expected_legal_count)
+    throw std::runtime_error(name + " fixture legal-action count mismatch");
+  if (game.board.hash() != expected_exact_hash)
+    throw std::runtime_error(name + " fixture exact-hash mismatch");
   return game;
 }
 
+Game make_fixture(const std::string &name) {
+  if (name == "five_moves")
+    return replay_fixture(name, kFiveMoveActions, 5, 13684725691275296037ULL);
+  if (name == "midgame_250")
+    return replay_fixture(name, kMidgame250Actions, 250,
+                          14707374328533802645ULL);
+  throw std::invalid_argument("unknown benchmark fixture: " + name);
+}
+
 Measurement run_shared(const Arguments &arguments, uint32_t threads,
-                       mcts_parallel::TreeBackend backend) {
+                       mcts_parallel::TreeBackend backend,
+                       const Game &fixture) {
   MCTSConfig config;
   config.use_determinization = arguments.determinization;
   config.num_determinizations = 1;
   config.use_dirichlet_noise = false;
   MCTS mcts(config);
-  Game root = make_midgame(arguments.seed);
+  const Game root = fixture.clone_light();
   mcts_parallel::ParallelSearchOptions options;
   options.num_threads = threads;
   options.batch_size = arguments.batch_size;
@@ -162,13 +191,13 @@ Measurement run_shared(const Arguments &arguments, uint32_t threads,
           result.ledger.evaluation_waiter};
 }
 
-Measurement run_legacy(const Arguments &arguments) {
+Measurement run_legacy(const Arguments &arguments, const Game &fixture) {
   MCTSConfig config;
   config.use_determinization = arguments.determinization;
   config.num_determinizations = 1;
   config.use_dirichlet_noise = false;
   MCTS mcts(config);
-  Game root = make_midgame(arguments.seed);
+  const Game root = fixture.clone_light();
   std::array<float, MAX_ACTIONS> policy{};
   for (size_t action = 0; action < MAX_ACTIONS; ++action)
     policy[action] = static_cast<float>(action + 1);
@@ -198,12 +227,13 @@ Measurement run_legacy(const Arguments &arguments) {
           static_cast<uint64_t>(mcts.tree_size()), requests, 0};
 }
 
-Measurement run_root(const Arguments &arguments, uint32_t threads) {
+Measurement run_root(const Arguments &arguments, uint32_t threads,
+                     const Game &fixture) {
   MCTSConfig config;
   config.use_determinization = arguments.determinization;
   config.num_determinizations = 1;
   config.use_dirichlet_noise = false;
-  Game root = make_midgame(arguments.seed);
+  const Game root = fixture.clone_light();
   mcts_parallel::ParallelSearchOptions options;
   options.batch_size = arguments.batch_size;
   options.deterministic_epoch_size = arguments.batch_size;
@@ -257,26 +287,28 @@ void measure(const Arguments &arguments, const std::string &backend,
 int main(int argc, char **argv) {
   try {
     const Arguments arguments = parse_arguments(argc, argv);
+    const Game fixture = make_fixture(arguments.fixture);
     std::cout << "backend,threads,simulations,batch,latency_us,determinization,"
                  "median_sims_per_s,mean_sims_per_s,p95_sims_per_s,tree_size,"
                  "inference_requests,waiters\n";
     for (uint32_t threads : arguments.threads) {
       if ((arguments.backend == "all" || arguments.backend == "legacy") &&
           threads == arguments.threads.front())
-        measure(arguments, "legacy", 1, [&] { return run_legacy(arguments); });
+        measure(arguments, "legacy", 1,
+                [&] { return run_legacy(arguments, fixture); });
       if (arguments.backend == "all" || arguments.backend == "coarse")
         measure(arguments, "coarse", threads, [&] {
           return run_shared(arguments, threads,
-                            mcts_parallel::TreeBackend::Coarse);
+                            mcts_parallel::TreeBackend::Coarse, fixture);
         });
       if (arguments.backend == "all" || arguments.backend == "sharded")
         measure(arguments, "sharded", threads, [&] {
           return run_shared(arguments, threads,
-                            mcts_parallel::TreeBackend::Sharded);
+                            mcts_parallel::TreeBackend::Sharded, fixture);
         });
       if (arguments.backend == "all" || arguments.backend == "root")
         measure(arguments, "root", threads,
-                [&] { return run_root(arguments, threads); });
+                [&] { return run_root(arguments, threads, fixture); });
     }
   } catch (const std::exception &error) {
     std::cerr << "benchmark_mcts_parallel: " << error.what() << '\n';

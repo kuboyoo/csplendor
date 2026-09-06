@@ -1,0 +1,7 @@
+workload,fixture,domain,backend,threads,simulations,batch,latency_us,retained_tree,rate_per_second,rss_kib,tree_size,root_visits_before,measured_root_visits,digest
+legacy_mcts,midgame_250,exact,legacy,1,65536,16,0,false,282911.606276835,101524,65521,0,65520,0ab37fc767a05581
+legacy_mcts,midgame_250,exact,legacy,1,65536,16,0,true,280216.817933907,107620,69616,4080,65536,21c91515d623a22f
+parallel_scheduler,reveal_heavy,exact,sharded,4,4096,16,250,false,116438.726110304,5992,25,0,4096,d136539fa0c2f1e3
+parallel_scheduler,reveal_heavy,exact,sharded,4,4096,16,250,true,113804.828553276,6012,25,256,4096,d136539fa0c2f1e3
+parallel_scheduler,hidden_reserve,observable,coarse,8,4096,64,1000,false,55027.578005757,12520,4011,0,4096,31ae52cdad197407
+parallel_scheduler,hidden_reserve,observable,coarse,8,4096,64,1000,true,55391.678739082,13316,4272,256,4096,31ae52cdad197407

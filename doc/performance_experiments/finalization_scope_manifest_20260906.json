@@ -1,0 +1,140 @@
+{
+  "BASE_MAIN_SHA": "f5ec6c545c9a2727ca708bc4c6822daf07a2c4dc",
+  "CANDIDATE_SHA": "9415de5766c356f9229e2bb2d22feb97d2c6b8bb",
+  "COMMON_ANCESTOR_SHA": "7835f642b23251d0cb91de180006084521c74aa6",
+  "F1": {
+    "ci95": null,
+    "rss": null,
+    "semantic_comparison": "not run; API/source divergence statically identified",
+    "separate_axes_on_resume": [
+      "main portable -> integrated candidate portable",
+      "same candidate portable -> opt-in LTO (solver only)",
+      "main -> LTO deployment direct measurement, never product of phase ratios"
+    ],
+    "speedup": null,
+    "status": "NOT_RUN_PENDING_SCOPE_APPROVAL"
+  },
+  "FINAL_CANDIDATE_SHA": null,
+  "SIDE_BRANCH_SHA": "595d58805a99ee0c48586d04ad23ab14b459750d",
+  "artifacts": [
+    {
+      "bytes": 70648,
+      "path": "doc/performance_experiments/raw/finalization_20260906/scope_inventory.json.gz",
+      "sha256": "6021da723f717a6031ab914a51355e172f9d0e6927c43108ddbdc501c92bead1"
+    }
+  ],
+  "diff_summary": {
+    "base_to_candidate_files": 2602,
+    "base_to_main_files": 79,
+    "by_top_level": {
+      ".github": 1,
+      "CMakeLists.txt": 1,
+      "README.md": 1,
+      "csplendor": 5,
+      "doc": 2488,
+      "scripts": 7,
+      "src": 32,
+      "tests": 25
+    },
+    "duplicate_r0_files": 58,
+    "main_vs_candidate_files": 2560,
+    "unintegrated_main_files": 21
+  },
+  "divergent_overlap_paths": [
+    "CMakeLists.txt",
+    "doc/api_ref.md",
+    "doc/refactoring_contracts.json",
+    "src/reveal_verified_solver.cpp",
+    "tests/CMakeLists.txt"
+  ],
+  "excluded_from_tested_candidate": "All nonduplicate side/main changes; not approved as final shipment exclusions.",
+  "failure_classification": {
+    "baseline_runtime_failure": "NOT_EVALUATED",
+    "candidate_runtime_failure": "NOT_EVALUATED",
+    "environment_unavailable": "Phase 6 limitations reused, no new execution",
+    "integration_gap": "STATICALLY_CONFIRMED_SCOPE_BLOCKER"
+  },
+  "identity_note": "Candidate SHA denotes unchanged engine source, not the later documentation commit. No integrated tree has been tested.",
+  "integration_contract": "Keep main semantics including hints BEFORE filtering in BOTH compact and reference paths; do not import only old vector-path hint patch.",
+  "integration_scope": [
+    ".github/workflows/ci.yml",
+    "CMakeLists.txt",
+    "csplendor/__init__.py",
+    "csplendor/mate_depth.py",
+    "csplendor/mate_frontier.py",
+    "csplendor/mate_session.py",
+    "doc/api_ref.md",
+    "doc/index.md",
+    "doc/information_state.md",
+    "doc/refactoring_contracts.json",
+    "src/bindings_rules.cpp",
+    "src/bindings_solvers.cpp",
+    "src/information_state.cpp",
+    "src/information_state.h",
+    "src/reveal_verified_solver.cpp",
+    "tests/CMakeLists.txt",
+    "tests/information_state_unit.cpp",
+    "tests/test_api_application_boundaries.py",
+    "tests/test_generate_mate_puzzles.py",
+    "tests/test_information_state.py",
+    "tests/test_reveal_verified_solver.py"
+  ],
+  "main_already_contains_side_branch": true,
+  "main_tree_equals_side_tree": true,
+  "next_step": "Obtain explicit approval to integrate current main in a new isolated integration worktree, then fix candidate identity and rerun affected correctness/F1 gates.",
+  "not_executed": [
+    "merge/cherry-pick",
+    "production code changes",
+    "new optimization",
+    "benchmark/build/full test reruns",
+    "F2/F3/F4",
+    "push/PR/publication"
+  ],
+  "phase6_manifest": {
+    "path": "doc/performance_experiments/phase6_evidence_20260906.json",
+    "sha256": "0ff423ee6841b2d58e69f2c67e0af6f4e1a2666099dec0491294e88eaf96a593"
+  },
+  "phase6_source_identity_matches": true,
+  "prior_adoption_decisions": "phase6_common_audit_20260906.md (unchanged; all listed milestone ancestors verified)",
+  "prior_artifact_audit": {
+    "count": 2162,
+    "rerun": false
+  },
+  "prior_limitations": [
+    "hardware perf N/A paranoid=4",
+    "Apple/Windows/cross-host runtime untested",
+    "real NN/selfplay quality untested",
+    "primary depth7 ends at node limit UNKNOWN, not a completed 7-move proof",
+    "PGO rejected; no full PGO Python/sanitizer adoption gate",
+    "original workspace separate mate-frontier fixes not integrated",
+    "4A remains deferred"
+  ],
+  "reason": "Latest main already contains necessary public API/frontier/compatibility changes absent from the optimization candidate; integration requires approval.",
+  "report_branch": "docs/finalization-scope-20260906",
+  "report_parent_commit": "9415de5766c356f9229e2bb2d22feb97d2c6b8bb",
+  "reused_selected_artifacts_count": 15,
+  "reused_tests": {
+    "asan_ubsan_suites": 8,
+    "native_lto": 42,
+    "native_portable": 42,
+    "python": "586 passed, 1 skipped, 4 deselected",
+    "python_performance": 4,
+    "strong_oracle_suites": 3,
+    "tsan_suites": 4,
+    "wheel": "built portable and explicitly loaded wheel extension; native/skip-build rejected"
+  },
+  "schema": "csplendor.finalization.scope.v1",
+  "source_digest_algorithm": "Phase 3D-1/6: SHA256(sorted file SHA256 + two spaces + relative path + LF), CMakeLists.txt and src/scripts/tests/csplendor .h/.cpp/.py/.txt/.json. Extra packaging hashes in raw.",
+  "source_digests": {
+    "latest_main": "1256c8b63288c41bb73b971e6852e112fe31ef6c4858660ccdee6aee8e6a930c",
+    "optimization_candidate": "763d84418fcedaebc363f79a7a1e2f61dbc26dffcb5c0ca16cbf0843e6567752",
+    "side_branch": "1256c8b63288c41bb73b971e6852e112fe31ef6c4858660ccdee6aee8e6a930c"
+  },
+  "status": "BLOCKED",
+  "stop_at": "F0",
+  "tree_digests_git": {
+    "latest_main": "6ac40b62470c5d6ca0ba50db98b224c9a5d417f5",
+    "optimization_candidate": "76aecac710d8b34111a6b537c9e7d53e27586f24",
+    "side_branch": "6ac40b62470c5d6ca0ba50db98b224c9a5d417f5"
+  }
+}

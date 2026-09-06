@@ -1,0 +1,33 @@
+{
+  "baseline_binary": {
+    "sha256": "647975ba50b0610064bed2d74724b4815d4e934e8005616c613f7ab76c97f3ba",
+    "size_bytes": 975088
+  },
+  "candidate_binary": {
+    "sha256": "55604c61a187ef8b58206ff3727f66e5bbc6ea8f544637b42f4bb0fa18c53320",
+    "size_bytes": 975088
+  },
+  "candidate_corpus_digest": "e78cd99badd4bdf33a86c8590d3c5750994a4ab79450c4b77b9b8052944482b0",
+  "corpus_digest": "e78cd99badd4bdf33a86c8590d3c5750994a4ab79450c4b77b9b8052944482b0",
+  "fixture_plies": 32,
+  "exact_hash_oracle_checks_per_binary": 3000,
+  "exact_hash_oracle_checks_total": 6000,
+  "hash_oracle_failures": 0,
+  "legal_actions": 23617,
+  "schema": "csplendor.engine_differential.v1",
+  "seed_offset": 0,
+  "seeds": 1000,
+  "semantic_equal": true,
+  "semantic_record_checks": 12000,
+  "semantic_record_failures": 0,
+  "setup_actions": 31998,
+  "states_checked": 1000,
+  "workloads": [
+    "legal_count",
+    "legal_codes",
+    "legal_actions",
+    "apply_exact_hash",
+    "apply_observable_hash",
+    "action_mask"
+  ]
+}

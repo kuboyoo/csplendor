@@ -1,0 +1,3465 @@
+{
+  "CI_code": {
+    "conclusion": "success",
+    "databaseId": 34017353409,
+    "event": "pull_request",
+    "headSha": "8b6dd8b48526dfa1eda8ccbc00a9355f5abc8cdb",
+    "jobs": [
+      {
+        "completedAt": "2026-09-06T06:47:47Z",
+        "conclusion": "success",
+        "databaseId": 101443377381,
+        "name": "native",
+        "startedAt": "2026-09-06T06:46:02Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure native tests",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build native tests",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run native tests",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 10,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 11,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377381"
+      },
+      {
+        "completedAt": "2026-09-06T06:47:59Z",
+        "conclusion": "success",
+        "databaseId": 101443377465,
+        "name": "package",
+        "startedAt": "2026-09-06T06:46:01Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build release artifacts",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Rebuild wheel from sdist",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install and smoke-test built wheel",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Upload package diagnostics",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 13,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 14,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 15,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377465"
+      },
+      {
+        "completedAt": "2026-09-06T06:53:04Z",
+        "conclusion": "success",
+        "databaseId": 101443377472,
+        "name": "Windows 2025 x64 portable",
+        "startedAt": "2026-09-06T06:46:02Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Verify runtime architecture",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install editable profile",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Compile Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Test Python bindings",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure native tests",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build native tests",
+            "number": 9,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run native tests",
+            "number": 10,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build portable wheel",
+            "number": 11,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Build portable macOS arm64 wheel",
+            "number": 12,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Verify portable macOS wheel architecture",
+            "number": 13,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install portable wheel",
+            "number": 14,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Smoke-test installed wheel",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 29,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 30,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 31,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377472"
+      },
+      {
+        "completedAt": "2026-09-06T06:48:01Z",
+        "conclusion": "success",
+        "databaseId": 101443377476,
+        "name": "test (3.9)",
+        "startedAt": "2026-09-06T06:46:02Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Compile Python",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Lint Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Test",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Test with coverage gate",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 16,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377476"
+      },
+      {
+        "completedAt": "2026-09-06T06:50:17Z",
+        "conclusion": "success",
+        "databaseId": 101443377477,
+        "name": "Ubuntu 24.04 arm64 portable",
+        "startedAt": "2026-09-06T06:46:03Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Verify runtime architecture",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install editable profile",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Compile Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Test Python bindings",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure native tests",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build native tests",
+            "number": 9,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run native tests",
+            "number": 10,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build portable wheel",
+            "number": 11,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Build portable macOS arm64 wheel",
+            "number": 12,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Verify portable macOS wheel architecture",
+            "number": 13,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install portable wheel",
+            "number": 14,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Smoke-test installed wheel",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 29,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 30,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 31,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377477"
+      },
+      {
+        "completedAt": "2026-09-06T06:47:59Z",
+        "conclusion": "success",
+        "databaseId": 101443377483,
+        "name": "cpp-coverage",
+        "startedAt": "2026-09-06T06:46:01Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install coverage reporter",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure instrumented native tests",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build instrumented native tests",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run instrumented native tests",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Create report-only C++ coverage",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Upload C++ coverage report",
+            "number": 9,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 17,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 18,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 19,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377483"
+      },
+      {
+        "completedAt": "2026-09-06T06:48:52Z",
+        "conclusion": "success",
+        "databaseId": 101443377486,
+        "name": "sanitizer (thread)",
+        "startedAt": "2026-09-06T06:46:01Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Record sanitizer metadata",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure instrumented native tests",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build instrumented native tests",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "ThreadSanitizer tests",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Address/UndefinedBehaviorSanitizer tests",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Upload sanitizer diagnostics",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 16,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377486"
+      },
+      {
+        "completedAt": "2026-09-06T06:47:51Z",
+        "conclusion": "success",
+        "databaseId": 101443377489,
+        "name": "test (3.10)",
+        "startedAt": "2026-09-06T06:46:01Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Compile Python",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Lint Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Test",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Test with coverage gate",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 16,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377489"
+      },
+      {
+        "completedAt": "2026-09-06T06:50:51Z",
+        "conclusion": "success",
+        "databaseId": 101443377494,
+        "name": "macOS 15 arm64 portable",
+        "startedAt": "2026-09-06T06:46:05Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Verify runtime architecture",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install editable profile",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Compile Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Test Python bindings",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure native tests",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build native tests",
+            "number": 9,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run native tests",
+            "number": 10,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Build portable wheel",
+            "number": 11,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build portable macOS arm64 wheel",
+            "number": 12,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Verify portable macOS wheel architecture",
+            "number": 13,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install portable wheel",
+            "number": 14,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Smoke-test installed wheel",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 29,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 30,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 31,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377494"
+      },
+      {
+        "completedAt": "2026-09-06T06:48:47Z",
+        "conclusion": "success",
+        "databaseId": 101443377501,
+        "name": "macOS 15 arm64 native",
+        "startedAt": "2026-09-06T06:46:04Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Verify runtime architecture",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install editable profile",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Compile Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Test Python bindings",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure native tests",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build native tests",
+            "number": 9,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run native tests",
+            "number": 10,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Build portable wheel",
+            "number": 11,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Build portable macOS arm64 wheel",
+            "number": 12,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Verify portable macOS wheel architecture",
+            "number": 13,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Install portable wheel",
+            "number": 14,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Smoke-test installed wheel",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 29,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 30,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 31,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377501"
+      },
+      {
+        "completedAt": "2026-09-06T06:48:13Z",
+        "conclusion": "success",
+        "databaseId": 101443377514,
+        "name": "test (3.12)",
+        "startedAt": "2026-09-06T06:46:02Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Compile Python",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Lint Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Test",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Test with coverage gate",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 16,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377514"
+      },
+      {
+        "completedAt": "2026-09-06T06:46:58Z",
+        "conclusion": "success",
+        "databaseId": 101443377520,
+        "name": "strict-bindings (g++)",
+        "startedAt": "2026-09-06T06:46:01Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install binding build dependency",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure strict binding build",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build bindings without warnings",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 11,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 12,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 13,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377520"
+      },
+      {
+        "completedAt": "2026-09-06T06:48:03Z",
+        "conclusion": "success",
+        "databaseId": 101443377532,
+        "name": "test (3.8)",
+        "startedAt": "2026-09-06T06:46:01Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Compile Python",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Lint Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Test",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Test with coverage gate",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 16,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377532"
+      },
+      {
+        "completedAt": "2026-09-06T06:48:00Z",
+        "conclusion": "success",
+        "databaseId": 101443377544,
+        "name": "test (3.11)",
+        "startedAt": "2026-09-06T06:46:08Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Compile Python",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Lint Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Test",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Test with coverage gate",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 16,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377544"
+      },
+      {
+        "completedAt": "2026-09-06T06:49:10Z",
+        "conclusion": "success",
+        "databaseId": 101443377546,
+        "name": "sanitizer (address-undefined)",
+        "startedAt": "2026-09-06T06:46:01Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Record sanitizer metadata",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure instrumented native tests",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build instrumented native tests",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "ThreadSanitizer tests",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Address/UndefinedBehaviorSanitizer tests",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Upload sanitizer diagnostics",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 16,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377546"
+      },
+      {
+        "completedAt": "2026-09-06T06:47:11Z",
+        "conclusion": "success",
+        "databaseId": 101443377552,
+        "name": "strict-bindings (clang++)",
+        "startedAt": "2026-09-06T06:46:01Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install binding build dependency",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure strict binding build",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build bindings without warnings",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 11,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 12,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 13,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377552"
+      },
+      {
+        "completedAt": "2026-09-06T06:45:58Z",
+        "conclusion": "skipped",
+        "databaseId": 101443377849,
+        "name": "nightly-native-soak",
+        "startedAt": "2026-09-06T06:45:59Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409/job/101443377849"
+      }
+    ],
+    "status": "completed",
+    "url": "https://github.com/kuboyoo/csplendor/actions/runs/34017353409"
+  },
+  "CI_counts": {
+    "skipped": 1,
+    "success": 16
+  },
+  "CI_errors": {
+    "Ubuntu 24.04 arm64 portable": [],
+    "Windows 2025 x64 portable": [],
+    "cpp-coverage": [],
+    "macOS 15 arm64 native": [],
+    "macOS 15 arm64 portable": [],
+    "native": [],
+    "package": [],
+    "sanitizer (address-undefined)": [],
+    "sanitizer (thread)": [],
+    "strict-bindings (clang++)": [],
+    "strict-bindings (g++)": [],
+    "test (3.10)": [],
+    "test (3.11)": [],
+    "test (3.12)": [],
+    "test (3.8)": [],
+    "test (3.9)": []
+  },
+  "CI_steps": {
+    "Ubuntu 24.04 arm64 portable": {
+      "Build native tests": "success",
+      "Build portable macOS arm64 wheel": "skipped",
+      "Build portable wheel": "success",
+      "Compile Python": "success",
+      "Complete job": "success",
+      "Configure native tests": "success",
+      "Install editable profile": "success",
+      "Install portable wheel": "success",
+      "Post Run actions/checkout@v6": "success",
+      "Post Run actions/setup-python@v6": "success",
+      "Run actions/checkout@v6": "success",
+      "Run actions/setup-python@v6": "success",
+      "Run native tests": "success",
+      "Set up job": "success",
+      "Smoke-test installed wheel": "success",
+      "Test Python bindings": "success",
+      "Verify portable macOS wheel architecture": "skipped",
+      "Verify runtime architecture": "success"
+    },
+    "Windows 2025 x64 portable": {
+      "Build native tests": "success",
+      "Build portable macOS arm64 wheel": "skipped",
+      "Build portable wheel": "success",
+      "Compile Python": "success",
+      "Complete job": "success",
+      "Configure native tests": "success",
+      "Install editable profile": "success",
+      "Install portable wheel": "success",
+      "Post Run actions/checkout@v6": "success",
+      "Post Run actions/setup-python@v6": "success",
+      "Run actions/checkout@v6": "success",
+      "Run actions/setup-python@v6": "success",
+      "Run native tests": "success",
+      "Set up job": "success",
+      "Smoke-test installed wheel": "success",
+      "Test Python bindings": "success",
+      "Verify portable macOS wheel architecture": "skipped",
+      "Verify runtime architecture": "success"
+    },
+    "cpp-coverage": {
+      "Build instrumented native tests": "success",
+      "Complete job": "success",
+      "Configure instrumented native tests": "success",
+      "Create report-only C++ coverage": "success",
+      "Install coverage reporter": "success",
+      "Post Run actions/checkout@v6": "success",
+      "Post Run actions/setup-python@v6": "success",
+      "Run actions/checkout@v6": "success",
+      "Run actions/setup-python@v6": "success",
+      "Run instrumented native tests": "success",
+      "Set up job": "success",
+      "Upload C++ coverage report": "success"
+    },
+    "macOS 15 arm64 native": {
+      "Build native tests": "success",
+      "Build portable macOS arm64 wheel": "skipped",
+      "Build portable wheel": "skipped",
+      "Compile Python": "success",
+      "Complete job": "success",
+      "Configure native tests": "success",
+      "Install editable profile": "success",
+      "Install portable wheel": "skipped",
+      "Post Run actions/checkout@v6": "success",
+      "Post Run actions/setup-python@v6": "success",
+      "Run actions/checkout@v6": "success",
+      "Run actions/setup-python@v6": "success",
+      "Run native tests": "success",
+      "Set up job": "success",
+      "Smoke-test installed wheel": "skipped",
+      "Test Python bindings": "success",
+      "Verify portable macOS wheel architecture": "skipped",
+      "Verify runtime architecture": "success"
+    },
+    "macOS 15 arm64 portable": {
+      "Build native tests": "success",
+      "Build portable macOS arm64 wheel": "success",
+      "Build portable wheel": "skipped",
+      "Compile Python": "success",
+      "Complete job": "success",
+      "Configure native tests": "success",
+      "Install editable profile": "success",
+      "Install portable wheel": "success",
+      "Post Run actions/checkout@v6": "success",
+      "Post Run actions/setup-python@v6": "success",
+      "Run actions/checkout@v6": "success",
+      "Run actions/setup-python@v6": "success",
+      "Run native tests": "success",
+      "Set up job": "success",
+      "Smoke-test installed wheel": "success",
+      "Test Python bindings": "success",
+      "Verify portable macOS wheel architecture": "success",
+      "Verify runtime architecture": "success"
+    },
+    "native": {
+      "Build native tests": "success",
+      "Complete job": "success",
+      "Configure native tests": "success",
+      "Post Run actions/checkout@v6": "success",
+      "Run actions/checkout@v6": "success",
+      "Run native tests": "success",
+      "Set up job": "success"
+    },
+    "nightly-native-soak": {},
+    "package": {
+      "Build release artifacts": "success",
+      "Complete job": "success",
+      "Install and smoke-test built wheel": "success",
+      "Post Run actions/checkout@v6": "success",
+      "Post Run actions/setup-python@v6": "success",
+      "Rebuild wheel from sdist": "success",
+      "Run actions/checkout@v6": "success",
+      "Run actions/setup-python@v6": "success",
+      "Set up job": "success",
+      "Upload package diagnostics": "success"
+    },
+    "sanitizer (address-undefined)": {
+      "Address/UndefinedBehaviorSanitizer tests": "success",
+      "Build instrumented native tests": "success",
+      "Complete job": "success",
+      "Configure instrumented native tests": "success",
+      "Post Run actions/checkout@v6": "success",
+      "Record sanitizer metadata": "success",
+      "Run actions/checkout@v6": "success",
+      "Set up job": "success",
+      "ThreadSanitizer tests": "skipped",
+      "Upload sanitizer diagnostics": "success"
+    },
+    "sanitizer (thread)": {
+      "Address/UndefinedBehaviorSanitizer tests": "skipped",
+      "Build instrumented native tests": "success",
+      "Complete job": "success",
+      "Configure instrumented native tests": "success",
+      "Post Run actions/checkout@v6": "success",
+      "Record sanitizer metadata": "success",
+      "Run actions/checkout@v6": "success",
+      "Set up job": "success",
+      "ThreadSanitizer tests": "success",
+      "Upload sanitizer diagnostics": "success"
+    },
+    "strict-bindings (clang++)": {
+      "Build bindings without warnings": "success",
+      "Complete job": "success",
+      "Configure strict binding build": "success",
+      "Install binding build dependency": "success",
+      "Post Run actions/checkout@v6": "success",
+      "Post Run actions/setup-python@v6": "success",
+      "Run actions/checkout@v6": "success",
+      "Run actions/setup-python@v6": "success",
+      "Set up job": "success"
+    },
+    "strict-bindings (g++)": {
+      "Build bindings without warnings": "success",
+      "Complete job": "success",
+      "Configure strict binding build": "success",
+      "Install binding build dependency": "success",
+      "Post Run actions/checkout@v6": "success",
+      "Post Run actions/setup-python@v6": "success",
+      "Run actions/checkout@v6": "success",
+      "Run actions/setup-python@v6": "success",
+      "Set up job": "success"
+    },
+    "test (3.10)": {
+      "Compile Python": "success",
+      "Complete job": "success",
+      "Install": "success",
+      "Lint Python": "success",
+      "Post Run actions/checkout@v6": "success",
+      "Post Run actions/setup-python@v6": "success",
+      "Run actions/checkout@v6": "success",
+      "Run actions/setup-python@v6": "success",
+      "Set up job": "success",
+      "Test": "success",
+      "Test with coverage gate": "skipped"
+    },
+    "test (3.11)": {
+      "Compile Python": "success",
+      "Complete job": "success",
+      "Install": "success",
+      "Lint Python": "success",
+      "Post Run actions/checkout@v6": "success",
+      "Post Run actions/setup-python@v6": "success",
+      "Run actions/checkout@v6": "success",
+      "Run actions/setup-python@v6": "success",
+      "Set up job": "success",
+      "Test": "success",
+      "Test with coverage gate": "skipped"
+    },
+    "test (3.12)": {
+      "Compile Python": "success",
+      "Complete job": "success",
+      "Install": "success",
+      "Lint Python": "success",
+      "Post Run actions/checkout@v6": "success",
+      "Post Run actions/setup-python@v6": "success",
+      "Run actions/checkout@v6": "success",
+      "Run actions/setup-python@v6": "success",
+      "Set up job": "success",
+      "Test": "skipped",
+      "Test with coverage gate": "success"
+    },
+    "test (3.8)": {
+      "Compile Python": "success",
+      "Complete job": "success",
+      "Install": "success",
+      "Lint Python": "success",
+      "Post Run actions/checkout@v6": "success",
+      "Post Run actions/setup-python@v6": "success",
+      "Run actions/checkout@v6": "success",
+      "Run actions/setup-python@v6": "success",
+      "Set up job": "success",
+      "Test": "success",
+      "Test with coverage gate": "skipped"
+    },
+    "test (3.9)": {
+      "Compile Python": "success",
+      "Complete job": "success",
+      "Install": "success",
+      "Lint Python": "success",
+      "Post Run actions/checkout@v6": "success",
+      "Post Run actions/setup-python@v6": "success",
+      "Run actions/checkout@v6": "success",
+      "Run actions/setup-python@v6": "success",
+      "Set up job": "success",
+      "Test": "success",
+      "Test with coverage gate": "skipped"
+    }
+  },
+  "CI_summaries": {
+    "Ubuntu 24.04 arm64 portable": [
+      "2026-09-06T06:47:50.3545045Z 636 passed, 2 skipped, 4 deselected in 46.56s",
+      "2026-09-06T06:49:32.9759292Z 100% tests passed, 0 tests failed out of 44"
+    ],
+    "Windows 2025 x64 portable": [
+      "2026-09-06T06:49:25.1525598Z 625 passed, 13 skipped, 4 deselected in 66.56s (0:01:06)",
+      "2026-09-06T06:51:40.5868960Z 100% tests passed out of 44"
+    ],
+    "cpp-coverage": [
+      "2026-09-06T06:47:40.1363427Z 100% tests passed, 0 tests failed out of 44"
+    ],
+    "macOS 15 arm64 native": [
+      "2026-09-06T06:47:30.6698580Z 635 passed, 3 skipped, 4 deselected in 32.66s",
+      "2026-09-06T06:48:43.7594770Z 100% tests passed out of 44"
+    ],
+    "macOS 15 arm64 portable": [
+      "2026-09-06T06:48:09.4808210Z 635 passed, 3 skipped, 4 deselected in 44.77s",
+      "2026-09-06T06:49:54.1386800Z 100% tests passed out of 44"
+    ],
+    "native": [
+      "2026-09-06T06:47:45.4380843Z 100% tests passed, 0 tests failed out of 44"
+    ],
+    "package": [],
+    "sanitizer (address-undefined)": [
+      "2026-09-06T06:49:07.2806206Z 100% tests passed, 0 tests failed out of 44"
+    ],
+    "sanitizer (thread)": [
+      "2026-09-06T06:48:49.1590981Z 100% tests passed, 0 tests failed out of 44"
+    ],
+    "strict-bindings (clang++)": [],
+    "strict-bindings (g++)": [],
+    "test (3.10)": [
+      "2026-09-06T06:47:49.4217120Z 636 passed, 2 skipped, 4 deselected in 48.04s"
+    ],
+    "test (3.11)": [
+      "2026-09-06T06:47:57.5446227Z 636 passed, 2 skipped, 4 deselected in 47.30s"
+    ],
+    "test (3.12)": [
+      "2026-09-06T06:48:10.5622523Z Required test coverage of 50% reached. Total coverage: 58.89%",
+      "2026-09-06T06:48:10.5623115Z 636 passed, 2 skipped, 4 deselected in 64.58s (0:01:04)"
+    ],
+    "test (3.8)": [
+      "2026-09-06T06:48:00.1420470Z 636 passed, 2 skipped, 4 deselected in 52.33s"
+    ],
+    "test (3.9)": [
+      "2026-09-06T06:47:58.7020753Z 636 passed, 2 skipped, 4 deselected in 47.77s"
+    ]
+  },
+  "F1_F2_extension_byte_identical": false,
+  "F1_code": "b202e6a0cbb2eded9bc2ee5e59f750428e73ca49",
+  "all_applicable_checkout_head_base_test_merge_verified": true,
+  "artifacts": [
+    {
+      "bytes": 201,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/applicable_rules.json.gz",
+      "sha256": "31fd334935a329e8209ed1a0a8c566adf34bd7448f515b64d63cf6c5e0923acc"
+    },
+    {
+      "bytes": 322,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/binary_comparison.json.gz",
+      "sha256": "273657b0ed941c6c183b5463926a9a9d40610641419303e835a4fbdf12eaddaa"
+    },
+    {
+      "bytes": 325,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/branch_rules.json.gz",
+      "sha256": "99819ab91f86ac5cded76a06ee97b7e431863ab4e3045ca6d119b6f832d2991f"
+    },
+    {
+      "bytes": 1567,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/build_asan.json.gz",
+      "sha256": "5d12ab765998dfd0f4dc46c836f83905facbf9718b7c9db6f861f61cca69595e"
+    },
+    {
+      "bytes": 1708,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/build_clang.json.gz",
+      "sha256": "6aea1105e9038bf2d655ef4bdc98fab54dc57177ded2e22e661440288bb41e1b"
+    },
+    {
+      "bytes": 1571,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/build_gcc13.json.gz",
+      "sha256": "af13ea73b5433a125a18acbef65fcb8016d66207ce53fe6eeb918d64559c6a35"
+    },
+    {
+      "bytes": 495,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/build_guard.json.gz",
+      "sha256": "308cb71ec895cb4b1e31e9b4b4590111ec34a2ec3a310630beff6048949cfeaa"
+    },
+    {
+      "bytes": 555,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/build_perf.json.gz",
+      "sha256": "1dec93be7b03b40a5fde429d91a8288c0ea1c9cb603c61cdc20a989ec2f82266"
+    },
+    {
+      "bytes": 652,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/build_tools_final.json.gz",
+      "sha256": "3be7f16c1e2f3a4c6f6c38bb93290afd3cd0ae89c32406256cd5d0cdf1b9d5e1"
+    },
+    {
+      "bytes": 1593,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/build_tsan.json.gz",
+      "sha256": "cad31a7011ba332b160fd3922032e9bcea51445fba01d9d60b799f8886969211"
+    },
+    {
+      "bytes": 250,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/clang_comparators_final.json.gz",
+      "sha256": "bdbfdc6b8d890ab85384ebdbe534c4fbdcbb4c74d4a205c597875a6eed335435"
+    },
+    {
+      "bytes": 251,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/clang_comparators_probe.json.gz",
+      "sha256": "d50228ccfcf180a7f831ad75f51a96dfed35f88aec51bea3823b864b92f11a37"
+    },
+    {
+      "bytes": 2327,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/clean_wheel_build.json.gz",
+      "sha256": "01541e01b5229455b7c16c87800a94b6f6a61226f62fcd095056888690c7d1ec"
+    },
+    {
+      "bytes": 282,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cleanup_v3.json.gz",
+      "sha256": "4ab3e40915dd33dce19b5d6907db7bfc843339c35aa279b130030b4a3ba11fd7"
+    },
+    {
+      "bytes": 194,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/compile_final.json.gz",
+      "sha256": "509215b82e70a1241fcbfa9fd21c90e9362c6d269cede4f0ab8598584caac531"
+    },
+    {
+      "bytes": 568,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/configure_asan.json.gz",
+      "sha256": "d80a1841175f06c372d7320b1c2fdfc3c253f8a3628cb669d4afd017bbafccee"
+    },
+    {
+      "bytes": 812,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/configure_clang.json.gz",
+      "sha256": "c2e89f041b2bf0263f9e4190ca6f7311ae60f4bcc759c3b58cda848824b78f63"
+    },
+    {
+      "bytes": 535,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/configure_gcc13.json.gz",
+      "sha256": "ea2493b1f79b72ae06d8f7a0514281dbd061b36cb63867169ee58177eca38721"
+    },
+    {
+      "bytes": 661,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/configure_guard.json.gz",
+      "sha256": "5266de83110f75b61722c94e32b10a795cbba63184477cce847c40f3e7952888"
+    },
+    {
+      "bytes": 556,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/configure_perf.json.gz",
+      "sha256": "d2523d819b75704e601156d53cef005526b0a50ce0ba4937b28c2ba06877646b"
+    },
+    {
+      "bytes": 561,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/configure_tsan.json.gz",
+      "sha256": "69d5378492f5955a9da8447cd19a0f0b8b977569c73f89dfe3c31c2c60d5ca01"
+    },
+    {
+      "bytes": 215,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/create_build_venv.json.gz",
+      "sha256": "d275d821496dac1e0c32938954e12893101f31fc714fc1ff8ea86890f303757f"
+    },
+    {
+      "bytes": 372,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/create_clean_source.json.gz",
+      "sha256": "182c73a50b3f4b03f0a0b824a122d05da5ece83452585e7e6f454a541991ae31"
+    },
+    {
+      "bytes": 229,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/create_test_venv.json.gz",
+      "sha256": "ec14fc350fe268e468d924163add3eabb55f25378d4a0fdaf3d9f61187473662"
+    },
+    {
+      "bytes": 212,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/create_wheel_venv.json.gz",
+      "sha256": "ff05b561eded40f3c290f9d3ea2fad33286c611e7740047fbb63615f60ce632a"
+    },
+    {
+      "bytes": 8669,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_arm64.json.gz",
+      "sha256": "3f24b59ee8830db3a2b32f8836f3d7a8c78252121e660b5b626bce6a3580c359"
+    },
+    {
+      "bytes": 1703,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_ci.json.gz",
+      "sha256": "bfe92e260d1baec8026d41e7018d118056469d8d044677751d2d7ac70f5dc28d"
+    },
+    {
+      "bytes": 19284,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_job_101440957960.json.gz",
+      "sha256": "c17123193908c2fe552c3a5c2fcacc53d7c7ea8fe4afc0995c77370ac09ab1ee"
+    },
+    {
+      "bytes": 16355,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_job_101440958009.json.gz",
+      "sha256": "11f9dbbfb8d2478c0a0ec8eca300b396ec05ddcf5b5f6d75913dd1e5e85e46cc"
+    },
+    {
+      "bytes": 10811,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_job_101440958011.json.gz",
+      "sha256": "41689d5059a7d9976619a369948250c29f56c6cdd941b289553f51f4fe85dfd9"
+    },
+    {
+      "bytes": 7016,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_job_101440958030.json.gz",
+      "sha256": "874642f3c199293af6f451ca47bb45fb0f67be0b3ff63b5fbfc8208ab02b30a4"
+    },
+    {
+      "bytes": 8376,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_job_101440958037.json.gz",
+      "sha256": "16428213c74ebff3d2b3986496ae7854d759b8afa4b239f09f7e2d1af3e48f49"
+    },
+    {
+      "bytes": 8803,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_job_101440958038.json.gz",
+      "sha256": "97735203121ef999a39ff1197c05ddaf8412f5c092fcbb4445be295196821ca2"
+    },
+    {
+      "bytes": 10271,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_job_101440958041.json.gz",
+      "sha256": "39fac5ebe26b826805ddbe1ea996d459f0d280ec531217cdefe2c0a6ba27eee5"
+    },
+    {
+      "bytes": 5333,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_job_101440958043.json.gz",
+      "sha256": "c221497268f57ac86aa772c1e3803536a4a01e93fcce67bf4d4118b7c36eee17"
+    },
+    {
+      "bytes": 7400,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_job_101440958044.json.gz",
+      "sha256": "ccc96d149367a31c2c6511e5b5de05fddd1582757f0a37915ee6325d80038787"
+    },
+    {
+      "bytes": 7578,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_job_101440958048.json.gz",
+      "sha256": "e593603472fd846052d2d65a828c29eefe451aa97160f07a73f1643299566837"
+    },
+    {
+      "bytes": 10894,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_job_101440958054.json.gz",
+      "sha256": "2c5e4caf68a4a2ddff561649750cf9ada6417c1cd898c863e1009b1a4b8a3b3b"
+    },
+    {
+      "bytes": 13610,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_job_101440958060.json.gz",
+      "sha256": "51272332787161b0d2e69a76e5d324fc0d65f7b06cd7fd3b2319fc0e96a09056"
+    },
+    {
+      "bytes": 5355,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_job_101440958064.json.gz",
+      "sha256": "347fe5f872a6f293a580d27319deeff5a6ebd15afbc44a04915b952dffed4a69"
+    },
+    {
+      "bytes": 6897,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_job_101440958078.json.gz",
+      "sha256": "4af71ba55e268ab53d68fd80abee3af30a749848033a3bea59603fbcf8cd8e69"
+    },
+    {
+      "bytes": 8671,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_job_101440958095.json.gz",
+      "sha256": "4daa9022255f2306db8b20a50a55b222e9fdebb0f5afd46d509b4ef3a5f8a392"
+    },
+    {
+      "bytes": 6794,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_job_101440958138.json.gz",
+      "sha256": "2795e4057fd3069c0f1fdf5e2d84b70fe1961bedd8cb702b22a3c62a15cc53ab"
+    },
+    {
+      "bytes": 10894,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_mac_native.json.gz",
+      "sha256": "1ae645d2ce93118c5fa2a3b305e7a9a32b99006c95e899a8a8421c8c8dfda042"
+    },
+    {
+      "bytes": 10812,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_mac_portable.json.gz",
+      "sha256": "f2b6dc63173bf8ad122bc863fb06fba97823e9147b95c338f6d4e3af2609ad2d"
+    },
+    {
+      "bytes": 364,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_pr.json.gz",
+      "sha256": "f2e5656ebff93e1e5c040c1b138359f2a5622f98d9a0579b71a4b3b297583f38"
+    },
+    {
+      "bytes": 7014,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle1_thread.json.gz",
+      "sha256": "06f3a220d2c30196d32c3de3c12520d6a6c9e8809bb0a8ade914efc7ae35b42a"
+    },
+    {
+      "bytes": 9916,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_arm_failed.json.gz",
+      "sha256": "3830f5a1e149cdb432f947b901e4595750b7a5c29eb05b02eb9140c15d6ca78b"
+    },
+    {
+      "bytes": 1718,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_ci.json.gz",
+      "sha256": "94d5be7c673af292b097d9241f3bb3f35327306bee7168bc798b52a3b905e1b7"
+    },
+    {
+      "bytes": 10264,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_job_101442187469.json.gz",
+      "sha256": "2e217f0053f32952d6468b5ad4ae86a2128d65811e91f4b31fec4605f0662c91"
+    },
+    {
+      "bytes": 10282,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_job_101442187639.json.gz",
+      "sha256": "e2da205032250629c1b11d9b169df626e01d02996766feb94967ef415a7cffaf"
+    },
+    {
+      "bytes": 5347,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_job_101442187663.json.gz",
+      "sha256": "e00588c755c921f9133276e047522f4f3c87dd3fcbc2d12f5f745cb4fb2ea03d"
+    },
+    {
+      "bytes": 18634,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_job_101442187678.json.gz",
+      "sha256": "00066bd17be3e8480c11d1004259ef2e2d511b6b0cdd84545900a1cffe14655a"
+    },
+    {
+      "bytes": 6046,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_job_101442187689.json.gz",
+      "sha256": "46004c50d733c37b541fa347f0419da248bbf7be954a75dd36ce7c442a8d3644"
+    },
+    {
+      "bytes": 7558,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_job_101442187698.json.gz",
+      "sha256": "6f03d0e0055e055954ac2129cfd88e9f40919a71c583c7a95142fc363b822efa"
+    },
+    {
+      "bytes": 5343,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_job_101442187699.json.gz",
+      "sha256": "79278303ab03b954df097cb67218722267de8e9278afdab2838edee4e44f2e21"
+    },
+    {
+      "bytes": 16464,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_job_101442187701.json.gz",
+      "sha256": "1acfdbcbeee1b88b3613887cfc23eb4d6d1d7e6a168db011ea51d92e744bf39e"
+    },
+    {
+      "bytes": 6815,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_job_101442187733.json.gz",
+      "sha256": "bf3fddcc7d08879185abc041eae37a3c7ba7c97183dcd26425cda95f5b383cfb"
+    },
+    {
+      "bytes": 13906,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_job_101442187734.json.gz",
+      "sha256": "7db75a10dfe647c6e23c2ed656d5e3c6a250f246ebac5eb2895651de1eb9588f"
+    },
+    {
+      "bytes": 9918,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_job_101442187743.json.gz",
+      "sha256": "1bed171a18c16cd2aacbfc99eb63f6c4cc979ff96edb56e9bf47b25ea60f1a1b"
+    },
+    {
+      "bytes": 13368,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_job_101442187759.json.gz",
+      "sha256": "94da3887da3e463649f0bc30bb93c1c0a8b8385c5689477de8b550b9bf2b2f54"
+    },
+    {
+      "bytes": 8341,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_job_101442187770.json.gz",
+      "sha256": "7adee28e1dddd413887e29f6a3052bb146da2f89d945f504b0a2a0757a606be0"
+    },
+    {
+      "bytes": 12055,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_job_101442187791.json.gz",
+      "sha256": "4883989ef2ef606f45570b4da1a37b0d19b3e4df88aa02c178d1b1c8355b8f58"
+    },
+    {
+      "bytes": 8413,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_job_101442187794.json.gz",
+      "sha256": "64bd31e97952cd68659a147e7112b2fb1928ac917c26a94afff9eabf11373e3f"
+    },
+    {
+      "bytes": 7417,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_job_101442187826.json.gz",
+      "sha256": "515228d32c33bd468064282e1077e88a2e644b1424f55718936d69f73c829e3f"
+    },
+    {
+      "bytes": 6047,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_native_failed.json.gz",
+      "sha256": "aa6ddbf5ca1cb88e92dab3e42ee487f0713efac365957e07dd81e06ff74ccb36"
+    },
+    {
+      "bytes": 365,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_pr.json.gz",
+      "sha256": "55ab1e6287b283fc7144ae42d1a0240acab918290b237eb62f0010f1504aa673"
+    },
+    {
+      "bytes": 8413,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle2_py310_failed.json.gz",
+      "sha256": "66dfd2358b94dc458eaa87a59bd8e2b2f7319741dd9713b15c5d1f61e00e690f"
+    },
+    {
+      "bytes": 1665,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_ci.json.gz",
+      "sha256": "745467ca27b1e4079db7664977a302d251f5fabab37c5108bee52a79b2e66e14"
+    },
+    {
+      "bytes": 8817,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_job_101443377381.json.gz",
+      "sha256": "175a006611a592b96c3c6d92035ad2d62cd15edb6d45e71d738742d95b123bb9"
+    },
+    {
+      "bytes": 16445,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_job_101443377465.json.gz",
+      "sha256": "0a6ccfbc2ad98c0870b890d565b6751ff1edab43b6b5fc8b564bfbad4c8de68f"
+    },
+    {
+      "bytes": 13713,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_job_101443377472.json.gz",
+      "sha256": "311987215583d53c0b434911a9497a4073c87bd833bae8baead31de74dbd8679"
+    },
+    {
+      "bytes": 7557,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_job_101443377476.json.gz",
+      "sha256": "a7b6cfd6a32523a2195fb8a797643180955d56f7d7d5f8a9b1122121e6afc92d"
+    },
+    {
+      "bytes": 13702,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_job_101443377477.json.gz",
+      "sha256": "8da42d50d9a4443890b833fdf2195d82e8c50cee048c73dd5505e19efe5dad29"
+    },
+    {
+      "bytes": 18863,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_job_101443377483.json.gz",
+      "sha256": "f6281e0b38a6b3108d4ae8033ef2b1ed5c1ba6dac4ff673b1875b4647a2524ac"
+    },
+    {
+      "bytes": 10215,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_job_101443377486.json.gz",
+      "sha256": "01f08b0bd5a5be928be430fc909d270af2e19f649726d5ed111fb7628591c53c"
+    },
+    {
+      "bytes": 6905,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_job_101443377489.json.gz",
+      "sha256": "b60ce395f86eabf6541a0cf92f29015eb34c64cc04c461cd9cc0fc08c48c0cae"
+    },
+    {
+      "bytes": 13411,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_job_101443377494.json.gz",
+      "sha256": "f12b4b43d24804df18c7a3f8be4dc2a17c4019fe8643727ee2c6da236f720abe"
+    },
+    {
+      "bytes": 12062,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_job_101443377501.json.gz",
+      "sha256": "ab32c5b05826a925b63a0e39159db2fd4a52cbbd4b5860cab9d22ae68f5bbda6"
+    },
+    {
+      "bytes": 8395,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_job_101443377514.json.gz",
+      "sha256": "253b15d16c172301fcc596f680f13dc3bd44da17a82219449abb1a4914aa429c"
+    },
+    {
+      "bytes": 5354,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_job_101443377520.json.gz",
+      "sha256": "e167d2030a364beb1ac32fae852b3e6963f336a33edbaf694ad8ad47824ca510"
+    },
+    {
+      "bytes": 7392,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_job_101443377532.json.gz",
+      "sha256": "d677f80058dca5a194149f7b5893abc2a1831958f725fb395a20eb17c6949b63"
+    },
+    {
+      "bytes": 6800,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_job_101443377544.json.gz",
+      "sha256": "3e68545790dbd8fb2be3b95da204400d7106df77b3f6eb52b32ac626187d9959"
+    },
+    {
+      "bytes": 10260,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_job_101443377546.json.gz",
+      "sha256": "02ecb3a5c7fc0814d6054bba6d14f75edc982e3540fe4da6f090d597498f501f"
+    },
+    {
+      "bytes": 5387,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_job_101443377552.json.gz",
+      "sha256": "26a7361bcd6873953e514eaeaaeb6a3bb2ad2dd8943aef8c2bcab5772ee15e4b"
+    },
+    {
+      "bytes": 365,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/cycle3_pr.json.gz",
+      "sha256": "d609d0483ef9d4a7f15c42afaadac43bcaaa953358d48160a3d5e191d4d4e85a"
+    },
+    {
+      "bytes": 373,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/final_clean_source.json.gz",
+      "sha256": "f1989687126e08128720e03ec25fa7a37e8053613344a9c52cc1040cf67c8c34"
+    },
+    {
+      "bytes": 2731,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/final_wheel_acceptance.json.gz",
+      "sha256": "f68a38305d1b53260d133047d387a9f22d3a91eca5db46d19303c1bf863036c3"
+    },
+    {
+      "bytes": 2339,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/final_wheel_build.json.gz",
+      "sha256": "1e239d2411dd127aa83cb17f7ed3380dd2c7b8475a05e94d3cda25cd5dbe1035"
+    },
+    {
+      "bytes": 495,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/final_wheel_install.json.gz",
+      "sha256": "9eae43e579c314461e75de9029aa6261ff9ac2f2e4877b5ae357d31865b1ca2d"
+    },
+    {
+      "bytes": 215,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/final_wheel_venv.json.gz",
+      "sha256": "1fcad36e42c485192e546698f0e258278b4e6cddffc814d9e05fff1936a7e361"
+    },
+    {
+      "bytes": 247,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/gcc_comparators_final.json.gz",
+      "sha256": "328ed07876f1dee4a743b1325de48040dc0e08547b2fff59b9d21cc87e52f116"
+    },
+    {
+      "bytes": 876,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/gcc_comparators_probe.json.gz",
+      "sha256": "aafbd45836ea21e59f9bc7fdecaca7928037ec197a6c06dd30d9e82ab04bfc83"
+    },
+    {
+      "bytes": 14276,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/guard_exact.json.gz",
+      "sha256": "6df5fedd681e553f470d12d7820c0b895c35ff3e737e0ddfbe38283082629c1b"
+    },
+    {
+      "bytes": 13322,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/guard_visible.json.gz",
+      "sha256": "9163a91054c56506dbbe5a9527db8764f830596c7c2e705d756d7351e7d41988"
+    },
+    {
+      "bytes": 472,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/hook_asan_v3.json.gz",
+      "sha256": "f1ed8c6aadaee2cf98669845f358d17604702039c5aa4c3bc611d75b102bd857"
+    },
+    {
+      "bytes": 328,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/hook_asan_v3_build.json.gz",
+      "sha256": "341a52719ac34ccd07a32f1bed70fc138188b103b8f6926d34d97227f834dd63"
+    },
+    {
+      "bytes": 273,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/hook_gcc_v3.json.gz",
+      "sha256": "fae91c591a36d4da4223af3f991aa764d5fdfb5e2d916fc6b8821f9f93580daf"
+    },
+    {
+      "bytes": 457,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/hook_tsan_v3.json.gz",
+      "sha256": "6e510b557fabe5db1d5babb0c20482351e19292bf5c0c77d35bd17ec2c13a11e"
+    },
+    {
+      "bytes": 328,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/hook_tsan_v3_build.json.gz",
+      "sha256": "d07534839a01111f322a6d56b42af5664b64ea262fcefb3bf8e6798760d65b07"
+    },
+    {
+      "bytes": 846,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/install_build_tools.json.gz",
+      "sha256": "caa615f9bf33da3f212bd2e0292787e79614baf0ed53824bc68ba0adb3d48d52"
+    },
+    {
+      "bytes": 432,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/install_test_wheel.json.gz",
+      "sha256": "686995e68c06e8d37d2f82d67ee700ecfaf6ca7c4d4d0d679414368cf1400895"
+    },
+    {
+      "bytes": 491,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/install_wheel.json.gz",
+      "sha256": "3b9d522fb54bcdf7a63b24cefcdca612431455c93fe0c0b06de3aed577cccf1c"
+    },
+    {
+      "bytes": 253,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/lint.json.gz",
+      "sha256": "f5ed1f6aea9fdb30f147a4eb13c5b6944326150e109262d0237f41ca1351d8b5"
+    },
+    {
+      "bytes": 255,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/lint_final.json.gz",
+      "sha256": "79c6ac5aa0ed6a136c4d8b9c397a5c1ec09e035bd1de32a879b501761c8f9608"
+    },
+    {
+      "bytes": 254,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/lint_v2.json.gz",
+      "sha256": "3c9b01bf13fdd522b421517128a1df5026d3e5359c99f18e08950a7b5d1f18b0"
+    },
+    {
+      "bytes": 254,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/lint_v3.json.gz",
+      "sha256": "9bb6226f03fc5f327fc094f206d80e4512e777eed8a7e18a8d721c99d485fb78"
+    },
+    {
+      "bytes": 1769,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/native_asan.json.gz",
+      "sha256": "e3cc7b1d36ffc4d9e056ee027c026d4939092af16dbd56a9c60731aa7c26e9b0"
+    },
+    {
+      "bytes": 1653,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/native_clang.json.gz",
+      "sha256": "f228e685dba2e99ae587c663cb3a91865c960df67a7fb5fc156a1ceecd3b70f5"
+    },
+    {
+      "bytes": 1643,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/native_gcc13.json.gz",
+      "sha256": "174d9c2ecbc06eac4fd84a8e3d395575e265b744815e0acf05584b4cd40fb561"
+    },
+    {
+      "bytes": 339,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/native_hook_asan.json.gz",
+      "sha256": "20951467ca5df02bbd7510d94ee17b7ff4f74b3734a62dad4681c86422085ec9"
+    },
+    {
+      "bytes": 338,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/native_hook_plain.json.gz",
+      "sha256": "a87a73fc5a92f758d7a7ba9b371720a46e452f44089bca4b1bfcb5c9bfd7ca15"
+    },
+    {
+      "bytes": 581,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/native_perf.json.gz",
+      "sha256": "718a6f21ffc83f8c3d5e868d820bfbf6cd4ee0ddb20d4af669c7803f3e68dae0"
+    },
+    {
+      "bytes": 1801,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/native_tsan_hook.json.gz",
+      "sha256": "10737c230a4b53d93bcfb5a1fab3edc474758e43accc99870d9541f9ca02d306"
+    },
+    {
+      "bytes": 1687,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/prior_ci.json.gz",
+      "sha256": "f799e33020138f425cddde65bd984801886b8731dbefbe4430a44bc35f1456da"
+    },
+    {
+      "bytes": 10721,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/prior_job_101437394787.json.gz",
+      "sha256": "60fe4e2e7f70deb161026840b0790902c39d91e6002ca8ce85bd9f926a721dd2"
+    },
+    {
+      "bytes": 8581,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/prior_job_101437394828.json.gz",
+      "sha256": "8e26f0a915e400f191d9c7d3ed220f403cd9cff6c65e7c8d3937ce438b522fb9"
+    },
+    {
+      "bytes": 6007,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/prior_job_101437394854.json.gz",
+      "sha256": "d3dddbca6970a3bee906c3b438623b8f36531dc6e988f07ee0ab9633e9f32caf"
+    },
+    {
+      "bytes": 6175,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/prior_job_101437394880.json.gz",
+      "sha256": "a746e6264cf3319afd2baca39607895208a939ec63e6abcf601e50789140b65d"
+    },
+    {
+      "bytes": 8547,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/prior_job_101437394900.json.gz",
+      "sha256": "6f80151048fb511023323c5f370c53c62e43fa801e4ecf508b7f06320127fd5a"
+    },
+    {
+      "bytes": 6178,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/prior_job_101437394907.json.gz",
+      "sha256": "adeb37bfceaf93feddd86e9a03abda12f8ad4add8373d8344ad7c8c5f8b504f0"
+    },
+    {
+      "bytes": 32852,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/provenance.json.gz",
+      "sha256": "a6fb7db4c74225a635037698014f51a7e4165f428d5645b449c9e749b552d737"
+    },
+    {
+      "bytes": 32893,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/provenance3.json.gz",
+      "sha256": "255c1e0eaab6b0f616bee916ec9e4731e973a02ae4ca9e20347af4a3ebe8e8d8"
+    },
+    {
+      "bytes": 279,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/push_cycle1.json.gz",
+      "sha256": "2eebf2881b6adbf583d763f51efddb9e7e3094573c478ea600806319b57bcdfc"
+    },
+    {
+      "bytes": 280,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/push_cycle2.json.gz",
+      "sha256": "bf790947045784f8b83ea0091582952b8f43a692729875d527d6fd2178767f63"
+    },
+    {
+      "bytes": 280,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/push_cycle3.json.gz",
+      "sha256": "1dcbaed7c588d66010206fa4e89eddd193793b8daca1636061d09bdc5497e6fb"
+    },
+    {
+      "bytes": 281,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/python_cleanup_v2.json.gz",
+      "sha256": "8022ec110693cd2ba95da815d77fc402880780248d8e60e8517821e3bae4bc8d"
+    },
+    {
+      "bytes": 1603,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/python_coverage_v2.json.gz",
+      "sha256": "da21c10634e91e82727040c6ef5135940789624ee89d2959f8fc7ea59dd19bd7"
+    },
+    {
+      "bytes": 799,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/python_coverage_v3.json.gz",
+      "sha256": "b17276282427dc926f1671886065712960c505f5aa16eb274c9ba4622fbd752b"
+    },
+    {
+      "bytes": 1599,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/python_full.json.gz",
+      "sha256": "3317df2cb6aa01bb73d0889a00bd6cb44dc8756119d2c60beb36d4fe4854e6a4"
+    },
+    {
+      "bytes": 539,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/python_full_v2.json.gz",
+      "sha256": "b86ea3ba004e3d055d3ec6be3bd1273a133a9592f70a79a5a900e10feed0413f"
+    },
+    {
+      "bytes": 539,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/python_full_v3.json.gz",
+      "sha256": "1eec39d51e375606164317053d11525e4acce99fdab0586df78e45ebfe95a869"
+    },
+    {
+      "bytes": 275,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/python_tools.json.gz",
+      "sha256": "838a36ecabb9d8125b805aa9c61d050f3722f27793cab8e33007d7a0b65bfe1c"
+    },
+    {
+      "bytes": 275,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/python_tools_final.json.gz",
+      "sha256": "8d31bc1942a7e8c1451af32dc32c0d4fc0305390fe388c67580b883282106091"
+    },
+    {
+      "bytes": 1021,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/rebuild_tsan_hook.json.gz",
+      "sha256": "893ae1fbdcfe5c837e0567fd6c91a5e7c561f735c2fd09f84e140750671beef1"
+    },
+    {
+      "bytes": 9386,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/runner_final_aa.json.gz",
+      "sha256": "8c9acf0c5b6995653f41cef0e9fc6b53aff6431adee142e54306fb9d62f33de1"
+    },
+    {
+      "bytes": 237,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/security_final.json.gz",
+      "sha256": "21d9bae187f8f51dce6a1430115171f3f32826adf456d5ea7240acc8ef911166"
+    },
+    {
+      "bytes": 235,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/security_lint.json.gz",
+      "sha256": "7beca992e8c9aaecb0f73bc0642133fb3035709519de5bbe1d83b84e4593984f"
+    },
+    {
+      "bytes": 31376,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/start.json.gz",
+      "sha256": "9e1174499ce5b46cd54171b5aa200f1a9ec237b8ddb70e5947860bf422f266ea"
+    },
+    {
+      "bytes": 485,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/test_hook_asan.json.gz",
+      "sha256": "bd915bf3a346ccc83a1358e3e79eaa1fd1946f1a7a6839bebcb6b775714e4fb6"
+    },
+    {
+      "bytes": 415,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/test_hook_plain.json.gz",
+      "sha256": "fd9484c304671ac7e47390473d40fda6c7e5a5663e44506db46e4071758d1cdc"
+    },
+    {
+      "bytes": 2732,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/wheel_cycle3_acceptance.json.gz",
+      "sha256": "c8d52c8cad65cf4a407f3fcbcd2062ce148899b42692a7e7658f2c6262ec4796"
+    },
+    {
+      "bytes": 2337,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/wheel_cycle3_build.json.gz",
+      "sha256": "7deda7e75cfbce9e6cb88b5be615e8d55a5a583efe801fa2b92fe86ed62e2e24"
+    },
+    {
+      "bytes": 499,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/wheel_cycle3_install.json.gz",
+      "sha256": "ba9162ddc5bc0a929f0242db4754f54a7eb38e32dfd9c9f458509156d8963a4f"
+    },
+    {
+      "bytes": 359,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/wheel_cycle3_source.json.gz",
+      "sha256": "94a0f176a3d25f90e4abb21d41e0ffc826867335ba57fbebe25277e757da7ce4"
+    },
+    {
+      "bytes": 219,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/wheel_cycle3_venv.json.gz",
+      "sha256": "e6fe0798c0dfca239b76d5a609219a60ffc04a0094899f1aa709e5f87c7f1360"
+    },
+    {
+      "bytes": 681,
+      "path": "doc/performance_experiments/raw/f4_ci_finish_20260906/wheel_member_parity.json.gz",
+      "sha256": "c85d92e2abe7c7390d9415aa612e2f74e88e178803e3d4f00737632d8ebd25a0"
+    }
+  ],
+  "branch": "review/f3-lint-correction-20260906",
+  "build_dependency_CI_unchanged": true,
+  "build_tools": {
+    "compiler": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n",
+    "python": "3.12.1 (main, Jan  9 2025, 22:10:40) [GCC 11.4.0]",
+    "tools": {
+      "cmake": "4.2.3",
+      "packaging": "26.3",
+      "pip": "23.2.1",
+      "pybind11": "3.0.1",
+      "setuptools": "75.8.0",
+      "wheel": "0.48.0"
+    }
+  },
+  "decision": "READY_FOR_REVIEW",
+  "final_CI_policy": "Record-only commit follows this code snapshot. Verify its head/test merge and publish final CI in PR body without recursive evidence commits.",
+  "fix_commits": [
+    "e4d1464c34dc3d137103a3576efe996ae9313168 Clang\u306e\u8a08\u6e2c\u5909\u6570\u3068hint\u6bd4\u8f03\u5668\u306e\u8b66\u544a\u3092\u4fee\u6b63",
+    "be9fcaa21bdeefbae8f54debd3bc6065f6f26dfe native\u30c6\u30b9\u30c8\u306e\u7e2e\u5c0f\u5909\u63db\u3092\u5024\u57df\u78ba\u8a8d\u4ed8\u304d\u3067\u660e\u793a",
+    "3c8921c06b47d48edd558c0c807890ab3f3485dc GNU time\u306e\u80fd\u529b\u5224\u5b9a\u3068\u30d7\u30ed\u30bb\u30b9\u56de\u53ce\u691c\u67fb\u3092\u5206\u96e2",
+    "c1a8cb5506dab2b8e885796cfba1bd58f5160b93 TSan\u306e\u5272\u5f53hook\u3067rollback\u306e\u7121\u5272\u5f53\u691c\u67fb\u3092\u7dad\u6301",
+    "cdba39779fbfa18a5756d14bf27fd2a5823ca764 \u7d42\u4e86\u6e08\u307f\u30d7\u30ed\u30bb\u30b9\u56de\u53ce\u3068proc\u6d88\u6ec5\u7af6\u5408\u3092\u6271\u3046",
+    "404ddeb48ca793e7f74559a893031a655984d058 \u5272\u5f53\u76e3\u8996\u306e\u967d\u6027\u5bfe\u7167\u3092\u6700\u9069\u5316\u4e0b\u3067\u3082\u660e\u793a\u7684\u306b\u5b9f\u884c",
+    "8b6dd8b48526dfa1eda8ccbc00a9355f5abc8cdb proc\u8aad\u53d6\u308a\u4e2d\u306eESRCH\u3082\u7d42\u4e86\u3068\u3057\u3066\u691c\u8a3c"
+  ],
+  "fixed_code_head": "8b6dd8b48526dfa1eda8ccbc00a9355f5abc8cdb",
+  "fixed_test_merge": "ff3994071ab3656a0cc860b41ea7c4a266c68ee3",
+  "guard_summary": {
+    "guard_exact": [
+      {
+        "B_over_A": {
+          "bootstrap_iterations": 10000,
+          "bootstrap_unit": "two_pair_crossover_block",
+          "crossover_block_bootstrap_ci95": [
+            0.9980825223292822,
+            1.0269283893381909
+          ],
+          "crossover_blocks": 11,
+          "median": 1.010302781021777,
+          "method": "two_pair_binary_slot_crossover",
+          "pair_raw": [
+            1.0210360042421016,
+            1.0328547793096972,
+            1.1132136271673703,
+            1.0010919749715863,
+            1.001114195664668,
+            1.0029157074187436,
+            1.0174529485891568,
+            1.0032028613762423,
+            0.9825705930249302,
+            0.9936505167456772,
+            1.021634850889632,
+            0.9999596746730793,
+            0.976104210548295,
+            0.9890585746403432,
+            1.1386344676211664,
+            1.0215052286535529,
+            0.9930917322855596,
+            1.0030983936262776,
+            0.9886846348557724,
+            1.0112291918598635,
+            0.9979114336137873,
+            1.035664170840562
+          ],
+          "raw": [
+            1.0269283893381909,
+            1.05566530140299,
+            1.002014546676832,
+            1.010302781021777,
+            0.9880950245286778,
+            1.0107391617674049,
+            0.9825600435522167,
+            1.0784809048843544,
+            0.9980825223292822,
+            0.999893376470445,
+            1.0166125699920987
+          ]
+        },
+        "absolute": {
+          "A_elapsed_ns": {
+            "median": 1129077452.0,
+            "p50": 1129077452.0,
+            "p95": 1344357612.55,
+            "raw": [
+              1069925726.0,
+              1344587054.0,
+              1346745825.0,
+              1038213929.0,
+              1043333611.0,
+              1046197301.0,
+              1339998225.0,
+              1333480628.0,
+              1301905402.0,
+              1319819095.0,
+              1333202578.0,
+              1331045265.0,
+              1300146808.0,
+              1307660514.0,
+              1181854724.0,
+              1054881582.0,
+              1029457389.0,
+              1033548946.0,
+              1031539376.0,
+              1042081479.0,
+              1037622896.0,
+              1076300180.0
+            ]
+          },
+          "A_native_rss_kib": {
+            "median": 49186.0,
+            "p50": 49186.0,
+            "p95": 49224.0,
+            "raw": [
+              49160.0,
+              49224.0,
+              49232.0,
+              49160.0,
+              49112.0,
+              49116.0,
+              49160.0,
+              49220.0,
+              49224.0,
+              49224.0,
+              49216.0,
+              49184.0,
+              49216.0,
+              49176.0,
+              49220.0,
+              49160.0,
+              49220.0,
+              49156.0,
+              49188.0,
+              49208.0,
+              49176.0,
+              49184.0
+            ]
+          },
+          "A_rate_per_second": {
+            "median": 887618.2563627983,
+            "p50": 887618.2563627983,
+            "p95": 969330.6976843686,
+            "raw": [
+              934644.3175439638,
+              743722.7638218804,
+              742530.6107780212,
+              963192.625399654,
+              958466.1985935005,
+              955842.6494162787,
+              746269.645245239,
+              749917.1559018703,
+              768104.9625140122,
+              757679.5969905255,
+              750073.5570884863,
+              751289.2508580465,
+              769143.9104006168,
+              764724.4749641496,
+              846127.6836255215,
+              947973.7034597311,
+              971385.518900773,
+              967540.0510736915,
+              969424.9422428253,
+              959617.8611288801,
+              963741.2627024375,
+              929108.8291000751
+            ]
+          },
+          "A_runner_rss_kib": {
+            "median": 54190.0,
+            "p50": 54190.0,
+            "p95": 54259.8,
+            "raw": [
+              54192.0,
+              54192.0,
+              54144.0,
+              54312.0,
+              54248.0,
+              54152.0,
+              54188.0,
+              54168.0,
+              54136.0,
+              54228.0,
+              54192.0,
+              54204.0,
+              54256.0,
+              54068.0,
+              54192.0,
+              54160.0,
+              54260.0,
+              54160.0,
+              54164.0,
+              54092.0,
+              54028.0,
+              54224.0
+            ]
+          },
+          "B_elapsed_ns": {
+            "median": 1045613837.0,
+            "p50": 1045613837.0,
+            "p95": 1331005160.4,
+            "raw": [
+              1047882466.0,
+              1301816171.0,
+              1209782015.0,
+              1037081462.0,
+              1042172427.0,
+              1043155764.0,
+              1317012474.0,
+              1329223310.0,
+              1324999355.0,
+              1328252814.0,
+              1304969752.0,
+              1331098942.0,
+              1331975412.0,
+              1322126462.0,
+              1037957973.0,
+              1032673698.0,
+              1036618628.0,
+              1030356496.0,
+              1043345208.0,
+              1030509688.0,
+              1039794576.0,
+              1039236666.0
+            ]
+          },
+          "B_native_rss_kib": {
+            "median": 49204.0,
+            "p50": 49204.0,
+            "p95": 49227.799999999996,
+            "raw": [
+              49224.0,
+              49168.0,
+              49124.0,
+              49176.0,
+              49228.0,
+              49224.0,
+              49228.0,
+              49112.0,
+              49216.0,
+              49172.0,
+              49216.0,
+              49176.0,
+              49208.0,
+              49144.0,
+              49208.0,
+              49180.0,
+              49140.0,
+              49220.0,
+              49068.0,
+              49204.0,
+              49204.0,
+              49208.0
+            ]
+          },
+          "B_rate_per_second": {
+            "median": 956380.5222070504,
+            "p50": 956380.5222070504,
+            "p95": 970291.9192289751,
+            "raw": [
+              954305.4993726749,
+              768157.6110948464,
+              826595.1945070038,
+              964244.4076394069,
+              959534.1174767043,
+              958629.6069203333,
+              759294.2509973524,
+              752319.03659589,
+              754717.3485227848,
+              752868.7230772921,
+              766301.2866523515,
+              751258.9548733936,
+              750764.6094596226,
+              756357.2992006267,
+              963430.1445844764,
+              968360.0947101879,
+              964674.9276822759,
+              970537.8710011065,
+              958455.545041426,
+              970393.594203648,
+              961728.425096151,
+              962244.7251105746
+            ]
+          },
+          "B_runner_rss_kib": {
+            "median": 54128.0,
+            "p50": 54128.0,
+            "p95": 54219.0,
+            "raw": [
+              54136.0,
+              54140.0,
+              54132.0,
+              54088.0,
+              54200.0,
+              54168.0,
+              54116.0,
+              54056.0,
+              54068.0,
+              54144.0,
+              54184.0,
+              54092.0,
+              54224.0,
+              54072.0,
+              54152.0,
+              54220.0,
+              54088.0,
+              54132.0,
+              54044.0,
+              54120.0,
+              54112.0,
+              54124.0
+            ]
+          }
+        },
+        "all_counters_identical": true,
+        "digest": "e5c83af438331d73",
+        "fixture": "hidden_reserve",
+        "workload": "exact_reveal"
+      }
+    ],
+    "guard_visible": [
+      {
+        "B_over_A": {
+          "bootstrap_iterations": 10000,
+          "bootstrap_unit": "two_pair_crossover_block",
+          "crossover_block_bootstrap_ci95": [
+            0.9972574761941512,
+            1.0444242362674563
+          ],
+          "crossover_blocks": 11,
+          "median": 1.0191556452859272,
+          "method": "two_pair_binary_slot_crossover",
+          "pair_raw": [
+            1.4644679143080557,
+            0.9753684656701392,
+            0.9814167335876677,
+            0.9822632007828395,
+            1.0150935591725694,
+            1.023233986594132,
+            1.0608523989678316,
+            1.0282504770354357,
+            1.0269284544945099,
+            1.1024996427344518,
+            1.0464629450680443,
+            0.9844370815348414,
+            0.9987435106312608,
+            1.0005745856365542,
+            1.020486223724611,
+            1.0569852128991934,
+            0.9428200713624085,
+            0.9864674821261977,
+            0.9749802458316644,
+            1.077614018577989,
+            0.9804034575334615,
+            1.0144012306190633
+          ],
+          "raw": [
+            1.1951551458291083,
+            0.9818398759653539,
+            1.0191556452859272,
+            1.0444242362674563,
+            1.0640433516516326,
+            1.01497631872726,
+            0.999658628886417,
+            1.0385753937217326,
+            0.9643968798658139,
+            1.0250133563738648,
+            0.9972574761941512
+          ]
+        },
+        "absolute": {
+          "A_elapsed_ns": {
+            "median": 112126651.0,
+            "p50": 112126651.0,
+            "p95": 129151035.19999999,
+            "raw": [
+              164766112.0,
+              110453895.0,
+              110353958.0,
+              109343408.0,
+              111846213.0,
+              115736489.0,
+              117354711.0,
+              113507618.0,
+              111741758.0,
+              117674564.0,
+              114784078.0,
+              113142352.0,
+              112407089.0,
+              111013269.0,
+              111467002.0,
+              115930766.0,
+              107699289.0,
+              111089614.0,
+              112956624.0,
+              129755060.0,
+              108892663.0,
+              110825698.0
+            ]
+          },
+          "A_native_rss_kib": {
+            "median": 11270.0,
+            "p50": 11270.0,
+            "p95": 11331.800000000001,
+            "raw": [
+              11276.0,
+              11260.0,
+              11292.0,
+              11232.0,
+              11268.0,
+              11276.0,
+              11312.0,
+              11200.0,
+              11244.0,
+              11328.0,
+              11240.0,
+              11288.0,
+              11320.0,
+              11244.0,
+              11188.0,
+              11260.0,
+              11344.0,
+              11276.0,
+              11240.0,
+              11260.0,
+              11332.0,
+              11272.0
+            ]
+          },
+          "A_rate_per_second": {
+            "median": 891854.2081958704,
+            "p50": 891854.2081958704,
+            "p95": 918146.2350760406,
+            "raw": [
+              606920.9183014526,
+              905355.1257744238,
+              906175.0191144028,
+              914549.8739164962,
+              894084.8091119544,
+              864031.740240539,
+              852117.4748579117,
+              880998.1370589593,
+              894920.5900268725,
+              849801.3215498296,
+              871200.969179715,
+              883842.3298819172,
+              889623.6072797864,
+              900793.2195925156,
+              897126.487711583,
+              862583.7941931653,
+              928511.2365040776,
+              900174.160295489,
+              885295.5803636624,
+              770682.8542948538,
+              918335.5172423325,
+              902317.799974515
+            ]
+          },
+          "A_runner_rss_kib": {
+            "median": 11490.0,
+            "p50": 11490.0,
+            "p95": 11634.4,
+            "raw": [
+              11396.0,
+              11416.0,
+              11428.0,
+              11556.0,
+              11472.0,
+              11468.0,
+              11636.0,
+              11460.0,
+              11508.0,
+              11528.0,
+              11388.0,
+              11424.0,
+              11520.0,
+              11572.0,
+              11448.0,
+              11416.0,
+              11604.0,
+              11540.0,
+              11568.0,
+              11320.0,
+              11660.0,
+              11532.0
+            ]
+          },
+          "B_elapsed_ns": {
+            "median": 111193533.0,
+            "p50": 111193533.0,
+            "p95": 115809080.94999999,
+            "raw": [
+              112509199.0,
+              113243250.0,
+              112443526.0,
+              111317830.0,
+              110183157.0,
+              113108527.0,
+              110623034.0,
+              110389074.0,
+              108811629.0,
+              106734333.0,
+              109687666.0,
+              114931014.0,
+              112548505.0,
+              110949519.0,
+              109229306.0,
+              109680594.0,
+              114231010.0,
+              112613559.0,
+              115855295.0,
+              120409588.0,
+              111069236.0,
+              109252330.0
+            ]
+          },
+          "B_native_rss_kib": {
+            "median": 11282.0,
+            "p50": 11282.0,
+            "p95": 11340.0,
+            "raw": [
+              11276.0,
+              11336.0,
+              11320.0,
+              11344.0,
+              11340.0,
+              11276.0,
+              11276.0,
+              11336.0,
+              11268.0,
+              11260.0,
+              11224.0,
+              11276.0,
+              11260.0,
+              11328.0,
+              11340.0,
+              11332.0,
+              11336.0,
+              11284.0,
+              11340.0,
+              11280.0,
+              11260.0,
+              11244.0
+            ]
+          },
+          "B_rate_per_second": {
+            "median": 899334.0013544611,
+            "p50": 899334.0013544611,
+            "p95": 918843.7085734364,
+            "raw": [
+              888816.2113748583,
+              883054.8399131957,
+              889335.3273179996,
+              898328.6864287598,
+              907579.7310835811,
+              884106.6421101921,
+              903970.8674054266,
+              905886.754698205,
+              919019.4184116111,
+              936905.653403952,
+              911679.5319539391,
+              870087.1637659092,
+              888505.8046750599,
+              901310.8024379988,
+              915505.2216481171,
+              911738.3153486568,
+              875419.0302615726,
+              887992.5373817553,
+              863145.7025766496,
+              830498.6476658321,
+              900339.3162801624,
+              915312.2867036337
+            ]
+          },
+          "B_runner_rss_kib": {
+            "median": 11524.0,
+            "p50": 11524.0,
+            "p95": 11607.8,
+            "raw": [
+              11464.0,
+              11536.0,
+              11524.0,
+              11608.0,
+              11604.0,
+              11540.0,
+              11472.0,
+              11524.0,
+              11472.0,
+              11524.0,
+              11252.0,
+              11464.0,
+              11460.0,
+              11592.0,
+              11464.0,
+              11660.0,
+              11460.0,
+              11488.0,
+              11604.0,
+              11540.0,
+              11464.0,
+              11568.0
+            ]
+          }
+        },
+        "all_counters_identical": true,
+        "digest": "b6cdbdc80156e463",
+        "fixture": "five_moves",
+        "workload": "visible_solver"
+      }
+    ],
+    "runner_final_aa": [
+      {
+        "B_over_A": {
+          "bootstrap_iterations": 1000,
+          "bootstrap_unit": "two_pair_crossover_block",
+          "crossover_block_bootstrap_ci95": [
+            1.0434221519030495,
+            1.090394883226296
+          ],
+          "crossover_blocks": 2,
+          "median": 1.0669085175646726,
+          "method": "two_pair_binary_slot_crossover",
+          "pair_raw": [
+            1.1192756430557593,
+            1.0622593359756125,
+            1.0894009510845397,
+            0.9993839146166698
+          ],
+          "raw": [
+            1.090394883226296,
+            1.0434221519030495
+          ]
+        },
+        "absolute": {
+          "A_elapsed_ns": {
+            "median": 61883553.0,
+            "p50": 61883553.0,
+            "p95": 66107233.95,
+            "raw": [
+              66651480.0,
+              60743933.0,
+              63023173.0,
+              57338194.0
+            ]
+          },
+          "A_native_rss_kib": {
+            "median": 5674.0,
+            "p50": 5674.0,
+            "p95": 5746.0,
+            "raw": [
+              5712.0,
+              5632.0,
+              5636.0,
+              5752.0
+            ]
+          },
+          "A_rate_per_second": {
+            "median": 323297.28958242084,
+            "p50": 323297.28958242084,
+            "p95": 345874.14036847197,
+            "raw": [
+              300068.35557139915,
+              329250.9887366035,
+              317343.5904282382,
+              348807.6377152723
+            ]
+          },
+          "A_runner_rss_kib": {
+            "median": 5696.0,
+            "p50": 5696.0,
+            "p95": 5771.4,
+            "raw": [
+              5700.0,
+              5680.0,
+              5692.0,
+              5784.0
+            ]
+          },
+          "B_elapsed_ns": {
+            "median": 57612380.0,
+            "p50": 57612380.0,
+            "p95": 59294131.400000006,
+            "raw": [
+              59548763.0,
+              57183713.0,
+              57851219.0,
+              57373541.0
+            ]
+          },
+          "B_native_rss_kib": {
+            "median": 5686.0,
+            "p50": 5686.0,
+            "p95": 5753.8,
+            "raw": [
+              5664.0,
+              5764.0,
+              5676.0,
+              5696.0
+            ]
+          },
+          "B_rate_per_second": {
+            "median": 347153.5758305937,
+            "p50": 347153.5758305937,
+            "p95": 349576.35752917186,
+            "raw": [
+              335859.201642862,
+              349749.93666465837,
+              345714.40923310537,
+              348592.742428082
+            ]
+          },
+          "B_runner_rss_kib": {
+            "median": 5600.0,
+            "p50": 5600.0,
+            "p95": 5668.2,
+            "raw": [
+              5576.0,
+              5624.0,
+              5576.0,
+              5676.0
+            ]
+          }
+        },
+        "all_counters_identical": true,
+        "digest": "9e5be642d05486c3",
+        "fixture": "midgame_250",
+        "workload": "legal_actions"
+      }
+    ]
+  },
+  "limits": [
+    "asynchronous MCTS and additional LTO cumulative gains remain uncertain",
+    "depth7 million-node guard is UNKNOWN, not a completed mate-time benchmark",
+    "Windows actual ELF/POSIX slot I/O unsupported, reference contracts run",
+    "Darwin GNU RSS unsupported -> None; actual timeout cleanup tested"
+  ],
+  "local_checks": {
+    "cleanup_v3": {
+      "command": [
+        "build/f2-env/bin/python",
+        "-m",
+        "pytest",
+        "-W",
+        "error",
+        "tests/test_engine_benchmark_tools.py",
+        "tests/test_engine_baseline_driver.py"
+      ],
+      "cwd": "/home/kuboyu/workspace/repos/csplendor-final-candidate",
+      "elapsed_seconds": 2.4861157829873264,
+      "exit_code": 0
+    },
+    "compile_final": {
+      "command": [
+        "python",
+        "-m",
+        "compileall",
+        "-q",
+        "csplendor"
+      ],
+      "cwd": "/home/kuboyu/workspace/repos/csplendor-final-candidate",
+      "elapsed_seconds": 0.028872394002974033,
+      "exit_code": 0
+    },
+    "hook_asan_v3": {
+      "command": [
+        "env",
+        "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:strict_init_order=1",
+        "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1",
+        "ctest",
+        "--test-dir",
+        "build/f4-ci-finish-asan",
+        "-R",
+        "^solver_normal_rollback_unit$",
+        "--output-on-failure"
+      ],
+      "cwd": "/home/kuboyu/workspace/repos/csplendor-final-candidate",
+      "elapsed_seconds": 0.031192121998174116,
+      "exit_code": 0
+    },
+    "hook_tsan_v3": {
+      "command": [
+        "env",
+        "TSAN_OPTIONS=halt_on_error=1:history_size=7:exitcode=66",
+        "ctest",
+        "--test-dir",
+        "build/f4-ci-finish-tsan",
+        "-R",
+        "^solver_normal_rollback_unit$",
+        "--output-on-failure"
+      ],
+      "cwd": "/home/kuboyu/workspace/repos/csplendor-final-candidate",
+      "elapsed_seconds": 0.05202662700321525,
+      "exit_code": 0
+    },
+    "lint_v3": {
+      "command": [
+        "python",
+        "-m",
+        "ruff",
+        "check",
+        "--target-version",
+        "py38",
+        "--select",
+        "E4,E7,E9,F,W,I",
+        "csplendor",
+        "tests"
+      ],
+      "cwd": "/home/kuboyu/workspace/repos/csplendor-final-candidate",
+      "elapsed_seconds": 0.02948757298872806,
+      "exit_code": 0
+    },
+    "native_asan": {
+      "command": [
+        "env",
+        "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:strict_init_order=1",
+        "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1",
+        "ctest",
+        "--test-dir",
+        "build/f4-ci-finish-asan",
+        "--output-on-failure",
+        "-j1"
+      ],
+      "cwd": "/home/kuboyu/workspace/repos/csplendor-final-candidate",
+      "elapsed_seconds": 15.080847841018112,
+      "exit_code": 0
+    },
+    "native_clang": {
+      "command": [
+        "ctest",
+        "--test-dir",
+        "build/f4-ci-finish-clang",
+        "--output-on-failure"
+      ],
+      "cwd": "/home/kuboyu/workspace/repos/csplendor-final-candidate",
+      "elapsed_seconds": 3.7715596380003262,
+      "exit_code": 0
+    },
+    "native_gcc13": {
+      "command": [
+        "ctest",
+        "--test-dir",
+        "build/f4-ci-finish-gcc13",
+        "--output-on-failure"
+      ],
+      "cwd": "/home/kuboyu/workspace/repos/csplendor-final-candidate",
+      "elapsed_seconds": 4.21268114601844,
+      "exit_code": 0
+    },
+    "native_perf": {
+      "command": [
+        "ctest",
+        "--test-dir",
+        "build/f4-ci-finish-perf",
+        "-R",
+        "^(solver_components_unit|perf_counters_unit|state_feature_table_unit|action_selection_unit)$",
+        "--output-on-failure"
+      ],
+      "cwd": "/home/kuboyu/workspace/repos/csplendor-final-candidate",
+      "elapsed_seconds": 0.9027993820200209,
+      "exit_code": 0
+    },
+    "native_tsan_hook": {
+      "command": [
+        "env",
+        "TSAN_OPTIONS=halt_on_error=1:history_size=7:exitcode=66",
+        "taskset",
+        "-c",
+        "8-11",
+        "ctest",
+        "--test-dir",
+        "build/f4-ci-finish-tsan",
+        "-L",
+        "tsan",
+        "--output-on-failure",
+        "--no-tests=error",
+        "-j1"
+      ],
+      "cwd": "/home/kuboyu/workspace/repos/csplendor-final-candidate",
+      "elapsed_seconds": 36.75571543499245,
+      "exit_code": 0
+    },
+    "python_coverage_v3": {
+      "command": [
+        "/home/kuboyu/workspace/csplendor-f4-ci-finish-20260906/test-env/bin/python",
+        "-I",
+        "-m",
+        "coverage",
+        "report",
+        "--precision=2",
+        "--fail-under=50"
+      ],
+      "cwd": "/home/kuboyu/workspace/csplendor-f4-ci-finish-20260906",
+      "elapsed_seconds": 0.2307000780128874,
+      "exit_code": 0
+    },
+    "python_full_v3": {
+      "command": [
+        "/home/kuboyu/workspace/csplendor-f4-ci-finish-20260906/test-env/bin/python",
+        "-I",
+        "-m",
+        "coverage",
+        "run",
+        "--source=csplendor",
+        "/home/kuboyu/workspace/repos/csplendor-final-candidate/doc/performance_experiments/f4_installed_pytest_20260906.py"
+      ],
+      "cwd": "/home/kuboyu/workspace/csplendor-f4-ci-finish-20260906",
+      "elapsed_seconds": 42.54794916600804,
+      "exit_code": 0
+    },
+    "security_final": {
+      "command": [
+        "python",
+        "-m",
+        "ruff",
+        "check",
+        "--target-version",
+        "py38",
+        "--select",
+        "S",
+        "csplendor"
+      ],
+      "cwd": "/home/kuboyu/workspace/repos/csplendor-final-candidate",
+      "elapsed_seconds": 0.024478475999785587,
+      "exit_code": 0
+    },
+    "wheel_cycle3_acceptance": {
+      "command": [
+        "/home/kuboyu/workspace/csplendor-f4-ci-finish-20260906/wheel-cycle3-env/bin/python",
+        "-I",
+        "/home/kuboyu/workspace/repos/csplendor-final-candidate/doc/performance_experiments/f4_wheel_probe_20260906.py",
+        "--wheel",
+        "/home/kuboyu/workspace/csplendor-f4-ci-finish-20260906/wheels-cycle3/csplendor-0.1.0-cp312-cp312-linux_x86_64.whl",
+        "--source",
+        "/home/kuboyu/workspace/repos/csplendor-f4-ci-finish-wheel3-20260906",
+        "--solver-sha",
+        "daaa805b7cbe80e3f96894c7300649a97f61584c4f1e0195b6401237e6ce4cb6",
+        "--numpy-sha",
+        "40df44a2d42e9093763be7ea4889e16688e9a2c8e2b4b79f21bef2f318d8cfcd"
+      ],
+      "cwd": "/home/kuboyu/workspace/csplendor-f4-ci-finish-20260906/acceptance-cycle3",
+      "elapsed_seconds": 0.16793911799322814,
+      "exit_code": 0
+    }
+  },
+  "measurement_diff_from_F1": [
+    "scripts/run_paired_benchmarks.py",
+    "scripts/run_phase0_baseline.py"
+  ],
+  "merge_deployment": "NOT_EXECUTED_AWAITING_APPROVAL",
+  "not_executed": [
+    "full F1 rerun",
+    "current binary real-model reload",
+    "GPU",
+    "browser",
+    "AI playing strength",
+    "nightly soak",
+    "merge",
+    "production deployment"
+  ],
+  "origin_main": "f5ec6c545c9a2727ca708bc4c6822daf07a2c4dc",
+  "prior_failed_runs": [
+    34015102420,
+    34016455084,
+    34016913244
+  ],
+  "production_diff_from_F1": [
+    "src/noble_data.h",
+    "src/solver_action_filter.h",
+    "src/solver_path.h"
+  ],
+  "provenance": "raw/f4_ci_finish_20260906/provenance3.json.gz",
+  "reuse_scope": "F1/F2 retained as historical old-binary evidence; unchanged table/runtime prefix and 28 Python files/build/fixtures reused. Changed native and extension .text are covered by new scoped solver guards/native/Python/wheel acceptance, not claimed byte-identical.",
+  "schema": "csplendor.f4_ci_finish.v1",
+  "source_digest": "cdc20fe72092271f8d37c21c1320f93d2bf9eab64b7eb73be28665871e36decd",
+  "starting_head": "da73c5ddfb4cd4da6a1525e4b362c48fe24b6df1",
+  "wheel_acceptance": {
+    "existing_cases": {
+      "MCTS": "legacy 48-action, 8 simulations, batch=1, synthetic evaluator, no NN",
+      "fixture_file_sha256": {
+        "test_reveal_verified_solver.py": "daaa805b7cbe80e3f96894c7300649a97f61584c4f1e0195b6401237e6ce4cb6",
+        "test_state_feature_numpy.py": "40df44a2d42e9093763be7ea4889e16688e9a2c8e2b4b79f21bef2f318d8cfcd"
+      },
+      "passed": [
+        "test_reveal_verified_solver_proves_seven_move_mate_at_exact_depth",
+        "test_exact_depth_search_honors_external_cancellation",
+        "test_mate_search_session_reuses_position_after_opponent_response",
+        "test_mate_search_session_resumes_incomplete_same_depth_search",
+        "test_json_mate_frontier_state_round_trip_preserves_phase_fields",
+        "test_lazy_frontier_reaches_terminal_for_five_and_seven_move_mates",
+        "test_retained_featurizer_array_survives_search_and_game_destruction"
+      ],
+      "solver": "existing 5/7 frontier, exact 7, session/cancel/resume; original asserts/budgets unchanged"
+    },
+    "identity": {
+      "cwd": "/home/kuboyu/workspace/csplendor-f4-ci-finish-20260906/acceptance-cycle3",
+      "executable": "/home/kuboyu/workspace/csplendor-f4-ci-finish-20260906/wheel-cycle3-env/bin/python",
+      "extension": "/home/kuboyu/workspace/csplendor-f4-ci-finish-20260906/wheel-cycle3-env/lib/python3.12/site-packages/csplendor/_csplendor.cpython-312-x86_64-linux-gnu.so",
+      "extension_sha256": "711498238be2a8e61148ce210bcb5be162c65e9950f834f1b635b9fb1833cd06",
+      "installed_files": {
+        "csplendor/__init__.py": "19cef99d3750cd093d4a67f5208d1d9f9c1923bb54b20c60f1c0afa1b9036cbc",
+        "csplendor/_csplendor.cpython-312-x86_64-linux-gnu.so": "711498238be2a8e61148ce210bcb5be162c65e9950f834f1b635b9fb1833cd06",
+        "csplendor/action_space.py": "e881d7f3b8ebdb8dda909657a8c2007a8ca33245c8c69af32c3676e7f0f47aea",
+        "csplendor/api/__init__.py": "0d4145d65780b5b8ce90223a801b8420df00f452264b06f6fa959262ca00e1b2",
+        "csplendor/api/ai_manager.py": "faa63cdc9206b18958e8b892584519734db9ebe2246beae62c6b4d2a11d263b9",
+        "csplendor/api/ai_provider.py": "83217f94a657ec688d3e68af97c0a2b86474e2c08fc257f620c0f50526973156",
+        "csplendor/api/app.py": "fa0ae36ebea765a71f8811447c8a1551a2b69324198205147c5e4994deafd5e9",
+        "csplendor/api/application_errors.py": "45b2078998a4d75ed5d611500a7ca4216bcee743ee822fb9c82089d6a72179d5",
+        "csplendor/api/external_ai_bridge.py": "27ddbfd5d789ffab15e692f74374e6c0b5e1a6a004286f5b78255d75c9da68ee",
+        "csplendor/api/game_presenter.py": "bb69ff4ce07b944ec41576fa57d587f5ca39eab86cf0c013898613b921086810",
+        "csplendor/api/game_service.py": "6515691d57b8716dc69d4e7a04f872d84114c3458a768d7676abfa48766d81ad",
+        "csplendor/api/kifu_codec.py": "8d393d73b7b2f762dbec7348fdd4fcf45a05b56c460a12ddd236ff34fe5d331e",
+        "csplendor/api/kifu_service.py": "0d2b48faac361e650321c3a6666727b90b7eba2c7ccabd06af33b58603b2c9d8",
+        "csplendor/api/legacy_replay_reader.py": "8f8737f441bae4f610af5b37f9398eebc9add05564973feada683e1e0969bbf7",
+        "csplendor/api/replay.py": "44421cd308c1ebd09e820a6e689cf2232be24403469fa845f568b9ac1cc2e0c1",
+        "csplendor/api/schemas.py": "1f581859afb965d55d08fb6e90cdc160927ad56ded6e2c2b4f5ab27c40e53aae",
+        "csplendor/api/spn_codec.py": "7e1364fa780ff8624e9705937b8d7b05c6b9c3fe1b1990779b3c80c16ef8611c",
+        "csplendor/api/stores.py": "9a82b5886bba8dbff306b1000ef35dbe353772d00ed8725387b984a90383be5a",
+        "csplendor/api/usi_kifu.py": "87bdc8e7eed6ef16a5490b80225e2e2df213bcc47836d053de74f0b56f5fd2da",
+        "csplendor/api/usi_parser.py": "99694c16f4ac790b13e619a8cf7c0ccb98d2c2979674ec4d7d16f35c106f51cb",
+        "csplendor/api/usi_resolver.py": "c5b0bef9045e6d2b76540accd602102c855eff5cca75d1d6a986dbf3fcd005a1",
+        "csplendor/api/usi_serializer.py": "e909e617695fcc31c4081699017ef8686c3401a0bb24ff152b0c7a766a84bbad",
+        "csplendor/api/usi_tokens.py": "18456812aaac8d9b655df044972632938fd825ad2d81f697f570b82d54c95ca9",
+        "csplendor/api/usi_types.py": "4d5ca5ca2293cb1df63005a9943564533b5cade58c4e3c06dc33a4bab9c196a2",
+        "csplendor/features.py": "d22d0a860aa4fff8f6d3a0c9ab7e3b1476772c59fba560cd49e9e7b8c780cd13",
+        "csplendor/gem_colors.py": "4afd396015e4fe66cb3ad85ffc7b9a57b9225b05187de3232f26671023311e3d",
+        "csplendor/mate_depth.py": "ee92000f7eafa764289761e6863b5c83a7991fe9b723889e708f4729d77a699c",
+        "csplendor/mate_frontier.py": "c96c7ffccea901ea5981a548ba1de6641525c5fa2e33839e7e7f62d518f88089",
+        "csplendor/mate_session.py": "97ee34e73d6d82d0ead2817d925db3b7082d2e1c88918d5cf6e8786f5d5aeead"
+      },
+      "package": "/home/kuboyu/workspace/csplendor-f4-ci-finish-20260906/wheel-cycle3-env/lib/python3.12/site-packages/csplendor/__init__.py",
+      "prefix": "/home/kuboyu/workspace/csplendor-f4-ci-finish-20260906/wheel-cycle3-env",
+      "python": "3.12.1 (main, Jan  9 2025, 22:10:40) [GCC 11.4.0]",
+      "sys_path": [
+        "/home/kuboyu/.pyenv/versions/3.12.1/lib/python312.zip",
+        "/home/kuboyu/.pyenv/versions/3.12.1/lib/python3.12",
+        "/home/kuboyu/.pyenv/versions/3.12.1/lib/python3.12/lib-dynload",
+        "/home/kuboyu/workspace/csplendor-f4-ci-finish-20260906/wheel-cycle3-env/lib/python3.12/site-packages"
+      ],
+      "versions": {
+        "csplendor": "0.1.0",
+        "numpy": "2.2.6",
+        "pip": "23.2.1"
+      },
+      "wheel": "/home/kuboyu/workspace/csplendor-f4-ci-finish-20260906/wheels-cycle3/csplendor-0.1.0-cp312-cp312-linux_x86_64.whl",
+      "wheel_bytes": 797767,
+      "wheel_sha256": "f4fa6dd4965ad7cbafb3a1407fdf47c5bb044789cc6125ecd8b7934772140f09"
+    },
+    "smoke": [
+      {
+        "features": 196,
+        "legal_v3_ids": 30,
+        "owning_numpy": true,
+        "simple_payment_mode": false,
+        "snapshot_roundtrip": true
+      },
+      {
+        "features": 196,
+        "legal_v3_ids": 30,
+        "owning_numpy": true,
+        "simple_payment_mode": true,
+        "snapshot_roundtrip": true
+      }
+    ],
+    "status": "PASS"
+  }
+}

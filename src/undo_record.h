@@ -45,7 +45,7 @@ struct UndoRecord {
   uint64_t cached_hash = 0;
   bool hash_valid = false;
 
-  static UndoRecord capture(const Board &board) {
+  static UndoRecord capture(const Board &board) noexcept {
     UndoRecord record;
     record.bank = board.bank;
     record.visible = board.visible;
@@ -80,7 +80,7 @@ struct UndoRecord {
     return record;
   }
 
-  bool can_restore(const Board &board) const {
+  bool can_restore(const Board &board) const noexcept {
     if (player_index >= Board::NUM_PLAYERS)
       return false;
     const PlayerState &player = board.players[player_index];
@@ -94,7 +94,7 @@ struct UndoRecord {
     return true;
   }
 
-  bool restore(Board &board) const {
+  bool restore(Board &board) const noexcept {
     if (!can_restore(board))
       return false;
 
@@ -115,8 +115,12 @@ struct UndoRecord {
     player.reserved_count = reserved_count;
     player.purchased_count = purchased_count;
     player.noble_eligibility_mask = noble_eligibility_mask;
-    player.purchased_cards.resize(purchased_cards_size);
-    player.acquired_nobles.resize(acquired_nobles_size);
+    // can_restore proved these are truncations. Erasing uint8_t tails cannot
+    // allocate or throw; never grow a vector from a noexcept rollback.
+    player.purchased_cards.erase(player.purchased_cards.begin() + purchased_cards_size,
+                                 player.purchased_cards.end());
+    player.acquired_nobles.erase(player.acquired_nobles.begin() + acquired_nobles_size,
+                                 player.acquired_nobles.end());
 
     board.current_player = current_player;
     board.turn = turn;
@@ -137,7 +141,8 @@ struct UndoRecord {
     return restore(restored) && boards_equal(restored, snapshot);
   }
 
-private:
+  // Internal field-wise oracle, also used by solver transactions. Do not use
+  // padding, vector object bytes or serialization-only equality for rollback.
   template <typename T, size_t Capacity>
   static bool stacks_equal(const FixedStack<T, Capacity> &lhs,
                            const FixedStack<T, Capacity> &rhs) {

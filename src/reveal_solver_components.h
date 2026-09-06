@@ -11,13 +11,27 @@
 
 namespace csplendor::solver_internal {
 
+namespace config {
+
+#if defined(CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE) &&                  \
+    defined(CSPLENDOR_INCREMENTAL_EXACT_HASH)
+inline const volatile bool incremental_reveal_search_state_enabled = true;
+#else
+inline const volatile bool incremental_reveal_search_state_enabled = false;
+#endif
+
+} // namespace config
+
 struct CardIdSet {
   uint64_t low = 0;
   uint64_t high = 0;
 
   void clear() noexcept;
   void add(int card_id) noexcept;
+  void remove(int card_id) noexcept;
   bool contains(int card_id) const noexcept;
+  bool operator==(const CardIdSet &other) const noexcept;
+  bool operator!=(const CardIdSet &other) const noexcept;
 };
 
 class HiddenOutcomeCatalog {
@@ -27,12 +41,66 @@ public:
   bool is_initially_known(int card_id) const noexcept;
   bool is_initially_hidden(int card_id) const noexcept;
   static bool is_claimed(const Board &board, int card_id) noexcept;
+  static CardIdSet claimed_cards(const Board &board) noexcept;
   CardIdSet unseen_cards(const Board &board) const noexcept;
   CardIdSet acquired_hidden_cards(const Board &board) const noexcept;
 
 private:
   CardIdSet known_;
   CardIdSet hidden_;
+};
+
+// Solver-owned sidecar for canonical reveal-search roots.  It deliberately
+// stays outside Board so editor/serialization/public ABI contracts remain
+// unchanged.  Noncanonical roots leave active()==false and use the legacy
+// scan-based path.
+class RevealSearchState {
+public:
+  struct TransitionObservation {
+    std::array<size_t, 3> deck_sizes = {0, 0, 0};
+    std::array<int, 3> deck_tops = {-1, -1, -1};
+    std::array<size_t, Board::NUM_PLAYERS> purchased_sizes = {0, 0};
+  };
+
+  bool initialize(const Game &game,
+                  const HiddenOutcomeCatalog &catalog) noexcept;
+  bool active() const noexcept;
+
+  const std::array<CardIdSet, 3> &remaining_by_level() const noexcept;
+  const CardIdSet &remaining_all() const noexcept;
+  const CardIdSet &acquired_hidden() const noexcept;
+  const CardIdSet &claimed() const noexcept;
+  uint64_t rule_hash() const noexcept;
+
+  bool is_claimed(const Board &board, int card_id) const noexcept;
+  TransitionObservation observe_before(const Board &board) const noexcept;
+  void observe_after(const TransitionObservation &before, const Board &board,
+                     const HiddenOutcomeCatalog &catalog) noexcept;
+
+  // Preserve the legacy erase-then-refill deck order while moving an exact
+  // outcome to the ordinary top-pop position.  Both Board's exact hash and
+  // this sidecar's deck component are adjusted by the same positional salts.
+  bool move_deck_card_to_back(Board &board, int level,
+                              int card_id) noexcept;
+
+  bool matches_reference(const Board &board,
+                         const HiddenOutcomeCatalog &catalog) const noexcept;
+  void verify_or_abort(const Board &board,
+                       const HiddenOutcomeCatalog &catalog) const noexcept;
+
+private:
+  static bool canonical_root(const Board &board) noexcept;
+  static uint64_t deck_order_hash(const Board &board) noexcept;
+  void deactivate() noexcept;
+  void runtime_fallback(const char *reason) noexcept;
+
+  std::array<CardIdSet, 3> remaining_by_level_{};
+  CardIdSet remaining_all_;
+  CardIdSet acquired_hidden_;
+  CardIdSet claimed_;
+  uint64_t rule_hash_ = 0;
+  uint64_t deck_order_hash_ = 0;
+  bool active_ = false;
 };
 
 struct OracleActionMetadata {

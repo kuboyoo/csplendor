@@ -1,0 +1,185 @@
+{
+  "schema": "csplendor.phase3b_incremental_reveal_state_evidence.v1",
+  "measurement_date": "2026-09-05",
+  "decision": "ACCEPT",
+  "provenance": {
+    "branch": "perf/codex56-engine-hotpaths",
+    "baseline_revision": "0c5eba654ab4536c70947e725872cf5790db5e92",
+    "source_diff_sha256": "ad07e94e123d7a6892001a2f124d3eb0756fddb6a3ebf9a7dcf51172ad818071",
+    "manifest_dirty": true,
+    "clean_provenance_gate_satisfied": false,
+    "note": "The worktree git metadata was read-only, so the final source could not be committed before measurement. A and B were rebuilt from the same source tree and differ only by the allowlisted Phase 3B option."
+  },
+  "build": {
+    "type": "Release",
+    "language_standard": "C++17",
+    "release_flags": ["-O3", "-DNDEBUG"],
+    "cpu_target": "portable",
+    "compiler": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+    "cmake": "4.2.3",
+    "python": "3.12.1",
+    "instrumentation": false,
+    "verify_incremental_hash": false,
+    "verify_reveal_search_state": false,
+    "A": {
+      "incremental_reveal_search_state": false,
+      "binary_size_bytes": 1097072,
+      "binary_text_bytes": 931394,
+      "binary_sha256": "5c5017b0b81a24c6992c06a4b260daac01dcfd7d649e17ecdecdb9939016d775"
+    },
+    "B": {
+      "incremental_reveal_search_state": true,
+      "binary_size_bytes": 1097072,
+      "binary_text_bytes": 931394,
+      "binary_sha256": "b0c42a84d3e33a3fa02d7748305c7d3f968349646c851ed76adf7de67e4f328d"
+    }
+  },
+  "method": {
+    "cpu_affinity": [4],
+    "cpu_thread_siblings": "4,16",
+    "selected_set_contains_smt_siblings": false,
+    "governor": "performance",
+    "pairs": 22,
+    "crossover_blocks": 11,
+    "order": "ABBA",
+    "warmups_per_side": 3,
+    "bootstrap_iterations": 10000,
+    "bootstrap_unit": "two_pair_crossover_block",
+    "binary_slot_policy": "two_private_fixed_inodes_crossed_every_pair"
+  },
+  "acceptance": {
+    "state_key_micro_minimum_ratio": 2.0,
+    "exact_reveal_e2e_alternative_minimum_ratio": 1.08,
+    "state_key_micro_observed_ratio": 3.373953472922542,
+    "state_key_micro_gate_passed": true,
+    "semantic_gate_passed": true,
+    "fallback_gate_passed": true,
+    "rss_gate_passed": true,
+    "decision_basis": "The state-key micro gate passed. Normal exact-reveal E2E improved significantly on two fixtures; persistent reuse is secondary evidence."
+  },
+  "formal_cases": [
+    {
+      "case_id": "state_key",
+      "workload": "solver_state_key",
+      "fixture": "reveal_heavy",
+      "operations": 2000000,
+      "A_median_rate_per_second": 6730589.784651455,
+      "B_median_rate_per_second": 23221358.51550144,
+      "B_over_A_median": 3.373953472922542,
+      "ci95": [3.334568148297154, 3.4525442748909407],
+      "A_median_runner_rss_kib": 5708,
+      "B_median_runner_rss_kib": 5706,
+      "digest": "09fabd6c0473eb83",
+      "raw_archive": "doc/performance_experiments/raw/phase3b/state_key_paired_v2_final_20260905.json.gz",
+      "raw_original_sha256": "13cf819b62e438c0a3ff04594e85caff51d72072f198a3f1d4d3ebfa8ba0154a",
+      "raw_archive_sha256": "9922095670efd768551616c116d912e26caab278e5066dbe28cfeff2dd132d55"
+    },
+    {
+      "case_id": "exact_five_moves",
+      "workload": "exact_reveal",
+      "fixture": "five_moves",
+      "persistent_reuse": false,
+      "operations": 139868,
+      "A_median_rate_per_second": 658148.3605446324,
+      "B_median_rate_per_second": 687570.1041171727,
+      "B_over_A_median": 1.043080557086346,
+      "ci95": [1.0411328104918887, 1.0504478381032394],
+      "A_median_runner_rss_kib": 16426,
+      "B_median_runner_rss_kib": 16416,
+      "digest": "9dd9c11919a4581a",
+      "raw_archive": "doc/performance_experiments/raw/phase3b/exact_five_moves_paired_v2_final_20260905.json.gz",
+      "raw_original_sha256": "50fb185296c2cbda73e96c902890c3b7aad8a17a958c6164127720b2a40563d9",
+      "raw_archive_sha256": "cd1390410aa099fe3c8ae7e9d07fdcb0e00cf4bed9092ca9c48c11c560070f0c"
+    },
+    {
+      "case_id": "exact_hidden_reserve",
+      "workload": "exact_reveal",
+      "fixture": "hidden_reserve",
+      "persistent_reuse": false,
+      "operations": 418336,
+      "A_median_rate_per_second": 849291.6203860212,
+      "B_median_rate_per_second": 888905.3195322792,
+      "B_over_A_median": 1.0467642436091436,
+      "ci95": [1.0405525498055075, 1.0556472511844754],
+      "A_median_runner_rss_kib": 36394,
+      "B_median_runner_rss_kib": 36392,
+      "digest": "684280a42eaabf21",
+      "raw_archive": "doc/performance_experiments/raw/phase3b/exact_hidden_reserve_paired_v2_final_20260905.json.gz",
+      "raw_original_sha256": "4a45ac97ed8170632c41b22f4b23d86e5513391a1feb9b53c1ae91d9266d9f04",
+      "raw_archive_sha256": "796618aa9c143711e82045cca0fbc323781e349ab5da0d844b4e17c4e3c5b705"
+    },
+    {
+      "case_id": "exact_persistent",
+      "workload": "exact_reveal",
+      "fixture": "five_moves",
+      "persistent_reuse": true,
+      "operations": 280909,
+      "A_median_rate_per_second": 1159054.124020514,
+      "B_median_rate_per_second": 1252311.449194218,
+      "B_over_A_median": 1.0780634933240782,
+      "ci95": [1.065632365898585, 1.0982755968976101],
+      "A_median_runner_rss_kib": 48580,
+      "B_median_runner_rss_kib": 48594,
+      "digest": "34eff58fdf34805c",
+      "raw_archive": "doc/performance_experiments/raw/phase3b/exact_persistent_paired_v2_final_20260905.json.gz",
+      "raw_original_sha256": "acb3a09ad68d28ede7c1f5515a8933096b348ca556249f5b0ba519c3c606ff3d",
+      "raw_archive_sha256": "793101239e2709fd6c725b03d4357831d9bc7c67518d2a6f695dfbc6eaa36815",
+      "cache_states_before": 210454,
+      "cache_states_after": 282879,
+      "persistent_memo_hits": 8801
+    }
+  ],
+  "control_cases": [
+    {
+      "case_id": "control_solver_tt",
+      "B_over_A_median": 0.9999033055530981,
+      "ci95": [0.9946567400885656, 1.0120134197635202],
+      "digest": "575c26bfdff10f4a",
+      "raw_archive": "doc/performance_experiments/raw/phase3b/control_solver_tt_paired_final_20260905.json.gz",
+      "raw_original_sha256": "aa20f096277440c06f11a4f0ebbadca804e3c87e30685774faa600e16484e45d",
+      "raw_archive_sha256": "8b43503388a960014c4683b07a51aa2cee468b75e7454b3dc02f86528204ec81"
+    },
+    {
+      "case_id": "control_visible_solver",
+      "B_over_A_median": 1.0028135271723126,
+      "ci95": [1.0000188399621908, 1.0128673344012549],
+      "digest": "b6cdbdc80156e463",
+      "raw_archive": "doc/performance_experiments/raw/phase3b/control_visible_solver_paired_final_20260905.json.gz",
+      "raw_original_sha256": "e60ed8ae1000d7a346ca46f28df4248ed81ad3ac989ea4f52dc8f8bb4fc80260",
+      "raw_archive_sha256": "ed19f3df6674ce865a538925673109bb6d936228a060fca5c61c863ae97babb2"
+    },
+    {
+      "case_id": "control_board_copy",
+      "B_over_A_median": 0.9956853579042283,
+      "ci95": [0.9670908572312064, 1.038245594305641],
+      "digest": "c35f3a2d19cd3783",
+      "raw_archive": "doc/performance_experiments/raw/phase3b/control_board_copy_paired_final_20260905.json.gz",
+      "raw_original_sha256": "eee36792fe61219703d8031fb82ea5608e013f0a03d915b7ab18ffbe4993635e",
+      "raw_archive_sha256": "619ef4f4cf47e221fd297b7d3acb1d6f0f6362c875ed25362f5a63ed471c21f3"
+    }
+  ],
+  "semantic_anchors": {
+    "five_moves": {
+      "nodes": 139868,
+      "legal_moves": 692386,
+      "memo_hits": 17163,
+      "memoized_states": 67615,
+      "principal_line_action_digest": "ee6f8466fd88410b",
+      "principal_line_reveal_digest": "70ce0d9a743220ca",
+      "root_action_digest": "edfd4c52f12a9c7a",
+      "root_outcome_digest": "65bbe0573367e0a1",
+      "root_reveal_digest": "b8027749d8c198fb"
+    },
+    "hidden_reserve": {
+      "nodes": 418336,
+      "legal_moves": 2119495,
+      "memo_hits": 60855,
+      "memoized_states": 194950,
+      "principal_line_action_digest": "6384177c6a05dfc3",
+      "principal_line_reveal_digest": "d760fb0049f218d9",
+      "root_action_digest": "fec2cd9a7cf799c2",
+      "root_outcome_digest": "8973fcf16c663709",
+      "root_reveal_digest": "b91d571c6c22b239"
+    }
+  }
+}

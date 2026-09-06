@@ -5,21 +5,98 @@
 `csplendor` は、ボードゲーム Splendor 向けの高速な C++ ベースのエンジンです。2人対戦と機械学習の学習用途に最適化されています。
 
 ## 特長
-- **高速なロジック**: C++17 実装により、合法手250件の中盤局面で Python の `legal_actions` 取得は約 27,000 回/秒、C++ 内部の合法手カウントは約 1,012,000 回/秒、C++ 内部適用の自己対戦は約 893,000 moves/sec で動作します（測定条件は下記）。
+
+- **高速なロジック**: C++17による合法手生成・局面更新・探索。F1計測候補とmainの累積比較、CI互換版の追加検証、過去の測定を下記で区別しています。
 - **Python バインディング**: `pybind11` によりシームレスに連携できます。
 - **機械学習対応**: 状態の特徴量化と行動空間のエンコードを内蔵しています。
 - **Web API**: GUI 開発向けの FastAPI 連携を備えています。
 
 ### 性能目安
 
-`Phase 0--7 後`は2026-07-13にRyzen 9 7900X、GCC 13.3で、`現行`は
+#### 今回の累積ベンチマーク（F1計測候補、2026-09-06）
+
+main `f5ec6c545c9a2727ca708bc4c6822daf07a2c4dc` と、F1計測コード
+`b202e6a0cbb2eded9bc2ee5e59f750428e73ca49` の直接paired A/Bです。
+以下は同じ固定入力を使った独立再測定系列で、時間は1実行の中央値です。
+倍率は候補/mainの処理速度比で、大きいほど高速です。
+
+| 処理（独立再測定） | main | F1計測候補 | 倍率［95%信頼区間］ |
+|---|---:|---:|---:|
+| 厳密めくれ・depth7・100万node上限 | 2,505.49 ms | 1,051.16 ms | 2.373［2.361–2.403］ |
+| Python StateFeaturizer・5万回 | 372.14 ms | 29.04 ms | 12.808［12.514–13.048］ |
+| Python特徴量＋環境step・5万手 | 529.33 ms | 89.37 ms | 6.044［5.732–6.164］ |
+
+**これはF1計測バイナリの値です。** 後続のCI互換性修正によりnative実行ファイル・Python拡張は
+byte不一致であり、最終PR headやmerge後バイナリの直接測定値ではありません。
+F1の記録commit `49878b661298bf45e39c5f5ca5afa6d0e363736a` も計測コードとは区別します。
+
+厳密めくれのfixtureは `hidden_reserve`、cold探索のnode上限で **UNKNOWN** となる固定仕事です。
+7手詰めの完全証明時間ではありません。Pythonの2行は `reachable_32_seed42` の各経路の実測で、
+実NN・GPU・AI全体・問題保存速度の倍率ではありません。
+同じ独立再測定で、探索終了時にnative側が取得したLinux **current RSS** の中央値は
+70,152→49,208 KiB（約30%減）でした。正式系列も70,192→49,188 KiBです。
+peak RSSや累計allocation bytesではなく、他局面の省メモリ率も保証しません。
+
+測定条件：Ryzen 9 7900X、Linux x86_64、GCC 15.2.0、Python 3.12.1、CMake 4.2.3、
+pybind11 3.0.1。portable Release `-O3 -DNDEBUG -std=c++17`、PERF/VERIFY OFF、CPU4に1thread固定。
+native追加LTOはOFF、Python拡張は両側とも既存pybind11 LTOを維持しました。
+warmup 2回、22 pairs / 11個の2-pair fixed-slot crossover blocks、block bootstrap 10,000回。
+倍率はblock比の中央値なので、表示時間の中央値同士の比とは必ずしも一致しません。
+[F1詳細・再現手順](doc/performance_experiments/final_main_vs_candidate_20260906.md)、
+[CSV](doc/performance_experiments/final_main_vs_candidate_20260906.csv)、
+[manifest](doc/performance_experiments/final_main_vs_candidate_manifest_20260906.json)を正本とします。
+
+#### CI互換版の追加検証（2026-09-06）
+
+CI修正版コード `8b6dd8b48526dfa1eda8ccbc00a9355f5abc8cdb` と保存済みF1候補バイナリを、
+同じportable条件・CPU4・22 pairs / 11 blocksで限定比較しました。
+
+| 固定順solver・fixture | CI修正版/F1候補の速度比［95%信頼区間］ |
+|---|---:|
+| exact_reveal・hidden_reserve・depth7・100万node上限 | 1.0103［0.9981–1.0269］ |
+| visible_solver・five_moves・10万node上限 | 1.0192［0.9973–1.0444］ |
+
+全pairのsemantic digest・正しさcounterは一致しました。両区間は1を含み、
+「限定solver比較では明確な退行を検出していない」範囲の結果です。
+追加高速化や全経路の非劣性を確定したものではなく、F1倍率との乗算もしません。
+最終コードの適用CI 16 jobs（Python 3.8–3.12、Clang/GCC strict、ASan/UBSan・TSan実行、
+macOS/Windows native・適用wheelを含む）と隔離clean wheel受入は通過しました。
+詳細は[CI仕上げ報告](doc/performance_experiments/f4_ci_finish_review_20260906.md)・
+[manifest](doc/performance_experiments/f4_ci_finish_manifest_20260906.json)、
+記録追加後やREADME更新後のheadに対するCI・統合状況は[PR #26](https://github.com/kuboyoo/csplendor/pull/26)を参照してください。
+過去のF3/F4報告・runbookのBLOCKEDや承認待ちは各記録時点の状態です。
+
+並列MCTSの累積高速化、最終候補に対するLTO追加効果、現バイナリの実モデル速度は未確定です。
+`CSPLENDOR_ENABLE_LTO`は既定OFFを維持し、過去のnative solver向けopt-in LTO結果を
+Python拡張の追加効果へ転用しません。
+[F2実利用受入](doc/performance_experiments/f2_f3_shipping_review_20260906.md)は旧バイナリのCPU機能確認で、
+selfplay12/selfplay17のPython MCTS＋V3/3133 actions・canonical/public 313特徴を使用しています。
+native 48手やStateFeaturizerの測定経路とは異なり、実モデルsmoke通過も速度A/Bの代わりにはなりません。
+GPU・ブラウザ描画・実モデルpaired速度比較は未実施です。
+[導入・復帰手順](doc/performance_experiments/f4_integration_runbook_20260906.md)に従い、常用環境の切替は別途承認が必要です。
+
+#### F1のその他の参考測定（2026-09-06、正式系列）
+
+同じF1のmain/計測候補・build条件で、`midgame_250` を20万回処理したnative生成速度です。
+上の独立再測定とは別系列で、Python `legal_actions`取得やCI修正後の最新速度ではありません。
+自己対戦・MCTS等のF1結果は詳細報告に保持しています。
+
+| C++内部処理 | main | F1計測候補 | 倍率［95%信頼区間］ |
+|---|---:|---:|---:|
+| 合法手count | 1,185,093 回/秒 | 3,112,938 回/秒 | 2.629［2.615–2.651］ |
+| 合法手codes | 155,366 回/秒 | 378,400 回/秒 | 2.438［2.429–2.447］ |
+| 合法手actions | 172,136 回/秒 | 346,226 回/秒 | 2.008［1.959–2.057］ |
+
+#### 過去の生成速度（2026-07/08、現行候補の再測定ではない）
+
+`Phase 0--7 後`は2026-07-13にRyzen 9 7900X、GCC 13.3で、`2026-08-30`は
 2026-08-30に同じCPU、GCC 15.2で測定しました。いずれもRelease build、Python 3.12.1、
 CPU 1論理コア固定です。代表値は `tests/test_perf.py` と同じseed 42・12手・
-合法手250件の中盤局面です。`Phase 0--7 後`はbest-of-5を7回、`現行`は同じ測定を
+合法手250件の中盤局面です。`Phase 0--7 後`はbest-of-5を7回、`2026-08-30`は同じ測定を
 3 batch実行した21標本の中央値です。自己対戦行はseed 0--9の10 gameを1標本とし、
 それぞれ30標本、90標本を測定した別workloadです。
 
-| 処理 | リファクタ前 | Phase 0--7 後 | 現行 | 現行/リファクタ前 |
+| 処理 | リファクタ前 | Phase 0--7 後 | 2026-08-30 | 2026-08-30/リファクタ前 |
 |---|---:|---:|---:|---:|
 | Python `legal_actions` | 21,473 回/秒 | 26,586 回/秒 | 27,084 回/秒 | 1.26倍 |
 | C++ `legal_action_codes` | 61,313 回/秒 | 118,594 回/秒 | 125,444 回/秒 | 2.05倍 |
@@ -33,12 +110,12 @@ Phase 0--7 後を測定した同じ250件局面の30-pair sustained A/Bでは、
 codesは9.17倍、countは9.62倍です。したがって合法手生成が一律5倍になったわけではなく、
 Python Action object生成の割合と合法手数で倍率が変わります。
 
-現行値とリファクタ前の単純比較は、`legal_actions` が1.26倍、codesが2.05倍、
-countが3.19倍、自己対戦が5.56倍です。現行列はcompiler更新を含む再測定値であり、
+2026-08-30とリファクタ前の単純比較は、`legal_actions` が1.26倍、codesが2.05倍、
+countが3.19倍、自己対戦が5.56倍です。2026-08-30列はcompiler更新を含む再測定値であり、
 Phase 0--7 後との差だけを個別最適化の効果とはみなしません。厳密な変更評価には、
 同一build条件のpaired A/Bを用いてください。
 
-#### MCTS探索性能
+#### 過去のMCTS探索性能
 
 2026-08-04に同じRyzen 9 7900X、GCC 13、portable Release buildで、高速化前の`main`
 （`6ddb47c`）とMCTSホットパス高速化後を同一host・seed・tree size・batch sizeで比較した
@@ -63,7 +140,7 @@ action decodeが3,240.5 nsから15.4 ns（210.07倍）、dense mask走査が22.0
 実モデル込みの速度向上はNN推論時間の割合に依存します。測定方法、O(1)監査、compact
 edgeの詳細は[MCTSホットパス高速化](https://github.com/kuboyoo/csplendor/blob/main/doc/mcts_hotpath_optimizations.md)を参照してください。
 
-#### めくれ厳密詰み探索性能
+#### 過去のめくれ厳密詰み探索・Phase別測定
 
 2026-08-30にRyzen 9 7900X、GCC 15.2、portable Release build、Python 3.12.1、
 CPU 1論理コア固定で測定しました。5手詰め収集局面の初手を固定し、深さ7、
@@ -85,6 +162,78 @@ CPU 1論理コア固定で測定しました。5手詰め収集局面の初手�
 置換表容量を保守的に事前確保してrehashを抑えます。node limitは従来どおり毎nodeで厳密に
 検査し、wall-clockと外部cancelだけを64 nodeごとに検査します。node 0では必ず検査するため、
 事前cancelと即時timeoutの挙動は維持されます。
+
+2026-09-05のPhase 3Cでは、詰み探索の置換表を用途別に圧縮しました。portable Releaseの
+paired A/Bで、exact 5手局面は3.91%高速化し、exact/visible solverのpeak RSSは局面により
+11.91%〜27.38%減少しました。production型TT microは28.40%高速化した一方、key生成単体は
+2.33%低下しています。探索量・候補順・5手/7手詰み・証明DAGは同一です。測定fixtureと方法が
+上表とは異なるため倍率は合算していません。詳細は
+[Phase 3C測定記録](doc/performance_experiments/phase3c_solver_tt_compaction_20260905.md)を参照してください。
+
+Phase 3D-P1では、めくれ候補のスコアをsort比較のたびに再計算せず、一度だけ計算するように
+しました。3C後を基準とする固定探索量のpaired A/Bで、代表deepは1.497倍（独立再測定1.486倍）、
+shallowは1.307倍、warm sessionは1.544倍です。候補順・探索結果を維持し、5手/7手詰み、
+proof/frontier、cache再利用、ASan/UBSanを検証しました。depth7の速度fixtureはnode上限で
+UNKNOWNとなるため、7手詰みの完遂速度を意味しません。小さなproof計測の不確実性を含む詳細は
+[Phase 3D-P1測定記録](doc/performance_experiments/phase3dp1_score_once_20260905.md)を参照してください。
+
+Phase 3D-P2では、再帰呼出しごとに合法手・めくれ候補の一時配列を再利用するようにしました。
+3D-P1後を基準に、代表deepは1.085倍（独立再測定1.082倍）、shallowは1.076倍、
+warm sessionは1.073倍です。同じ100万ノード探索の確保回数は約938万回から330万回へ減少し、
+5手/7手詰み、proof/frontier、cache再利用、ASan/UBSanの検証を通過しました。
+過去Phaseとの倍率は乗算していません。極小proofの単発測定に残る制約を含む詳細は
+[Phase 3D-P2測定記録](doc/performance_experiments/phase3dp2_search_scratch_20260905.md)を参照してください。
+
+Phase 3D-1では、visible-only詰み探索の通常着手を軽量なRAII復元へ変更しました。
+3D-P2比で代表sliceは1.182倍（独立再測定1.172倍）、確保回数は約255万回から81万回へ
+減少しました。めくれ込みsolverへの適用案はproofの回帰基準未達で採用せず、従来方式を維持します。
+5手/7手詰み・全回帰・ASan/UBSanを検証済みです。採用範囲と棄却判断の詳細は
+[Phase 3D-1測定記録](doc/performance_experiments/phase3d1_normal_rollback_20260905.md)を参照してください。
+
+Phase 3D-2/3D-3は採否評価を完了しました。対象山だけを復元する3D-2の試作は代表deepで
+1.012倍（独立再測定1.010倍）にとどまり、採用基準未達で撤去しました。3D-3は代表探索で
+購入ごとの実訪問めくれ数が1枚だったため、prefix共用を導入していません。
+既存の高速化を維持し、PERF専用診断と記録のみ追加しています。追加の高速化は主張しません。
+詳細は[Phase 3D-2/3D-3測定記録](doc/performance_experiments/phase3d23_reveal_transactions_20260905.md)を参照してください。
+
+5B-R/4B-1の採否評価も完了しました。Game scratch再利用（5B-R）は独立再測定で1.017倍に
+とどまったため撤去し、legacy MCTSのnode・aux・LRU管理表統合（4B-1）を採用しました。
+3D-2/3評価後の同じ基準に対し、代表legacy探索は1.088倍（独立再測定1.103倍）、
+確保回数は約11.1%減少しました。これはnative 48-action＋模擬評価器での測定であり、
+実NN・V3・並列共有木や詰め問題生成全体の高速化を表す数値ではありません。
+未展開ノードを大量に保持する場合のメモリ増加を含む詳細とreferenceビルド方法は
+[5B-R/4B-1測定記録](doc/performance_experiments/phase5br4b1_mcts_state_records_20260905.md)を参照してください。
+
+Phase 4C-1〜4C-3は試作と採否評価を完了しました。metrics分散、予約tokenのinline格納、
+state確認と選択のlock統合はいずれも事前の主要並列探索5%改善基準に届かず、撤去しました。
+最後のlock統合案は1.048倍（独立再測定1.043倍）でしたが、採用後の速度としては扱いません。
+既存の探索実装を保持し、PERF専用の深さ別lock・予約占有診断と検証記録を追加しています。
+詳細は[Phase 4C測定記録](doc/performance_experiments/phase4c_concurrency_20260906.md)を参照してください。
+
+Phase 5DのV3 payment静的DPも試作・評価しました。修正版はV3マスク生成で1.127倍
+（独立再測定1.135倍）になりましたが、V3自己対戦の回帰基準を満たさず撤去しました。
+本番codecは従来方式のままです。V3公開経路のベンチマーク、全支払いパターン・byte境界・
+全IDの網羅テストを追加しました。48手MCTSや実NNの高速化を意味しません。
+詳細は[Phase 5D測定記録](doc/performance_experiments/phase5d_v3_payment_20260906.md)を参照してください。
+
+Phase 3E・5E・5Aも採否評価を完了しました。3Eのtake代表化は代表visible-only探索で
+1.106倍（独立再測定1.112倍）、5Eの返却手順位選択はfull-action自己対戦で
+1.088倍（再測定1.079倍）となり採用しました。5Aの48手直接適用は代表処理が遅くなり撤去しました。
+別経路の倍率を掛け合わせたり、実NN・問題保存速度の改善率として扱ったりはしません。
+詳細は[3E・5E・5A測定記録](doc/performance_experiments/phase3e5e5a_action_selection_20260906.md)を参照してください。
+
+Phase 5C-Bでは `StateEncoder.encode_numpy` を追加し、既存`StateFeaturizer`のlist経由変換を
+省きました。Python特徴量取得は12.55倍（独立再測定13.43倍）、特徴量取得＋ランダム着手の
+Python経路は約5.97倍です。native MCTS・実NN全体の倍率ではありません。
+固定特徴量の定数表案はMCTSで改善が再現せず撤去しました。
+詳細は[Phase 5C-B測定記録](doc/performance_experiments/phase5cb_features_20260906.md)を参照してください。
+
+Phase 6ではportable既定を維持し、native実行ファイル向けのRelease LTOをopt-inで追加しました。
+同じ採用コードの厳密めくれ探索で約1.06倍（独立再測定でも約1.06倍）です。
+Python拡張は既にpybind11がLTOを付けており、今回の追加効果とは扱いません。
+Linux nativeとPGOは別経路の回帰が再現したため棄却・撤去しました。
+[Phase 6検証報告](doc/performance_experiments/phase6_build_profiles_20260906.md)と
+[共通要件§19–22の監査](doc/performance_experiments/phase6_common_audit_20260906.md)を参照してください。
 
 ### 実験的な並列MCTS
 
@@ -173,6 +322,23 @@ cp _csplendor.*.so ../csplendor/
 
 `CSPLENDOR_CPU_TARGET`で、配布用とローカル最適化用を同じソースから
 分けてビルドできます。
+
+Linuxのnative実行ファイルでは、次のようにCPU互換性を保ったRelease LTOを選択できます。
+`CSPLENDOR_ENABLE_LTO`の既定はOFFです。OFFでもPython拡張の既存pybind11 LTOは無効化しません。
+ONではCMakeでcompiler/linkerのIPO対応を検査し、Release構成だけに適用します。
+
+```bash
+cmake -S . -B build/portable-lto \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCSPLENDOR_CPU_TARGET=portable \
+  -DCSPLENDOR_ENABLE_LTO=ON \
+  -DCSPLENDOR_BUILD_PYTHON_MODULE=OFF \
+  -DCSPLENDOR_BUILD_ENGINE_BENCHMARK=ON
+cmake --build build/portable-lto --parallel 4
+```
+
+Linux x86_64向け`-march=native`とPGOはPhase 6の比較で棄却したため、正式profileには含めません。
+以下のApple Silicon向けnative profileと配布wheel制限は従来どおりです。
 
 - `portable`（既定）: CPU固有フラグを追加しません。汎用arm64 wheelなどの
   配布物には必ずこちらを使用します。

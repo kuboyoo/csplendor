@@ -1,0 +1,14 @@
+{
+  "transport": "GitHub connector (CLI token createPullRequest denied)",
+  "url": "https://github.com/kuboyoo/csplendor/pull/26",
+  "number": 26,
+  "state": "open",
+  "merged": false,
+  "draft": false,
+  "base": "main",
+  "base_sha": "f5ec6c545c9a2727ca708bc4c6822daf07a2c4dc",
+  "head": "review/f3-lint-correction-20260906",
+  "head_sha": "f6d28dde184ff1950c4729197a3a9ac1645b0c11",
+  "merge_commit_sha": null,
+  "created_at": "2026-09-06T04:56:57Z"
+}
