@@ -1,5 +1,6 @@
 #include "game.h"
 #include "perf_counters.h"
+#include "solver_path.h"
 
 #include <cstddef>
 #include <cstdlib>
@@ -72,6 +73,28 @@ void test_counter_contract() {
 
   csplendor::perf::reset();
   check_all_zero(csplendor::perf::snapshot());
+}
+
+void test_path_comparison_counter() {
+  csplendor::perf::reset();
+  csplendor::solver_internal::RecursionPath<int, std::hash<int>> path;
+  path.push(7);
+  path.push(9);
+  check(path.contains(9)); // one comparison, reverse/LIFO order
+  check(path.contains(7)); // two comparisons
+  check(!path.contains(11)); // two comparisons, exhausted
+  path.pop(9);
+  path.pop(7);
+  check(!path.contains(7)); // zero comparisons, empty
+  const auto counters = csplendor::perf::snapshot();
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
+  check(counters.get(Counter::SolverPathFinds) == 4);
+  check(counters.get(Counter::SolverPathLinearComparisons) ==
+        (csplendor::solver_internal::solver_path_stack_enabled ? 5U : 0U));
+#else
+  check_all_zero(counters);
+#endif
+  csplendor::perf::reset();
 }
 
 void test_detailed_instrumentation_contract() {
@@ -198,6 +221,7 @@ void test_concurrent_counter_updates() {
 
 int main() {
   test_counter_contract();
+  test_path_comparison_counter();
   test_detailed_instrumentation_contract();
   test_concurrent_counter_updates();
 #ifdef CSPLENDOR_PERF_INSTRUMENTATION

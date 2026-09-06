@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -47,30 +48,46 @@ compact_forced_attacker_actions(const std::vector<OrderedAction> &actions,
   size_t take_count = 0;
   size_t reserve_count = 0;
 
-  const auto take_less = [preferred_code](const ScoredTake &left,
-                                        const ScoredTake &right) {
-    // Match the main/reference path's rotate-before-truncate semantics.
-    // The no-hint instantiation retains the original comparison operations.
-    if constexpr (PreferHint) {
-      const bool left_hint = left.second.code == preferred_code;
-      const bool right_hint = right.second.code == preferred_code;
-      if (left_hint != right_hint)
-        return left_hint;
-    }
+  const auto take_base_less = [](const ScoredTake &left, const ScoredTake &right) {
     if (left.first != right.first)
       return left.first > right.first;
     return left.second < right.second;
   };
-  const auto reserve_less = [preferred_code](const OrderedAction &left,
-                                           const OrderedAction &right) {
+  // Instantiate a capturing comparator only for the hint-enabled path.
+  // Keep the original comparison operations shared by both specializations.
+  const auto take_less = [&] {
     if constexpr (PreferHint) {
-      const bool left_hint = left.code == preferred_code;
-      const bool right_hint = right.code == preferred_code;
-      if (left_hint != right_hint)
-        return left_hint;
+      return [preferred_code, take_base_less](const ScoredTake &left, const ScoredTake &right) {
+        const bool left_hint = left.second.code == preferred_code;
+        const bool right_hint = right.second.code == preferred_code;
+        if (left_hint != right_hint)
+          return left_hint;
+        return take_base_less(left, right);
+      };
+    } else {
+      return take_base_less;
     }
+  }();
+  const auto reserve_base_less = [](const OrderedAction &left, const OrderedAction &right) {
     return left < right;
   };
+  const auto reserve_less = [&] {
+    if constexpr (PreferHint) {
+      return [preferred_code, reserve_base_less](const OrderedAction &left, const OrderedAction &right) {
+        const bool left_hint = left.code == preferred_code;
+        const bool right_hint = right.code == preferred_code;
+        if (left_hint != right_hint)
+          return left_hint;
+        return reserve_base_less(left, right);
+      };
+    } else {
+      return reserve_base_less;
+    }
+  }();
+  if constexpr (!PreferHint) {
+    static_assert(std::is_empty_v<decltype(take_less)>, "no-hint comparator must not capture");
+    static_assert(std::is_empty_v<decltype(reserve_less)>, "no-hint comparator must not capture");
+  }
 
   std::vector<OrderedAction> filtered;
   filtered.reserve(actions.size());

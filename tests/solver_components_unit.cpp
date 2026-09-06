@@ -649,6 +649,21 @@ void test_compact_forced_action_filter_order_and_caps() {
           return ls == rs ? left < right : ls > rs;
         });
         std::sort(reserves.begin(), reserves.end());
+        auto expected_no_hint = purchases;
+        expected_no_hint.insert(expected_no_hint.end(), takes.begin(),
+                                takes.begin() + std::min<size_t>(6, takes.size()));
+        expected_no_hint.insert(expected_no_hint.end(), reserves.begin(),
+                                reserves.begin() + std::min<size_t>(3, reserves.size()));
+        expected_no_hint.insert(expected_no_hint.end(), other.begin(), other.end());
+        const auto actual_no_hint =
+            csplendor::solver_internal::compact_forced_attacker_actions<6, 3, false>(
+                input, score, hint);
+        require(actual_no_hint.size() == expected_no_hint.size(), "no-hint category caps changed");
+        for (size_t i = 0; i < expected_no_hint.size(); ++i)
+          require(actual_no_hint[i].code == expected_no_hint[i].code &&
+                      actual_no_hint[i].rank == expected_no_hint[i].rank &&
+                      actual_no_hint[i].neg_points == expected_no_hint[i].neg_points,
+                  "no-hint filter differs from full sort oracle");
         for (auto *category : {&takes, &reserves}) {
           const auto found = std::find_if(
               category->begin(), category->end(),

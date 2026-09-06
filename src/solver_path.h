@@ -55,15 +55,23 @@ public:
     if (!use_stack_)
       return set_.find(key) != set_.end();
 
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
     size_t comparisons = 0;
+#endif
     for (auto it = stack_.rbegin(); it != stack_.rend(); ++it) {
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
       ++comparisons;
+#endif
       if (*it == key) {
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
         CSPLENDOR_PERF_ADD(SolverPathLinearComparisons, comparisons);
+#endif
         return true;
       }
     }
+#ifdef CSPLENDOR_PERF_INSTRUMENTATION
     CSPLENDOR_PERF_ADD(SolverPathLinearComparisons, comparisons);
+#endif
     return false;
   }
 
