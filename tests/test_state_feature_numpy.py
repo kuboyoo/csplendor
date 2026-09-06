@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+
 import csplendor as cs
 from csplendor import _csplendor as core
 

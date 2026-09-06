@@ -1,14 +1,16 @@
 """Build-profile comparisons are explicit, never a general mismatch waiver."""
-from copy import deepcopy
-from pathlib import Path
+
 import importlib.util
 import sys
+from copy import deepcopy
+from pathlib import Path
+
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'scripts'))
-import benchmark_manifest as manifest
-import run_paired_benchmarks as runner
+manifest = importlib.import_module("benchmark_manifest")
+runner = importlib.import_module("run_paired_benchmarks")
 
 
 @pytest.mark.parametrize('axis,key,value', [

@@ -5,6 +5,10 @@ F1測定code `b202e6a0cbb2eded9bc2ee5e59f750428e73ca49`、F1記録
 [F1報告](final_main_vs_candidate_20260906.md)のCSV/manifestを正本とし、F2の単発実NN時間を
 paired A/BやCI付きの高速化率として扱わない。
 
+F3 lint是正後はtestsを含むsource digestだけが変わった。本体/build/binaryは同一。
+現在の結果・digestは[是正報告](f3_lint_correction_20260906.md)と
+[新manifest](f3_lint_manifest_20260906.json)を参照する。旧証跡は履歴として残す。
+
 ## 証跡だけを確認する
 
 - [F2/F3 manifest](f2_f3_manifest_20260906.json)のhashと、`raw/f2_f3_20260906/*.json.gz`を照合する。
@@ -40,11 +44,18 @@ probeはF1の拡張path/SHAにfail-closed。新しいbuild/OSでSHAが異なる�
 モデルpathはGUI README/登録コードから確認したselfplay12/selfplay17だけを許可している。
 外部package/modelをcopyせず読み取り、学習・大容量棋譜出力をしない。
 
-lintの再現（読み取り専用。現在の候補は7件FAIL）：
+lintの再現（読み取り専用。前回e486e27は7件FAIL、是正後は同じrule・対象でPASS）：
 
 ```bash
-python -m ruff check --no-cache --target-version py38 --select E4,E7,E9,F,W,I csplendor tests
+python -m ruff check --target-version py38 --select E4,E7,E9,F,W,I csplendor tests
+python -m ruff check --target-version py38 --select S csplendor
 ```
+
+是正検証の実コマンド・stdout/stderr・終了codeは `raw/f3_lint_20260906/`。
+新規recorderもexclusive-createで既存rawを上書きしない。再検証する場合は未使用の記録名を使う。
+旧`verify_f1()`／`start`はテストを含む旧source digestを要求する履歴用のため、
+是正後へそのまま再実行して通過するとはしない。是正recorderの`finish`は
+承認5ファイルだけの差・本体/build不変・旧raw hashを照合する（既存名の再生成は不可）。
 
 F4用のclean build/installと旧版復帰は[runbook](f4_integration_runbook_20260906.md)を参照。
 ブラウザ/GPU/Genbu/実NN A/B未実施を、上記probe通過によってPASSへ変更しない。

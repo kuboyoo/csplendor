@@ -10,7 +10,6 @@ import pytest
 
 from scripts import compact_phase0_evidence as compactor
 
-
 _SHA_A = "a" * 64
 _SHA_B = "b" * 64
 

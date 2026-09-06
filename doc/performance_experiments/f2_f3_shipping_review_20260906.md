@@ -1,5 +1,16 @@
 # F2・F3受入確認／F4実行準備（2026-09-06）
 
+## 追記：承認済みF3是正を完了
+
+追加5テストのlint違反7件をimport周辺だけで解消した。CI lint/security lint、関連73テスト、
+Python 3.12の595テスト＋coverage 58.89%が通過。現在の判定は **READY_FOR_REVIEW**。
+詳細・新source digest・記録commitの特定方法は[是正報告](f3_lint_correction_20260906.md)と
+[新manifest](f3_lint_manifest_20260906.json)を正とする。リモートCI未実行、**F4は未実行・承認待ち**。
+
+以下は `e486e27cbabdec4387f9d183a758720e1cf2caee` 時点の原報告を保持した履歴である。
+「今回」「未修正」「BLOCKED」および旧source digestはその時点を指し、是正後の状態ではない。
+原報告の自己commit照会は、更新後には本書を変更した是正commitを返すため、原版は上記完全SHAで特定する。
+
 ## 判断：BLOCKED（CI lint、F4は未実行・承認待ち）
 
 実モデルの限定受入とGUIワーカー連携は通過した。一方、現行CIと同じlintコマンドが

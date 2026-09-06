@@ -1,9 +1,11 @@
 """Independent V3 binding regression oracle retained after the 5D DP trial."""
+
 import itertools
 
 import pytest
 
-from csplendor import ActionEncoderV3 as V3, ActionType, Game, get_card
+from csplendor import ActionEncoderV3 as V3
+from csplendor import ActionType, Game, get_card
 
 
 def _patterns(card):

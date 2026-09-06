@@ -1,32 +1,36 @@
 # F4実行準備：未実行・承認待ち
 
-2026-09-06。現在は **BLOCKED**：候補固有のCI lint 7件が未解消。
+2026-09-06追記。F3のCI lint 7件を是正し、ローカル再検証は **READY_FOR_REVIEW**。
+[是正報告](f3_lint_correction_20260906.md)を参照。リモートCIは未実行、出荷承認ではない。
 以下は準備文書であり、merge/push/PR/常用環境変更を実行する許可ではない。
 
 ## 固定するref
 
-- 確認したoriginのリモートmain：`f5ec6c545c9a2727ca708bc4c6822daf07a2c4dc`。
+- F2/F3で確認したoriginのリモートmain：`f5ec6c545c9a2727ca708bc4c6822daf07a2c4dc`。
+  lint是正では再照会していない。F4実行時に再確認する。
 - ローカルmain/origin/main追跡ref：`7835f642b23251d0cb91de180006084521c74aa6`、意図的に未更新。
   追跡refの古さをリモートmainが古い根拠にしない。
 - 検証済みcode：`b202e6a0cbb2eded9bc2ee5e59f750428e73ca49`。
 - F1記録：`49878b661298bf45e39c5f5ca5afa6d0e363736a`。
-- 統合予定の記録付き候補：`review/f2-f3-shipping-20260906`の今回のローカルcommit。
-  完全SHAは完了応答と、`git log -1 --format=%H -- doc/performance_experiments/f2_f3_shipping_review_20260906.md`で記録を特定する。
-  後続lint修正を承認・実施した場合、候補SHAとtest source digestを**再固定**する必要がある。
-- 本体を変えない限りF1 source digest：
+- 前回F2/F3記録commit：`e486e27cbabdec4387f9d183a758720e1cf2caee`。
+- 統合予定の記録付き候補：`review/f3-lint-correction-20260906`の是正ローカルcommit。
+  完全SHAは完了応答と、`git log -1 --format=%H -- doc/performance_experiments/f3_lint_correction_20260906.md`で特定する。
+- F1 source digest（testsも含む、是正前）：
   `05e3c3b52b2e42e1156eeb5facde98c2ba4215214b61b62d0606705a99d11e06`。
-  このdigestはtestsも含むため、lint修正後は全source digestと本体のみの不変性を分けて記録する。
+  是正後：`13d7c16e717db7e9a5f60c3e39c50746fb443c290d44d09e353cc478a5ce465e`。
+  差は5テストのimportのみ。本体・build・依存関係・計測fixture不変を新manifestへ記録した。
 
 ## 1. 統合前（別承認が必要）
 
-1. lintの5ファイルだけを修正し、同じCI lintと5ファイルpytestを通す。本体・build・測定harnessを変更しない。
-   [失敗・修正範囲](f2_f3_shipping_review_20260906.md)に従う。現状のままmergeしない。
+1. 完了済みの[lint是正・再検証](f3_lint_correction_20260906.md)をレビューする。
+   同じCI lint、関連73件、Python 3.12全体＋coverageは通過済み。無条件には再実行せず、
+   以後の差分やremote required checksに必要な再検証を決める。F4の明示承認なしにmergeしない。
 2. 読取りで最新mainと候補を再確認する。
 
    ```bash
    git status --short --branch
    git ls-remote origin refs/heads/main
-   git rev-parse review/f2-f3-shipping-20260906
+   git rev-parse review/f3-lint-correction-20260906
    git diff b202e6a0cbb2eded9bc2ee5e59f750428e73ca49 -- src csplendor CMakeLists.txt setup.py pyproject.toml
    ```
 
@@ -50,7 +54,9 @@
 - `sanitizer`：TSan、ASan/UBSan。
 - `nightly-native-soak`：schedule/manualのみ。PRで自動実行したと扱わない。
 
-どのjobがbranch protectionで必須かは未確認。F1のローカルnative44/Python595等は再利用するが、
+どのjobがbranch protectionで必須かは未確認。lint是正でPython 3.12は595 passed、
+1 skipped、4 deselected、coverage 58.89%（必須50%）、compile/lint/security lintも通過。
+clean installや他Python/OS/jobの今回実行ではない。F1のローカルnative44等は再利用するが、
 未実行のhosted CIを緑に読み替えない。実利用側のdirty treeを配備pinにする承認も含めない。
 
 ## 2. merge後のclean build/install（今回は未実行）

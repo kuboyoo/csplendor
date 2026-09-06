@@ -1,5 +1,7 @@
 """Binding-level checks against the unchanged full enumeration API."""
+
 import pytest
+
 from csplendor import Game
 from tests.support import set_current_player
 

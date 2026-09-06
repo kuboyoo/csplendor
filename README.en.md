@@ -41,8 +41,11 @@ unconfirmed. `CSPLENDOR_ENABLE_LTO` stays OFF by default. See the
 F2 exercised real selfplay12/selfplay17 checkpoints on CPU through the existing
 consumer: **Python MCTS, V3/3133 actions, canonical/public 313-feature encoding**,
 not native 48-action MCTS or the optimized StateFeaturizer path. Real-model A/B,
-browser rendering and GPU acceptance were not performed. F3 found candidate-only
-CI lint violations; shipment is **BLOCKED**, not approved by these smoke checks.
+browser rendering and GPU acceptance were not performed. F3's seven lint violations
+in five added tests are fixed with import-only changes: **READY_FOR_REVIEW** locally.
+Related tests (73) and Python 3.12 tests (595, coverage 58.89%) passed; remote CI
+has not run and shipment is not approved. See the
+[correction report](doc/performance_experiments/f3_lint_correction_20260906.md).
 See [acceptance/review](doc/performance_experiments/f2_f3_shipping_review_20260906.md)
 and [integration/rollback preparation](doc/performance_experiments/f4_integration_runbook_20260906.md).
 No main merge, push or production installation has been executed.

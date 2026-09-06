@@ -39,7 +39,9 @@ GCC 15.2、portable Release、22 pairs / 11 blocks。nativeはLTOなし、Python
 F2では実モデルselfplay12/selfplay17をCPUで小さく検証しました。利用側は**Python MCTS＋V3**、
 canonical/public特徴量313次元で、native 48手やStateFeaturizerの測定経路とは異なります。
 実モデルのmain対速度比較、ブラウザ描画、GPU受入は未実施です。
-F3で候補固有のCI lint違反が見つかったため、出荷判定は**BLOCKED**。
+F3の追加テスト5ファイル・CI lint違反7件は最小修正済みで、ローカル判定は**READY_FOR_REVIEW**。
+関連73件とPython 3.12の595件・coverage 58.89%が通過しました。リモートCIは未実行で、出荷承認ではありません。
+[是正報告](doc/performance_experiments/f3_lint_correction_20260906.md)、
 [受入・最終レビュー](doc/performance_experiments/f2_f3_shipping_review_20260906.md)と
 [F4準備・復帰手順](doc/performance_experiments/f4_integration_runbook_20260906.md)を参照してください。
 main統合・push・常用環境更新は未実行です。
