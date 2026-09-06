@@ -18,6 +18,7 @@ from ._csplendor import (
 from .api.usi_kifu import action_to_usi
 
 MATE_DEPTH_SEARCH_FORMAT = "csplendor_mate_depth_search_v1"
+_ROOT_PROGRESS_FIELDS = {"root_actions", "root_actions_completed", "root_action"}
 MATE_ANYTIME_SEARCH_FORMAT = "csplendor_mate_anytime_search_v1"
 _WIN_SCORE = 15
 _NO_REQUIRED_ACTION = (1 << 64) - 1
@@ -490,6 +491,9 @@ def _solve_depth_parallel(
         dict(raw["stats"]) for raw in completed_raw
     ]:
         for name, value in source.items():
+            if name in _ROOT_PROGRESS_FIELDS:
+                # Child-worker progress does not describe the split root.
+                continue
             if name == "elapsed_ms" or name not in aggregate:
                 continue
             if isinstance(value, (int, float)):
@@ -727,10 +731,15 @@ def search_reveal_verified_mate_depths(
         native_stats = dict(native["stats"])
         nodes = int(native_stats.get("nodes", 0))
         total_nodes += nodes
+        for name in _ROOT_PROGRESS_FIELDS:
+            total_stats.pop(name, None)
         for name, value in native_stats.items():
             if name == "elapsed_ms" or not isinstance(value, (int, float)):
                 continue
-            total_stats[name] = total_stats.get(name, 0) + value
+            total_stats[name] = (
+                value if name in _ROOT_PROGRESS_FIELDS
+                else total_stats.get(name, 0) + value
+            )
 
         unknown_reason = native["unknown_reason"]
         proven = bool(native["proven"])

@@ -92,8 +92,11 @@ def test_reveal_solver_proof_dag_and_action_order_golden():
     assert [entry["action_code"] for entry in result["line"]] == [692, 37]
     assert result["proof_dag"]["complete"] is True
     assert result["proof_dag"]["validated"] is True
+    # The proof and its order are unchanged; the stats now expose root progress.
+    assert result["stats"]["root_actions"] == 24
+    assert result["stats"]["root_actions_completed"] == 1
     assert _digest_without_elapsed(result) == (
-        "9732dd60583389a9220ae450619dcaecadc1defc73f6c9cfcbec128173fe2ba2"
+        "b2d99b3d6f708148e9e0d1a02d5d506a67dbf1186ef87022ae8f67979db3a621"
     )
 
 

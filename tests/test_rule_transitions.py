@@ -175,7 +175,8 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
     stats = {
         key: value
         for key, value in result["stats"].items()
-        if key != "elapsed_ms"
+        # Root progress is an additive diagnostic, not a rule/search-tree change.
+        if key not in {"elapsed_ms", "root_actions", "root_actions_completed", "root_action"}
     }
     payload = {
         "proven": result["proven"],

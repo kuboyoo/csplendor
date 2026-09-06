@@ -35,20 +35,19 @@ struct RevealVerifiedFrontierResult {
 
 class RevealVerifiedSolver {
 public:
-  RevealVerifiedSolver(int attacker, int depth, uint64_t max_nodes,
-                       double time_limit_seconds,
-                       std::vector<uint64_t> preferred_attacker_actions = {},
-                       bool include_proof_dag = false,
-                       size_t proof_dag_node_limit = 100000,
-                       size_t proof_dag_edge_limit = 500000,
-                       uint64_t required_root_action = UINT64_MAX,
-                       bool strict_preferred_attacker_actions = false,
-                       size_t strict_preferred_attacker_prefix = 0,
-                       bool exhaustive_attacker_actions = false,
-                       bool exact_reveal_search = false,
-                       std::shared_ptr<
-                           csplendor::solver_internal::RevealSearchCancellationToken>
-                           cancellation_token = {});
+  RevealVerifiedSolver(
+      int attacker, int depth, uint64_t max_nodes, double time_limit_seconds,
+      std::vector<uint64_t> preferred_attacker_actions = {},
+      bool include_proof_dag = false, size_t proof_dag_node_limit = 100000,
+      size_t proof_dag_edge_limit = 500000,
+      uint64_t required_root_action = UINT64_MAX,
+      bool strict_preferred_attacker_actions = false,
+      size_t strict_preferred_attacker_prefix = 0,
+      bool exhaustive_attacker_actions = false,
+      bool exact_reveal_search = false,
+      std::shared_ptr<csplendor::solver_internal::RevealSearchCancellationToken>
+          cancellation_token = {},
+      bool use_route_ordering = true, bool cooperative_reveals = false);
   ~RevealVerifiedSolver();
 
   RevealVerifiedSolver(const RevealVerifiedSolver &other);

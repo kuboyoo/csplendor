@@ -431,6 +431,9 @@ void bind_solvers(py::module_ &m) {
         stats["terminal_nodes"] = result.stats.terminal_nodes;
         stats["legal_moves"] = result.stats.legal_moves;
         stats["reveal_branches"] = result.stats.reveal_branches;
+        stats["root_actions"] = result.stats.root_actions;
+        stats["root_actions_completed"] = result.stats.root_actions_completed;
+        stats["root_action"] = result.stats.root_action;
         stats["final_round_reveal_collapses"] =
             result.stats.final_round_reveal_collapses;
         stats["final_round_score_prunes"] =
@@ -569,10 +572,11 @@ void bind_solvers(py::module_ &m) {
          size_t proof_dag_edge_limit, uint64_t required_root_action,
          bool strict_preferred_attacker_actions,
          size_t strict_preferred_attacker_prefix,
-         const std::string &proof_dag_format,
-         bool exhaustive_attacker_actions, bool exact_reveal_search,
+         const std::string &proof_dag_format, bool exhaustive_attacker_actions,
+         bool exact_reveal_search,
          const std::shared_ptr<RevealSearchCancellationToken>
-             &cancellation_token) {
+             &cancellation_token,
+         bool use_route_ordering, bool cooperative_reveals) {
         if (proof_dag_format != "v1" && proof_dag_format != "compact") {
           throw std::invalid_argument(
               "proof_dag_format must be 'v1' or 'compact'");
@@ -584,23 +588,23 @@ void bind_solvers(py::module_ &m) {
         RevealVerifiedSearchResult result;
         {
           py::gil_scoped_release release;
-          result = RevealVerifiedSolver(attacker, depth, max_nodes,
-                                        time_limit_seconds,
-                                        preferred_attacker_actions,
-                                        include_proof_dag,
-                                        proof_dag_node_limit,
-                                        proof_dag_edge_limit,
-                                        required_root_action,
-                                        strict_preferred_attacker_actions,
-                                        strict_preferred_attacker_prefix,
-                                        exhaustive_attacker_actions,
-                                        exact_reveal_search,
-                                        cancellation_token)
-                       .solve(input_snapshot);
+          result =
+              RevealVerifiedSolver(
+                  attacker, depth, max_nodes, time_limit_seconds,
+                  preferred_attacker_actions, include_proof_dag,
+                  proof_dag_node_limit, proof_dag_edge_limit,
+                  required_root_action, strict_preferred_attacker_actions,
+                  strict_preferred_attacker_prefix, exhaustive_attacker_actions,
+                  exact_reveal_search, cancellation_token, use_route_ordering,
+                  cooperative_reveals)
+                  .solve(input_snapshot);
         }
 
         py::dict stats;
         stats["nodes"] = result.stats.nodes;
+        stats["root_actions"] = result.stats.root_actions;
+        stats["root_actions_completed"] = result.stats.root_actions_completed;
+        stats["root_action"] = result.stats.root_action;
         stats["memo_hits"] = result.stats.memo_hits;
         stats["terminal_nodes"] = result.stats.terminal_nodes;
         stats["legal_moves"] = result.stats.legal_moves;
@@ -659,7 +663,9 @@ void bind_solvers(py::module_ &m) {
       py::arg("proof_dag_format") = "v1",
       py::arg("exhaustive_attacker_actions") = false,
       py::arg("exact_reveal_search") = false,
-      py::arg("cancellation_token") = nullptr);
+      py::arg("cancellation_token") = nullptr,
+      py::arg("use_route_ordering") = true,
+      py::arg("cooperative_reveals") = false);
 }
 
 } // namespace csplendor::python

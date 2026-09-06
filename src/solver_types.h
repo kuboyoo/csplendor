@@ -39,6 +39,9 @@ struct VisibleOnlySearchResult {
 
 struct RevealVerifiedSearchStats {
   uint64_t nodes = 0;
+  uint64_t root_actions = 0;
+  uint64_t root_actions_completed = 0;
+  uint64_t root_action = 0;
   uint64_t memo_hits = 0;
   uint64_t persistent_memo_hits = 0;
   uint64_t iterative_order_hits = 0;

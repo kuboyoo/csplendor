@@ -1,5 +1,6 @@
 #include "reveal_verified_solver.h"
 #include "action.h"
+#include "mate_route_ordering.h"
 #include "reveal_solver_components.h"
 #include "rule_transition.h"
 #include <algorithm>
@@ -34,9 +35,9 @@ public:
        uint64_t required_root_action, bool strict_preferred_attacker_actions,
        size_t strict_preferred_attacker_prefix,
        bool exhaustive_attacker_actions, bool exact_reveal_search,
-       std::shared_ptr<RevealSearchCancellationToken> cancellation_token)
-      : attacker_(attacker), depth_(depth),
-        max_nodes_(max_nodes),
+       std::shared_ptr<RevealSearchCancellationToken> cancellation_token,
+       bool use_route_ordering, bool cooperative_reveals)
+      : attacker_(attacker), depth_(depth), max_nodes_(max_nodes),
         limits_(max_nodes, time_limit_seconds, std::move(cancellation_token)),
         preferred_attacker_actions_(std::move(preferred_attacker_actions)),
         include_proof_dag_(include_proof_dag),
@@ -45,7 +46,13 @@ public:
         strict_preferred_attacker_actions_(strict_preferred_attacker_actions),
         strict_preferred_attacker_prefix_(strict_preferred_attacker_prefix),
         exhaustive_attacker_actions_(exhaustive_attacker_actions),
-        exact_reveal_search_(exact_reveal_search) {}
+        exact_reveal_search_(exact_reveal_search),
+        use_route_ordering_(use_route_ordering),
+        cooperative_reveals_(cooperative_reveals) {
+    if (cooperative_reveals_ && (!exact_reveal_search_ || include_proof_dag_))
+      throw std::invalid_argument(
+          "cooperative reveals require exact search without a proof DAG");
+  }
 
   RevealVerifiedSearchResult solve(const Game &input) {
     max_cache_states_ = 0;
@@ -59,8 +66,15 @@ public:
       const ForceStatus status =
           forced_win(game, path, depth_, exact_reveal_search_);
       result.proven = status == ForceStatus::PROVEN;
-      result.reason = result.proven ? "all_reveals_verified"
-                                    : "candidate_mate_not_verified";
+      result.reason =
+          result.proven ? (cooperative_reveals_ ? "cooperative_reveals_verified"
+                                                : "all_reveals_verified")
+                        : "candidate_mate_not_verified";
+      if (cooperative_reveals_ && !exhaustive_attacker_actions_ &&
+          !result.proven) {
+        result.reason = "cooperative_candidate_not_verified";
+        result.unknown_reason = result.reason;
+      }
       result.line = principal_line(exact_reveal_search_);
       if (result.proven && include_proof_dag_)
         result.proof_dag = build_proof_dag();
@@ -104,8 +118,10 @@ public:
       std::unordered_set<DepthStateKey, DepthStateKeyHash> path;
       const ForceStatus status = forced_win(game, path, depth_, true);
       result.proven = status == ForceStatus::PROVEN;
-      result.reason = result.proven ? "all_reveals_verified"
-                                    : "candidate_mate_not_verified";
+      result.reason =
+          result.proven ? (cooperative_reveals_ ? "cooperative_reveals_verified"
+                                                : "all_reveals_verified")
+                        : "candidate_mate_not_verified";
       result.line = principal_line(true);
     } catch (const SearchLimitExceeded &exc) {
       result.reason = exc.what();
@@ -119,7 +135,11 @@ public:
     return result;
   }
 
-  void clear_exact_cache() { exact_memo_.clear(); }
+  void clear_exact_cache() {
+    exact_memo_.clear();
+    exact_bounds_.clear();
+    route_ordering_.clear();
+  }
 
   void trim_exact_cache(size_t max_cache_states) {
     if (!max_cache_states || exact_memo_.size() <= max_cache_states)
@@ -269,6 +289,9 @@ public:
 
 private:
   Game begin_search(const Game &input, bool clear_memo = true) {
+    exact_bounds_.clear();
+    route_ordering_.clear();
+    cutoff_actions_.clear();
     if (clear_memo) {
       memo_.clear();
       exact_memo_.clear();
@@ -399,6 +422,12 @@ private:
     }
   };
 
+  struct ExactBounds {
+    int first_proven = std::numeric_limits<int>::max();
+    int last_refuted = -1;
+    Entry winning;
+  };
+
   int attacker_ = 0;
   int depth_ = 0;
   uint64_t max_nodes_ = 0;
@@ -407,10 +436,13 @@ private:
   RevealVerifiedSearchStats stats_;
   std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash> memo_;
   std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash> exact_memo_;
+  std::unordered_map<StateKey, ExactBounds, StateKeyHash> exact_bounds_;
+  std::unordered_map<uint64_t, std::array<uint64_t, 2>> cutoff_actions_;
   uint64_t search_generation_ = 0;
   uint64_t cache_touch_counter_ = 0;
   Game root_{0};
   HiddenOutcomeCatalog hidden_catalog_;
+  csplendor::solver_internal::MateRouteOrdering route_ordering_;
   std::vector<uint64_t> preferred_attacker_actions_;
   bool include_proof_dag_ = false;
   RevealProofDagBuilder proof_builder_;
@@ -419,6 +451,8 @@ private:
   size_t strict_preferred_attacker_prefix_ = 0;
   bool exhaustive_attacker_actions_ = false;
   bool exact_reveal_search_ = false;
+  bool use_route_ordering_ = true;
+  bool cooperative_reveals_ = false;
   std::unordered_map<DepthStateKey, size_t, DepthStateKeyHash> proof_node_ids_;
   std::unordered_map<DepthStateKey, size_t, DepthStateKeyHash>
       proof_terminal_node_ids_;
@@ -442,6 +476,30 @@ private:
     if (game.current_player() == attacker_ && depth <= 0)
       return ForceStatus::REFUTED;
 
+    if (exact_refinement && use_route_ordering_ && !include_proof_dag_ &&
+        !path.empty() && game.current_player() == 1 &&
+        !game.board.waiting_noble && player1_can_win_now(game)) {
+      // P1's turn closes the round: an immediately winning purchase is a
+      // terminal witness, regardless of its replacement card.
+      return attacker_ == 1 ? ForceStatus::PROVEN : ForceStatus::REFUTED;
+    }
+
+    if (exact_refinement && use_route_ordering_ && depth == 1 &&
+        !game.board.waiting_noble && !game.board.final_round &&
+        max_last_turn_score(game, attacker_) < 15) {
+      // No legal single action can reach the winning threshold. A refill
+      // cannot be bought until a later attacker turn. Unlike route estimates,
+      // this is an admissible one-turn bound, not heuristic pruning.
+      return ForceStatus::REFUTED;
+    }
+
+    if (exact_refinement && use_route_ordering_ && !include_proof_dag_ &&
+        can_resolve_final_round(game)) {
+      // This inexpensive exact calculation is cheaper than hashing and
+      // retaining millions of final-round boards that differ only by refills.
+      return resolve_final_round(game, true).status;
+    }
+
     const DepthStateKey key{state_key(game, exact_refinement), depth};
     auto &memo = exact_refinement ? exact_memo_ : memo_;
     auto memo_it = memo.find(key);
@@ -452,6 +510,20 @@ private:
       memo_it->second.generation = search_generation_;
       memo_it->second.last_touched = ++cache_touch_counter_;
       return memo_it->second.status;
+    }
+    if (exact_refinement && monotone_bounds_enabled()) {
+      const auto bound = exact_bounds_.find(key.state);
+      if (bound != exact_bounds_.end()) {
+        if (depth >= bound->second.first_proven) {
+          ++stats_.memo_hits;
+          memo[key] = bound->second.winning;
+          return ForceStatus::PROVEN;
+        }
+        if (exhaustive_attacker_actions_ && depth <= bound->second.last_refuted) {
+          ++stats_.memo_hits;
+          return ForceStatus::REFUTED;
+        }
+      }
     }
     if (path.find(key) != path.end()) {
       ++stats_.terminal_nodes;
@@ -465,6 +537,10 @@ private:
 
     std::vector<OrderedAction> actions =
         exact_refinement ? proof_ordered_actions(game) : ordered_actions(game);
+    if (exact_refinement && use_route_ordering_ && depth > 1)
+      prioritize_routes(game, actions, depth);
+    if (exact_refinement && use_route_ordering_ && depth > 1)
+      prefer_cutoff_actions(game.current_player(), depth, actions);
     if (exact_refinement)
       prefer_iterative_action(key.state, depth, game.current_player(), actions);
     if (game.current_player() == attacker_)
@@ -478,14 +554,20 @@ private:
     }
 
     const int current_player = game.current_player();
+    const bool is_root = path.empty();
+    if (is_root)
+      stats_.root_actions = actions.size();
     path.insert(key);
     bool has_unknown = false;
     Entry representative;
     representative.action_count = actions.size();
 
     for (const OrderedAction &ordered : actions) {
+      if (is_root)
+        stats_.root_action = ordered.code;
       bool action_unknown = false;
       bool action_refuted = false;
+      bool action_proven = false;
       int representative_reveal = -1;
       bool has_representative_reveal = false;
       const auto visit_outcome = [&](int reveal_card) {
@@ -498,7 +580,21 @@ private:
           representative_reveal = reveal_card;
           has_representative_reveal = true;
         }
+        if (cooperative_reveals_) {
+          // The other player controls actions but nature may cooperate with
+          // this attacker. A proven opponent win under this quantifier is a
+          // counterstrategy to a guaranteed mate, not a guaranteed mate itself.
+          if (child == ForceStatus::PROVEN) {
+            representative_reveal = reveal_card;
+            action_proven = true;
+            action_unknown = false;
+            return false;
+          }
+          action_unknown = action_unknown || child == ForceStatus::UNKNOWN;
+          return true;
+        }
         if (child == ForceStatus::REFUTED) {
+          representative_reveal = reveal_card;
           action_refuted = true;
           return false;
         }
@@ -507,10 +603,17 @@ private:
       };
       const bool completed =
           exact_refinement
-              ? for_each_proof_outcome(game, ordered, visit_outcome)
+              ? for_each_proof_outcome(game, ordered, visit_outcome,
+                                       use_route_ordering_ &&
+                                           !include_proof_dag_,
+                                       use_route_ordering_ ? depth : 0)
               : for_each_search_outcome(game, ordered, visit_outcome);
-      if (!completed && !action_refuted)
+      if (cooperative_reveals_)
+        action_refuted = completed && !action_proven && !action_unknown;
+      if (!completed && !action_refuted && !action_proven)
         action_unknown = true;
+      if (is_root)
+        ++stats_.root_actions_completed;
 
       if (!representative.has_action) {
         representative = Entry{ForceStatus::UNKNOWN,  ordered.code,
@@ -518,6 +621,7 @@ private:
                                actions.size(),        is_replayable(ordered)};
       }
       if (current_player == attacker_ && !action_refuted && !action_unknown) {
+        remember_cutoff_action(current_player, depth, ordered.code);
         path.erase(key);
         store_entry(memo, key,
                     Entry{ForceStatus::PROVEN,   ordered.code,
@@ -526,6 +630,7 @@ private:
         return ForceStatus::PROVEN;
       }
       if (current_player != attacker_ && action_refuted) {
+        remember_cutoff_action(current_player, depth, ordered.code);
         path.erase(key);
         store_entry(memo, key,
                     Entry{ForceStatus::REFUTED,  ordered.code,
@@ -552,7 +657,111 @@ private:
       const DepthStateKey &key, Entry entry) {
     entry.generation = search_generation_;
     entry.last_touched = ++cache_touch_counter_;
+    if (&memo == &exact_memo_ && monotone_bounds_enabled()) {
+      // Positive counterstrategy witnesses also remain valid with more time,
+      // even if a policy probe would now prefer different candidate actions.
+      // Negative bounds require exhaustive, unrestricted action sets.
+      if (exact_bounds_.size() >= 65536)
+        exact_bounds_.clear();
+      auto &bounds = exact_bounds_[key.state];
+      if (entry.status == ForceStatus::PROVEN &&
+          key.depth < bounds.first_proven) {
+        bounds.first_proven = key.depth;
+        bounds.winning = entry;
+      }
+      if (exhaustive_attacker_actions_ && entry.status == ForceStatus::REFUTED)
+        bounds.last_refuted = std::max(bounds.last_refuted, key.depth);
+    }
     memo[key] = std::move(entry);
+  }
+
+  bool monotone_bounds_enabled() const {
+    return use_route_ordering_ && !include_proof_dag_ &&
+           (exhaustive_attacker_actions_ || cooperative_reveals_) &&
+           required_root_action_ == UINT64_MAX &&
+           !strict_preferred_attacker_actions_ &&
+           strict_preferred_attacker_prefix_ == 0;
+  }
+
+  void remember_cutoff_action(int player, int depth, uint64_t code) {
+    if (!use_route_ordering_ || !exact_reveal_search_ || depth < 2)
+      return;
+    const uint64_t key = (static_cast<uint64_t>(depth) << 1) | player;
+    auto [it, inserted] = cutoff_actions_.try_emplace(
+        key, std::array<uint64_t, 2>{UINT64_MAX, UINT64_MAX});
+    (void)inserted;
+    if (it->second[0] != code) {
+      it->second[1] = it->second[0];
+      it->second[0] = code;
+    }
+  }
+
+  void prefer_cutoff_actions(int player, int depth,
+                             std::vector<OrderedAction> &actions) const {
+    const uint64_t key = (static_cast<uint64_t>(depth) << 1) | player;
+    const auto found = cutoff_actions_.find(key);
+    if (found == cutoff_actions_.end())
+      return;
+    // A successful threat or reply often survives an unrelated token return
+    // or refill. Reuse it as an ordering hint, only after checking legality.
+    for (auto code = found->second.rbegin(); code != found->second.rend();
+         ++code) {
+      const auto action = std::find_if(
+          actions.begin(), actions.end(),
+          [&](const OrderedAction &item) { return item.code == *code; });
+      if (action != actions.end())
+        std::rotate(actions.begin(), action, action + 1);
+    }
+  }
+
+  void prioritize_routes(Game &game, std::vector<OrderedAction> &actions,
+                         int depth) {
+    if (actions.size() < 2 || game.board.waiting_noble)
+      return;
+    const int player = game.current_player();
+    const Board before = game.board;
+    std::vector<std::pair<int, OrderedAction>> scored;
+    scored.reserve(actions.size());
+    for (const OrderedAction &ordered : actions) {
+      if ((scored.size() & 31) == 0)
+        limits_.check(0);
+      game.board = before;
+      // Blank refills avoid pretending that one sampled replacement is certain.
+      // The search will subsequently examine all real replacement cards.
+      if (!game.apply_action_code_trusted(ordered.code, false)) {
+        scored.push_back({-100000000, ordered});
+        continue;
+      }
+      int score;
+      if (game.is_game_over()) {
+        score = game.winner() == player ? 100000000 : -100000000;
+      } else if (can_resolve_final_round(game)) {
+        ForceStatus status;
+        if (resolve_final_round_direct(game, status, true)) {
+          const bool wins =
+              (status == ForceStatus::PROVEN) == (player == attacker_);
+          score = wins ? 90000000 : -90000000;
+        } else {
+          score = 0;
+        }
+      } else {
+        const bool extended = depth >= 3;
+        const int own = route_ordering_.distance(game.board, player, extended);
+        const int other =
+            route_ordering_.distance(game.board, 1 - player, extended);
+        const bool attacking =
+            cooperative_reveals_ ? player != attacker_ : player == attacker_;
+        score = attacking ? other - 2 * own : 2 * other - own;
+      }
+      scored.push_back({score, ordered});
+    }
+    game.board = before;
+    std::stable_sort(scored.begin(), scored.end(),
+                     [](const auto &left, const auto &right) {
+                       return left.first > right.first;
+                     });
+    for (size_t index = 0; index < actions.size(); ++index)
+      actions[index] = scored[index].second;
   }
 
   void prefer_iterative_action(const StateKey &state, int depth,
@@ -608,14 +817,16 @@ private:
 
   template <typename Visitor>
   bool for_each_proof_outcome(Game &game, const OrderedAction &ordered,
-                              Visitor visitor) {
+                              Visitor visitor, bool collapse_terminal = false,
+                              int ordering_depth = 0) {
     const Action action = Action::unpack(ordered.code);
     if (action.type == RESERVE_DECK)
       return for_each_deck_reserve_outcome(game, action, visitor);
 
     const int level = visible_refill_level(action);
     if (level >= 0 && !game.board.decks[level].empty())
-      return for_each_visible_refill_outcome(game, action, visitor);
+      return for_each_visible_refill_outcome(game, action, visitor,
+                                             collapse_terminal, ordering_depth);
 
     const Board previous = game.board;
     if (!game.apply_trusted(action, false))
@@ -631,13 +842,20 @@ private:
 
   template <typename Visitor>
   bool for_each_visible_refill_outcome(Game &game, const Action &action,
-                                       Visitor visitor) {
+                                       Visitor visitor,
+                                       bool collapse_terminal = false,
+                                       int ordering_depth = 0) {
     const int level = visible_refill_level(action);
     const int slot = visible_refill_slot(game.board, action);
     if (level < 0 || level >= 3 || slot < 0 || game.board.decks[level].empty())
       return false;
-    const std::vector<int> cards =
-        visible_refill_cards(game, action, level, slot);
+    std::vector<int> cards = visible_refill_cards(game, action, level, slot);
+    if (ordering_depth >= 3)
+      prioritize_refill_routes(game, action, level, slot, cards,
+                               ordering_depth);
+    if (cooperative_reveals_ && !exhaustive_attacker_actions_ &&
+        cards.size() > 3)
+      cards.resize(3);
     if (cards.empty())
       return false;
     const Board previous = game.board;
@@ -645,6 +863,15 @@ private:
       game.board = previous;
       if (!apply_visible_refill_outcome(game, action, level, slot, card_id))
         continue;
+      ++stats_.reveal_branches;
+      if (collapse_terminal && game.is_game_over()) {
+        // A refill cannot change a game that already ended on this action.
+        // Materialization callers leave this disabled and emit every edge.
+        stats_.final_round_reveal_collapses += cards.size() - 1;
+        const bool keep_going = visitor(card_id);
+        game.board = previous;
+        return keep_going;
+      }
       if (!visitor(card_id)) {
         game.board = previous;
         return false;
@@ -710,17 +937,22 @@ private:
           seen.insert(card_equivalence_key(card_id)).second)
         cards.push_back(static_cast<int>(card_id));
     }
-    if (game.current_player() != attacker_) {
+    if (game.current_player() != attacker_ || cooperative_reveals_) {
       std::sort(cards.begin(), cards.end(), [&](int left, int right) {
         const int left_score =
             defender_reserved_card_threat_score(game, action, left);
         const int right_score =
             defender_reserved_card_threat_score(game, action, right);
         if (left_score != right_score)
-          return left_score > right_score;
+          return cooperative_reveals_ && game.current_player() != attacker_
+                     ? left_score < right_score
+                     : left_score > right_score;
         return left < right;
       });
     }
+    if (cooperative_reveals_ && !exhaustive_attacker_actions_ &&
+        cards.size() > 3)
+      cards.resize(3);
     return cards;
   }
 
@@ -788,7 +1020,9 @@ private:
       const int left_score = reveal_counterexample_score(blank, level, left);
       const int right_score = reveal_counterexample_score(blank, level, right);
       if (left_score != right_score)
-        return left_score > right_score;
+        return cooperative_reveals_ && blank.current_player() != attacker_
+                   ? left_score < right_score
+                   : left_score > right_score;
       return left < right;
     });
   }
@@ -804,6 +1038,37 @@ private:
     const bool applied = game.apply_trusted(action, false);
     game.blank_refill_mode = previous_blank_refill;
     return applied && game.board.visible[level][slot] == -1;
+  }
+
+  void prioritize_refill_routes(const Game &game, const Action &action,
+                                int level, int slot, std::vector<int> &cards,
+                                int depth) {
+    if (cards.size() < 2)
+      return;
+    Game blank = game.clone_light();
+    if (!apply_visible_refill_blank_outcome(blank, action, level, slot) ||
+        blank.is_game_over())
+      return;
+    // Nature is an adversary of the original attacker, irrespective of whose
+    // turn follows the refill. In counterstrategy mode it cooperates with the
+    // counter-attacker instead. Assess both players, not just the next mover.
+    const int favored = cooperative_reveals_ ? attacker_ : 1 - attacker_;
+    std::vector<std::pair<int, int>> scored;
+    scored.reserve(cards.size());
+    for (int card : cards) {
+      blank.board.visible[level][slot] = card;
+      const int own =
+          route_ordering_.distance(blank.board, favored, depth >= 4);
+      const int other =
+          route_ordering_.distance(blank.board, 1 - favored, depth >= 4);
+      scored.emplace_back(other - 2 * own, card);
+    }
+    std::stable_sort(scored.begin(), scored.end(),
+                     [](const auto &left, const auto &right) {
+                       return left.first > right.first;
+                     });
+    for (size_t index = 0; index < cards.size(); ++index)
+      cards[index] = scored[index].second;
   }
 
   static int reveal_counterexample_score(const Game &blank, int level,
@@ -1017,9 +1282,9 @@ private:
                                       : ForceStatus::REFUTED;
   }
 
-  static int max_final_round_score(const Game &game) {
+  static int max_current_turn_score(const Game &game, int player_id) {
     const Board &board = game.board;
-    const PlayerState &player = board.players[1];
+    const PlayerState &player = board.players[player_id];
     int max_score = static_cast<int>(player.points) +
                     max_noble_points(board, player.bonuses);
     for (int level = 0; level < 3; ++level) {
@@ -1033,6 +1298,57 @@ private:
           std::max(max_score,
                    score_after_purchase(board, player, player.reserved[slot]));
     return max_score;
+  }
+
+  static int max_final_round_score(const Game &game) {
+    return max_current_turn_score(game, 1);
+  }
+
+  static bool player1_can_win_now(const Game &game) {
+    const Board &board = game.board;
+    const PlayerState &player = board.players[1];
+    const auto wins = [&](int score, int purchases) {
+      return score >= 15 && final_round_winner(board, score, purchases) == 1;
+    };
+    if (has_nonpurchase_action(board, false) &&
+        wins(player.points + max_noble_points(board, player.bonuses),
+             player.purchased_count))
+      return true;
+    const auto winning_purchase = [&](int card) {
+      return is_valid_card_id(card) && player.can_afford(get_card(card)) &&
+             wins(score_after_purchase(board, player, card),
+                  player.purchased_count + 1);
+    };
+    for (const auto &row : board.visible) {
+      for (int card : row) {
+        if (winning_purchase(card))
+          return true;
+      }
+    }
+    for (int card : player.reserved) {
+      if (winning_purchase(card))
+        return true;
+    }
+    return false;
+  }
+
+  static int max_last_turn_score(const Game &game, int player_id) {
+    int score = max_current_turn_score(game, player_id);
+    if (game.current_player() == player_id || score >= 15)
+      return score;
+    // The opponent cannot increase our gems or discounts. Give us access to
+    // *every* remaining card, since their next action may reveal one of them.
+    // Even this optimistic score below 15 rules out a win on our last turn.
+    for (const auto &deck : game.board.decks) {
+      for (int card : deck) {
+        score = std::max(
+            score, score_after_purchase(game.board,
+                                        game.board.players[player_id], card));
+        if (score >= 15)
+          return score;
+      }
+    }
+    return score;
   }
 
   bool resolve_final_round_direct(const Game &game, ForceStatus &status,
@@ -1341,6 +1657,17 @@ private:
       std::vector<OrderedAction> exhaustive = actions;
       prefer_candidate_action(exhaustive, depth);
       return exhaustive;
+    }
+
+    if (cooperative_reveals_) {
+      // A policy probe may restrict only the counter-attacker's existential
+      // choices. Every action of the threatened player remains universal.
+      // Failure of this probe is inconclusive; success is still a proof.
+      std::vector<OrderedAction> candidates = actions;
+      prefer_candidate_action(candidates, depth);
+      if (candidates.size() > 3)
+        candidates.resize(3);
+      return candidates;
     }
 
     std::vector<OrderedAction> purchases;
@@ -1967,14 +2294,16 @@ RevealVerifiedSolver::RevealVerifiedSolver(
     uint64_t required_root_action, bool strict_preferred_attacker_actions,
     size_t strict_preferred_attacker_prefix, bool exhaustive_attacker_actions,
     bool exact_reveal_search,
-    std::shared_ptr<RevealSearchCancellationToken> cancellation_token)
+    std::shared_ptr<RevealSearchCancellationToken> cancellation_token,
+    bool use_route_ordering, bool cooperative_reveals)
     : impl_(std::make_unique<Impl>(
           attacker, depth, max_nodes, time_limit_seconds,
           std::move(preferred_attacker_actions), include_proof_dag,
           proof_dag_node_limit, proof_dag_edge_limit, required_root_action,
-          strict_preferred_attacker_actions,
-          strict_preferred_attacker_prefix, exhaustive_attacker_actions,
-          exact_reveal_search, std::move(cancellation_token))) {}
+          strict_preferred_attacker_actions, strict_preferred_attacker_prefix,
+          exhaustive_attacker_actions, exact_reveal_search,
+          std::move(cancellation_token), use_route_ordering,
+          cooperative_reveals)) {}
 
 RevealVerifiedSolver::~RevealVerifiedSolver() = default;
 

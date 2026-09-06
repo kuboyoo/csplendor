@@ -97,6 +97,7 @@
       "mcts_parallel_session.h",
       "mcts_parallel_trace.h",
       "mcts_parallel_types.h",
+      "mate_route_ordering.h",
       "mcts_rng.h",
       "mcts_searcher.h",
       "mcts_tree.h",
