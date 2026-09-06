@@ -112,6 +112,7 @@ import glob
 import os
 
 import csplendor
+import fastapi
 
 def forbidden(*_args, **_kwargs):
     raise AssertionError("external discovery happened during import")

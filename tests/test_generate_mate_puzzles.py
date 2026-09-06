@@ -2,8 +2,9 @@ import json
 from itertools import islice
 from types import SimpleNamespace
 
-import csplendor as cs
 import pytest
+
+import csplendor as cs
 import scripts.generate_mate_puzzles as generate_mate_puzzles
 from csplendor.api.usi_kifu import action_to_usi, parse_kifu_text, spn_to_game
 from scripts.generate_mate_puzzles import (

@@ -14,9 +14,9 @@ from ._csplendor import (
     GemType,
     InferenceResult,
     LeafRequest,
+    MateSearchCancellationToken,
     MCTSConfig,
     MCTSNode,
-    MateSearchCancellationToken,
     Noble,
     ParallelCancellationToken,
     ParallelSearchLedger,
@@ -49,17 +49,17 @@ from .gem_colors import (
 from .gem_colors import (
     GEM_USI_SYMBOLS as GEM_USI_SYMBOLS,
 )
-from .mate_frontier import (
-    decode_mate_frontier_state,
-    encode_mate_frontier_state,
-    expand_mate_frontier,
-    load_mate_frontier_game,
-)
 from .mate_depth import (
     MATE_ANYTIME_SEARCH_FORMAT,
     MATE_DEPTH_SEARCH_FORMAT,
     search_reveal_verified_mate_anytime,
     search_reveal_verified_mate_depths,
+)
+from .mate_frontier import (
+    decode_mate_frontier_state,
+    encode_mate_frontier_state,
+    expand_mate_frontier,
+    load_mate_frontier_game,
 )
 from .mate_session import MATE_SEARCH_SESSION_FORMAT, MateSearchSession
 

@@ -32,10 +32,23 @@ The main class for controlling game state.
   lightweight snapshot after validating its rules fingerprint and checksum.
 - `Game.snapshot_format_version() -> int`: Returns the binary layout version.
 - `Game.snapshot_rules_version() -> int`: Returns the rule-transition version.
+- `serialize_information_state(observer: int) -> bytes`: Returns a versioned,
+  observer-safe canonical identity for persistent analysis storage. It omits
+  deck order and the opponent's hidden reservation IDs and cannot be restored
+  as an authoritative `Game`.
+- `information_state_hash(observer: int) -> int`: Returns a stable 64-bit
+  index for the serialized information state. Persistent stores must compare
+  the bytes as well rather than treating the hash as collision-free identity.
+- `Game.information_state_format_version() -> int`: Returns the information
+  identity layout version.
+- `Game.information_state_rules_version() -> int`: Returns its rule-semantic
+  version.
 
 Snapshots contain authoritative hidden information. An imperfect-information
 search must determinize the restored game for its root observer before use.
 See [Versioned Game Snapshot](game_snapshot.md).
+See [Versioned information-state identity](information_state.md) for opening
+analysis and book keys.
 
 ### Public card probability API
 

@@ -20,6 +20,7 @@ set(CSPLENDOR_STANDALONE_HEADERS
     card_data.h
     game.h
     game_snapshot.h
+    information_state.h
     mcts.h
     move_generator.h
     noble_data.h
@@ -82,6 +83,8 @@ csplendor_add_native_test(mcts_ownership_unit mcts_ownership_unit.cpp
                           "unit;mcts;ownership;lifecycle;configuration" 30)
 csplendor_add_native_test(game_snapshot_unit game_snapshot_unit.cpp
                           "unit;snapshot;serialization;standalone-header" 30)
+csplendor_add_native_test(information_state_unit information_state_unit.cpp
+                          "unit;information-state;serialization;hidden-information" 30)
 csplendor_add_native_test(state_invariants_unit state_invariants_unit.cpp
                           "unit;state;invariants;hash" 30)
 csplendor_add_native_test(domain_state_unit domain_state_unit.cpp

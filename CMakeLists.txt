@@ -26,6 +26,7 @@ target_compile_features(csplendor_core_config INTERFACE cxx_std_17)
 
 set(CSPLENDOR_PYTHON_CORE_SOURCES
     src/game_snapshot.cpp
+    src/information_state.cpp
     src/mcts_parallel_trace.cpp
     src/reveal_solver_components.cpp
     src/reveal_verified_solver.cpp
