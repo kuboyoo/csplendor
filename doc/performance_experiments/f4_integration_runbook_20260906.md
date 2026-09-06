@@ -1,20 +1,20 @@
-# F4実行準備：未実行・承認待ち
+# F4統合・導入runbook：merge・導入は承認待ち
 
-2026-09-06追記。F3のCI lint 7件を是正し、ローカル再検証は **READY_FOR_REVIEW**。
-[是正報告](f3_lint_correction_20260906.md)を参照。リモートCIは未実行、出荷承認ではない。
-以下は準備文書であり、merge/push/PR/常用環境変更を実行する許可ではない。
+2026-09-06追記。F3 lint是正は完了。承認されたF4前半（作業branch push・PR作成・
+remote CI・隔離clean wheel受入）を実施した。wheelはPASS、CIで互換性failureが残り **BLOCKED**。
+[PR #26](https://github.com/kuboyoo/csplendor/pull/26)と[前半報告](f4_premerge_review_20260906.md)を参照。
+以下のmainへの統合・常用環境更新はまだ承認されていない。
 
 ## 固定するref
 
-- F2/F3で確認したoriginのリモートmain：`f5ec6c545c9a2727ca708bc4c6822daf07a2c4dc`。
-  lint是正では再照会していない。F4実行時に再確認する。
-- ローカルmain/origin/main追跡ref：`7835f642b23251d0cb91de180006084521c74aa6`、意図的に未更新。
-  追跡refの古さをリモートmainが古い根拠にしない。
+- F4前半でfetchしたorigin/main：`f5ec6c545c9a2727ca708bc4c6822daf07a2c4dc`、F1/F3から進行なし。
+- ローカルmain：`7835f642b23251d0cb91de180006084521c74aa6`、未変更。追跡refのみ更新した。
 - 検証済みcode：`b202e6a0cbb2eded9bc2ee5e59f750428e73ca49`。
 - F1記録：`49878b661298bf45e39c5f5ca5afa6d0e363736a`。
 - 前回F2/F3記録commit：`e486e27cbabdec4387f9d183a758720e1cf2caee`。
-- 統合予定の記録付き候補：`review/f3-lint-correction-20260906`の是正ローカルcommit。
-  完全SHAは完了応答と、`git log -1 --format=%H -- doc/performance_experiments/f3_lint_correction_20260906.md`で特定する。
+- lint是正・wheel source：`f6d28dde184ff1950c4729197a3a9ac1645b0c11`。
+- 統合予定の記録付き候補：`review/f3-lint-correction-20260906`。以降はF4文書・証跡追加のみ。
+  最終headはPRと完了応答で特定する。本体修正承認後は新候補として再固定する。
 - F1 source digest（testsも含む、是正前）：
   `05e3c3b52b2e42e1156eeb5facde98c2ba4215214b61b62d0606705a99d11e06`。
   是正後：`13d7c16e717db7e9a5f60c3e39c50746fb443c290d44d09e353cc478a5ce465e`。
@@ -22,9 +22,9 @@
 
 ## 1. 統合前（別承認が必要）
 
-1. 完了済みの[lint是正・再検証](f3_lint_correction_20260906.md)をレビューする。
-   同じCI lint、関連73件、Python 3.12全体＋coverageは通過済み。無条件には再実行せず、
-   以後の差分やremote required checksに必要な再検証を決める。F4の明示承認なしにmergeしない。
+1. 完了済みlint是正をやり直さず、[F4で検出した3種の互換性failure](f4_premerge_review_20260906.md)の
+   最小修正・再検証範囲の承認を受ける。Clang constexpr、Python 3.8 driver、Windows slot tests。
+   CI設定・閾値・対象範囲を緩めない。修正後もmainへのmergeは別の明示承認が必要。
 2. 読取りで最新mainと候補を再確認する。
 
    ```bash
@@ -38,8 +38,8 @@
    衝突・本体/build差分があれば統合後treeを新候補として固定し、変更範囲の回帰、reference/VERIFY、
    sanitizer、該当F1 primary/guardを再実行する。旧F1の全数値を新treeの実測と称さない。
    文書だけの進行なら実装/build不変をhashで確認して証跡を再利用できる。
-4. 明示承認後だけ作業branchを通常pushし、保存済み[PR案](f3_pr_draft_20260906.md)からPRを作成する。
-   main/masterへ直接pushしない。保護設定のrequired checksをリモートで確認し、reviewer承認後にPR経由で統合する。
+4. 作業branch通常push・PR #26作成は承認済みで実施した。以後は既存PRを使用し、重複作成しない。
+   main/masterへ直接pushしない。保護設定と実checkを再確認し、明示承認後だけPR経由で統合する。
    mainへの統合前に再度base/head完全SHAを確認する。force push、未承認branchの一括取り込みはしない。
 
 ### CIと追加gate
@@ -54,10 +54,10 @@
 - `sanitizer`：TSan、ASan/UBSan。
 - `nightly-native-soak`：schedule/manualのみ。PRで自動実行したと扱わない。
 
-どのjobがbranch protectionで必須かは未確認。lint是正でPython 3.12は595 passed、
-1 skipped、4 deselected、coverage 58.89%（必須50%）、compile/lint/security lintも通過。
-clean installや他Python/OS/jobの今回実行ではない。F1のローカルnative44等は再利用するが、
-未実行のhosted CIを緑に読み替えない。実利用側のdirty treeを配備pinにする承認も含めない。
+F4前半でbranch APIはprotected=false、強制required checksなし、適用rulesも空を確認。
+強制されなくてもworkflow全体をgateとする。初回hosted CIは9 SUCCESS・7 FAILURE・適用外skip1。
+最終PR headの結果はPR本文と前半報告から確認する。F1のローカルnative44等は再利用するが、
+Clang sanitizer build失敗を実行PASSへ読み替えない。利用側dirty treeの配備承認も含めない。
 
 ## 2. merge後のclean build/install（今回は未実行）
 
@@ -122,4 +122,4 @@ worker再起動は保持session/TTを失うため、利用者の処理を中断�
    reset、履歴改変、force push、mainへの直接pushを復帰手段にしない。
 
 tag、GitHub Release、PyPI公開、branch/worktree/旧wheel削除はF4のmerge承認とも別範囲。
-この準備では一切実行していない。**F4は未実行・承認待ち**。
+これらは一切実行していない。F4前半の実施と区別し、**merge・導入は承認待ち**。

@@ -15,14 +15,18 @@
   ブラウザ/GPU/旧Genbu/実モデル速度A/Bは未実施。
 - **READY_FOR_REVIEW**：候補追加テスト5ファイルのCI lint違反7件を最小修正。
   CI lint/security lint、関連73件、Python 3.12全体595件・coverage 58.89%が通過。
-  元の失敗証跡を保持。リモートCI未実行、F4は未実行・承認待ち。
-  main統合、push、PR作成、常用環境更新、Release/PyPI公開は未実行。
+  元の失敗証跡を保持。
+- F4前半：作業branch push・PR #26作成、隔離clean wheel受入PASS。
+  hosted CIはClang constexpr上限、Python 3.8 driver、Windows slot testsで失敗し **BLOCKED**。
+  原因・最小修正案のみ記録。本体・build・既存testの追加修正は未実施。
+  main統合・push、常用環境更新、Release/PyPI公開は未実行、merge・導入は承認待ち。
 
 English: This is an **unreleased** candidate. Retained optimizations and F1
 cumulative measurements are unchanged. Real CPU consumer smoke checks passed,
 and the seven test lint failures are now fixed with import-only changes. Local
-checks passed (595 tests, coverage 58.89%); remote CI and F4 remain pending.
-Status: READY_FOR_REVIEW, not shipment approval. Native LTO remains
+checks passed (595 tests, coverage 58.89%). F4 clean-wheel acceptance passed, but
+PR #26 CI exposed Clang/Python 3.8/Windows compatibility failures: BLOCKED.
+Only the candidate branch was pushed; merge/deployment remain unapproved. Native LTO remains
 opt-in and OFF by default; no whole-AI speedup or completed depth-7 proof-time
 claim is made.
 
@@ -30,4 +34,5 @@ claim is made.
 [F1](doc/performance_experiments/final_main_vs_candidate_20260906.md)、
 [F2/F3](doc/performance_experiments/f2_f3_shipping_review_20260906.md)、
 [F3是正](doc/performance_experiments/f3_lint_correction_20260906.md)、
+[F4前半](doc/performance_experiments/f4_premerge_review_20260906.md)、
 [F4準備](doc/performance_experiments/f4_integration_runbook_20260906.md)。

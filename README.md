@@ -40,11 +40,13 @@ F2では実モデルselfplay12/selfplay17をCPUで小さく検証しました。
 canonical/public特徴量313次元で、native 48手やStateFeaturizerの測定経路とは異なります。
 実モデルのmain対速度比較、ブラウザ描画、GPU受入は未実施です。
 F3の追加テスト5ファイル・CI lint違反7件は最小修正済みで、ローカル判定は**READY_FOR_REVIEW**。
-関連73件とPython 3.12の595件・coverage 58.89%が通過しました。リモートCIは未実行で、出荷承認ではありません。
+関連73件とPython 3.12の595件・coverage 58.89%が通過しました。
+その後の[F4前半](doc/performance_experiments/f4_premerge_review_20260906.md)では隔離clean wheel受入が通過しましたが、
+[PR #26](https://github.com/kuboyoo/csplendor/pull/26)のCIでClang・Python 3.8・Windows互換性の失敗があり、統合判定は**BLOCKED**です。
 [是正報告](doc/performance_experiments/f3_lint_correction_20260906.md)、
 [受入・最終レビュー](doc/performance_experiments/f2_f3_shipping_review_20260906.md)と
 [F4準備・復帰手順](doc/performance_experiments/f4_integration_runbook_20260906.md)を参照してください。
-main統合・push・常用環境更新は未実行です。
+作業ブランチのpush・PR作成のみ実施済みです。mainへのmerge・push・常用環境更新は承認待ちです。
 
 #### 過去の生成速度（2026-07/08、現行候補の再測定ではない）
 

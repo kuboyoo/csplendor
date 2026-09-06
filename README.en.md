@@ -43,12 +43,14 @@ consumer: **Python MCTS, V3/3133 actions, canonical/public 313-feature encoding*
 not native 48-action MCTS or the optimized StateFeaturizer path. Real-model A/B,
 browser rendering and GPU acceptance were not performed. F3's seven lint violations
 in five added tests are fixed with import-only changes: **READY_FOR_REVIEW** locally.
-Related tests (73) and Python 3.12 tests (595, coverage 58.89%) passed; remote CI
-has not run and shipment is not approved. See the
+Related tests (73) and Python 3.12 tests (595, coverage 58.89%) passed. The subsequent
+[F4 pre-merge review](doc/performance_experiments/f4_premerge_review_20260906.md)
+passed isolated clean-wheel acceptance, but [PR #26](https://github.com/kuboyoo/csplendor/pull/26)
+has Clang, Python 3.8 and Windows CI failures: integration is **BLOCKED**. See the
 [correction report](doc/performance_experiments/f3_lint_correction_20260906.md).
 See [acceptance/review](doc/performance_experiments/f2_f3_shipping_review_20260906.md)
 and [integration/rollback preparation](doc/performance_experiments/f4_integration_runbook_20260906.md).
-No main merge, push or production installation has been executed.
+Only the candidate branch was pushed and its PR created. Main merge/push and production installation remain unapproved.
 
 #### Historical generation measurements (not the current candidate)
 

@@ -1,0 +1,1722 @@
+{
+  "F1_F2_F3_reuse": {
+    "f2_f3_manifest_20260906.json": {
+      "sha256": "a38b7f55ee084c87631d35a10ec6445601d4e5f919f549f2b15e4efc2d3c8f8a",
+      "verified_artifact_count": 14
+    },
+    "f3_lint_manifest_20260906.json": {
+      "sha256": "7bfabdc59b493bf835db3749e93e03909ac7ed3a4b1051087562553f2c1efe02",
+      "verified_artifact_count": 16
+    },
+    "final_main_vs_candidate_manifest_20260906.json": {
+      "sha256": "a016c44637df17d74b95671799a933225700aaf44027b91000f3a3be2da4673f",
+      "verified_artifact_count": 101
+    }
+  },
+  "F1_engine_commit": "b202e6a0cbb2eded9bc2ee5e59f750428e73ca49",
+  "F4_source_diff_from_lint_candidate": [],
+  "PR": "https://github.com/kuboyoo/csplendor/pull/26",
+  "applicable_rules": [],
+  "artifacts": [
+    {
+      "bytes": 6021,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/asan_failure.json.gz",
+      "sha256": "2ee8d11a88217c89a6f8b766a3054fe1ceb55596c3825c2f0e5d0c73e227f451"
+    },
+    {
+      "bytes": 361,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/branch_protection.json.gz",
+      "sha256": "9bf5182247c2636bdf9da5b2ffc2b09e63cfef114108fd58846820b22d045930"
+    },
+    {
+      "bytes": 176,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/branch_rules.json.gz",
+      "sha256": "7d6f1b2610c9320eac80a6a919743f5b3e2b5f4a459fed69f1daa058b11b3ada"
+    },
+    {
+      "bytes": 944,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/build_dependencies.json.gz",
+      "sha256": "ecf5a647b9bf5a3dda83a657e124b8b8c8b08370cb6371d40cbbb236dbc39cba"
+    },
+    {
+      "bytes": 195,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/build_venv.json.gz",
+      "sha256": "091e7a7bb760c3355e52f8f0ee32062b8458268df5d3cf69b4e5c3d6ea60b138"
+    },
+    {
+      "bytes": 311,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/build_versions.json.gz",
+      "sha256": "52293339070394a9ca4a471183bc70eb94e9cfd5341ef3975638a685be6e4d29"
+    },
+    {
+      "bytes": 1735,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/ci_jobs_initial.json.gz",
+      "sha256": "46a9de9683fbdc90c120ce4dd417225004f4602a56efa03b6ea9ea95be3e4ab4"
+    },
+    {
+      "bytes": 1716,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/ci_jobs_observation_2.json.gz",
+      "sha256": "8d62285904b5305c2d580cea81e76c51cfc761d27dfe9c622c5c83874f0def6b"
+    },
+    {
+      "bytes": 5808,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/clang_failure.json.gz",
+      "sha256": "d5c5cc3000cc9dc4993db4eaaaf54c39dfc7896deff56b0802f76892b1a8468b"
+    },
+    {
+      "bytes": 2335,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/clean_wheel_build.json.gz",
+      "sha256": "d02ad1407f3c5f2e2d686a7c9ba91ae67bbe8544b3599f27eb8981a4589b88f5"
+    },
+    {
+      "bytes": 355,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/clean_worktree.json.gz",
+      "sha256": "2c3d4a1fd8dd6135453da7f98698c9327d5417d25e38d91983a7ae72b7c2c884"
+    },
+    {
+      "bytes": 322,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/compiler_version.json.gz",
+      "sha256": "5e379b2ab4cc6c5f35e4c7327bc8a0df0b4fa9cf9bc363f6f7a25464f6c89d75"
+    },
+    {
+      "bytes": 447,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/create_pr.json.gz",
+      "sha256": "43079df00b15d4d6f2278fe49b54d66d68eb2dd1255f9e8ff86cadd080068bd6"
+    },
+    {
+      "bytes": 454,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/create_pr_connector.json",
+      "sha256": "1027de44c0e102ccbe728d0e02ed717b620dba33fee7ae76ded23cbe11932de5"
+    },
+    {
+      "bytes": 287,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/failure_scope.json.gz",
+      "sha256": "212242c94c8384cbf753728a299c19cfcaefb5feeaca1e96f2306f33a429ae56"
+    },
+    {
+      "bytes": 9883,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/macos_native_failure.json.gz",
+      "sha256": "984ec9ebfb7c923fe0cdd94826389ad19f2349fd0a7b06ed8cf7263213979f99"
+    },
+    {
+      "bytes": 9785,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/macos_portable_failure.json.gz",
+      "sha256": "98019c543e34083d29682c508b75a7580a9bad5537f2f1acb02caa39f79021c4"
+    },
+    {
+      "bytes": 316,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/main_branch_metadata.json.gz",
+      "sha256": "f0476dc8bbcfcae69688ef59c2e3744cb3d582885fb162b024c7ce28bb650932"
+    },
+    {
+      "bytes": 255,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/measured_code_diff.json.gz",
+      "sha256": "a9ce7453a1a5e0009f47eb0ab6b0f027cc46187e06e26b6c898e4bf5a3657678"
+    },
+    {
+      "bytes": 506,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/pr_initial.json.gz",
+      "sha256": "e702923a14cec5a7eda368a5a593156a05e20131e6532794eb48ce71deafc622"
+    },
+    {
+      "bytes": 415,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/pr_metadata.json.gz",
+      "sha256": "671356a810596c037cd25dc5ba7e6820938724570d657e81e8ccfde8bc31f712"
+    },
+    {
+      "bytes": 420,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/protection_graphql.json.gz",
+      "sha256": "2d7d948a33866573e79b486203104cbfc9adbea5468614f046c349f8d12bb278"
+    },
+    {
+      "bytes": 323,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/push_candidate.json.gz",
+      "sha256": "911913e4a466865afafcd565e547cbf0d4dccd2524fbf911e6dc99d62862dc87"
+    },
+    {
+      "bytes": 8337,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/python312_success.json.gz",
+      "sha256": "64ac3c3b8b0a43476c5573e249fab0a8e36158d13bb9d0b4c74c5e1183cce73b"
+    },
+    {
+      "bytes": 9868,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/python38_failure.json.gz",
+      "sha256": "47576d969559e44b6f7f8dbc34a26a94860672899acbabdb695de0b9b9bbc01a"
+    },
+    {
+      "bytes": 229,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/required_checks.json.gz",
+      "sha256": "01af76270f9d0de7d60da6ca80bd74da58e3b59d590de605aed69c99f815b1b4"
+    },
+    {
+      "bytes": 17721,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/start.json.gz",
+      "sha256": "9b8b14585f00f8fe12d0a887c41783c9cf788eeb75b3b2e6fa68f6b3289a0303"
+    },
+    {
+      "bytes": 6288,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/tsan_failure.json.gz",
+      "sha256": "3cf65616d867e53be4f8f24dc4a02132f750ad69bd9afac6608be148ea2f2506"
+    },
+    {
+      "bytes": 566,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/wheel_acceptance.json.gz",
+      "sha256": "68bf78fba9d72da9613243d899b71c74f606cc4b7c8eb1f8ba1c8ad05f03b6a4"
+    },
+    {
+      "bytes": 2717,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/wheel_acceptance_v2.json.gz",
+      "sha256": "af9abea0098cad76ecaa246af1e8fd8cd9ffd4f8bab1b7a8266927100d960737"
+    },
+    {
+      "bytes": 555,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/wheel_install.json.gz",
+      "sha256": "bab319aa56df3fab92fb1936346c341e7fd02ae8197a8586dbb3703413af9d87"
+    },
+    {
+      "bytes": 14428,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/wheel_provenance.json.gz",
+      "sha256": "2eba9c0c4a2b1cc81747175c39a8a5a9d8fef21decf54758a4777c8c3c213582"
+    },
+    {
+      "bytes": 195,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/wheel_venv.json.gz",
+      "sha256": "de3542eda0c5feadf8d8b8dd98b724973627d48f9275bd04c1bb1d6ffb2389a8"
+    },
+    {
+      "bytes": 10790,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/windows_failure.json.gz",
+      "sha256": "670cf60fb3d425b33dc33d2d3c7be771005f4927cc87575cbe6155b866faca95"
+    },
+    {
+      "bytes": 391,
+      "path": "doc/performance_experiments/raw/f4_premerge_20260906/workflow_runs_initial.json.gz",
+      "sha256": "3582275b17634ecd1f91942c200c14ae492ed3b10fd2744b0136a362dc31b8d4"
+    }
+  ],
+  "auto_merge_enabled": false,
+  "branch_protection": {
+    "commit_sha": "f5ec6c545c9a2727ca708bc4c6822daf07a2c4dc",
+    "name": "main",
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "checks": [],
+        "contexts": [],
+        "enforcement_level": "off"
+      }
+    }
+  },
+  "build_conditions_raw": "doc/performance_experiments/raw/f4_premerge_20260906/wheel_provenance.json.gz",
+  "build_versions": [
+    {
+      "name": "cmake",
+      "version": "4.2.3"
+    },
+    {
+      "name": "packaging",
+      "version": "26.3"
+    },
+    {
+      "name": "pip",
+      "version": "23.2.1"
+    },
+    {
+      "name": "pybind11",
+      "version": "3.0.1"
+    },
+    {
+      "name": "setuptools",
+      "version": "75.8.0"
+    },
+    {
+      "name": "wheel",
+      "version": "0.48.0"
+    }
+  ],
+  "candidate_source_digest": "13d7c16e717db7e9a5f60c3e39c50746fb443c290d44d09e353cc478a5ce465e",
+  "decision": "BLOCKED",
+  "deployment_performed": false,
+  "failure_classification": {
+    "candidate_compatibility": [
+      "noble_data.h constexpr step limit on Clang/AppleClang (5 jobs)",
+      "Python 3.8 argparse.BooleanOptionalAction (2 tests)",
+      "Windows POSIX executable/ELF slot fixtures (4 tests)"
+    ],
+    "known_baseline_failure_reused_as_excuse": false,
+    "not_applicable": [
+      "nightly-native-soak for pull_request"
+    ],
+    "tooling_failures": [
+      "CLI createPullRequest/protection denied; PR created via configured connector",
+      "CLI 2.46 pr view baseRefOid unsupported; used REST",
+      "first wheel probe AST fixture order incorrect; probe-only order fix, new cwd/raw PASS"
+    ],
+    "workflow_environment_failures_confirmed": []
+  },
+  "final_head_CI_recording": "Final pushed report head and its CI results are added to PR body and completion response; initial raw is not treated as final-head CI.",
+  "implementation_build_dependency_measurement_diff_from_F1": [],
+  "initial_CI": {
+    "conclusion": "failure",
+    "databaseId": 34012764243,
+    "event": "pull_request",
+    "headSha": "f6d28dde184ff1950c4729197a3a9ac1645b0c11",
+    "jobs": [
+      {
+        "completedAt": "2026-09-06T04:57:20Z",
+        "conclusion": "failure",
+        "databaseId": 101431288196,
+        "name": "sanitizer (address-undefined)",
+        "startedAt": "2026-09-06T04:57:03Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Record sanitizer metadata",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure instrumented native tests",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "failure",
+            "name": "Build instrumented native tests",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "ThreadSanitizer tests",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Address/UndefinedBehaviorSanitizer tests",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Upload sanitizer diagnostics",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 16,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288196"
+      },
+      {
+        "completedAt": "2026-09-06T04:57:11Z",
+        "conclusion": "failure",
+        "databaseId": 101431288243,
+        "name": "strict-bindings (clang++)",
+        "startedAt": "2026-09-06T04:57:02Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install binding build dependency",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure strict binding build",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "failure",
+            "name": "Build bindings without warnings",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 11,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 12,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 13,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288243"
+      },
+      {
+        "completedAt": "2026-09-06T04:58:25Z",
+        "conclusion": "success",
+        "databaseId": 101431288254,
+        "name": "native",
+        "startedAt": "2026-09-06T04:57:02Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure native tests",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build native tests",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run native tests",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 10,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 11,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288254"
+      },
+      {
+        "completedAt": "2026-09-06T04:57:17Z",
+        "conclusion": "failure",
+        "databaseId": 101431288260,
+        "name": "sanitizer (thread)",
+        "startedAt": "2026-09-06T04:57:02Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Record sanitizer metadata",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure instrumented native tests",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "failure",
+            "name": "Build instrumented native tests",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "ThreadSanitizer tests",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Address/UndefinedBehaviorSanitizer tests",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Upload sanitizer diagnostics",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 16,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288260"
+      },
+      {
+        "completedAt": "2026-09-06T04:58:51Z",
+        "conclusion": "success",
+        "databaseId": 101431288265,
+        "name": "package",
+        "startedAt": "2026-09-06T04:57:03Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build release artifacts",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Rebuild wheel from sdist",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install and smoke-test built wheel",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Upload package diagnostics",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 13,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 14,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 15,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288265"
+      },
+      {
+        "completedAt": "2026-09-06T04:58:45Z",
+        "conclusion": "success",
+        "databaseId": 101431288266,
+        "name": "test (3.11)",
+        "startedAt": "2026-09-06T04:57:04Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Compile Python",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Lint Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Test",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Test with coverage gate",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 16,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288266"
+      },
+      {
+        "completedAt": "2026-09-06T04:58:39Z",
+        "conclusion": "success",
+        "databaseId": 101431288267,
+        "name": "cpp-coverage",
+        "startedAt": "2026-09-06T04:57:03Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install coverage reporter",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure instrumented native tests",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build instrumented native tests",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run instrumented native tests",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Create report-only C++ coverage",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Upload C++ coverage report",
+            "number": 9,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 17,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 18,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 19,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288267"
+      },
+      {
+        "completedAt": "2026-09-06T04:58:46Z",
+        "conclusion": "success",
+        "databaseId": 101431288270,
+        "name": "test (3.10)",
+        "startedAt": "2026-09-06T04:57:02Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Compile Python",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Lint Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Test",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Test with coverage gate",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 16,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288270"
+      },
+      {
+        "completedAt": "2026-09-06T04:57:53Z",
+        "conclusion": "success",
+        "databaseId": 101431288272,
+        "name": "strict-bindings (g++)",
+        "startedAt": "2026-09-06T04:57:03Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install binding build dependency",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure strict binding build",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build bindings without warnings",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 11,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 12,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 13,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288272"
+      },
+      {
+        "completedAt": "2026-09-06T04:58:51Z",
+        "conclusion": "success",
+        "databaseId": 101431288273,
+        "name": "test (3.9)",
+        "startedAt": "2026-09-06T04:57:02Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Compile Python",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Lint Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Test",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Test with coverage gate",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 16,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288273"
+      },
+      {
+        "completedAt": "2026-09-06T05:00:27Z",
+        "conclusion": "failure",
+        "databaseId": 101431288287,
+        "name": "Windows 2025 x64 portable",
+        "startedAt": "2026-09-06T04:57:03Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Verify runtime architecture",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install editable profile",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Compile Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "failure",
+            "name": "Test Python bindings",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Configure native tests",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Build native tests",
+            "number": 9,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Run native tests",
+            "number": 10,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Build portable wheel",
+            "number": 11,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Build portable macOS arm64 wheel",
+            "number": 12,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Verify portable macOS wheel architecture",
+            "number": 13,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Install portable wheel",
+            "number": 14,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Smoke-test installed wheel",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 29,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 30,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 31,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288287"
+      },
+      {
+        "completedAt": "2026-09-06T05:00:47Z",
+        "conclusion": "success",
+        "databaseId": 101431288289,
+        "name": "Ubuntu 24.04 arm64 portable",
+        "startedAt": "2026-09-06T04:57:05Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Verify runtime architecture",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install editable profile",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Compile Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Test Python bindings",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Configure native tests",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build native tests",
+            "number": 9,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run native tests",
+            "number": 10,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build portable wheel",
+            "number": 11,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Build portable macOS arm64 wheel",
+            "number": 12,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Verify portable macOS wheel architecture",
+            "number": 13,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install portable wheel",
+            "number": 14,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Smoke-test installed wheel",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 29,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 30,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 31,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288289"
+      },
+      {
+        "completedAt": "2026-09-06T04:57:21Z",
+        "conclusion": "failure",
+        "databaseId": 101431288304,
+        "name": "macOS 15 arm64 native",
+        "startedAt": "2026-09-06T04:57:05Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Verify runtime architecture",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "failure",
+            "name": "Install editable profile",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Compile Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Test Python bindings",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Configure native tests",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Build native tests",
+            "number": 9,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Run native tests",
+            "number": 10,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Build portable wheel",
+            "number": 11,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Build portable macOS arm64 wheel",
+            "number": 12,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Verify portable macOS wheel architecture",
+            "number": 13,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Install portable wheel",
+            "number": 14,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Smoke-test installed wheel",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 29,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 30,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 31,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288304"
+      },
+      {
+        "completedAt": "2026-09-06T04:59:03Z",
+        "conclusion": "success",
+        "databaseId": 101431288306,
+        "name": "test (3.12)",
+        "startedAt": "2026-09-06T04:57:02Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Compile Python",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Lint Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Test",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Test with coverage gate",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 16,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288306"
+      },
+      {
+        "completedAt": "2026-09-06T04:57:26Z",
+        "conclusion": "failure",
+        "databaseId": 101431288319,
+        "name": "macOS 15 arm64 portable",
+        "startedAt": "2026-09-06T04:57:07Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Verify runtime architecture",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "failure",
+            "name": "Install editable profile",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Compile Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Test Python bindings",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Configure native tests",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Build native tests",
+            "number": 9,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Run native tests",
+            "number": 10,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Build portable wheel",
+            "number": 11,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Build portable macOS arm64 wheel",
+            "number": 12,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Verify portable macOS wheel architecture",
+            "number": 13,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Install portable wheel",
+            "number": 14,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Smoke-test installed wheel",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 29,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 30,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 31,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288319"
+      },
+      {
+        "completedAt": "2026-09-06T04:58:50Z",
+        "conclusion": "failure",
+        "databaseId": 101431288365,
+        "name": "test (3.8)",
+        "startedAt": "2026-09-06T04:57:03Z",
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v6",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Compile Python",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Lint Python",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "failure",
+            "name": "Test",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Test with coverage gate",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "skipped",
+            "name": "Post Run actions/setup-python@v6",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 16,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288365"
+      },
+      {
+        "completedAt": "2026-09-06T04:57:00Z",
+        "conclusion": "skipped",
+        "databaseId": 101431288647,
+        "name": "nightly-native-soak",
+        "startedAt": "2026-09-06T04:57:01Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243/job/101431288647"
+      }
+    ],
+    "status": "completed",
+    "url": "https://github.com/kuboyoo/csplendor/actions/runs/34012764243"
+  },
+  "initial_CI_counts": {
+    "failure": 7,
+    "skipped": 1,
+    "success": 9
+  },
+  "initial_test_merge_commit": "1dda78202fb59aa72089450844f995291858983f",
+  "lint_corrected_candidate_and_wheel_source": "f6d28dde184ff1950c4729197a3a9ac1645b0c11",
+  "merge_performed": false,
+  "next": "Request approval for three compatibility corrections; merge and deployment still need separate approval",
+  "origin_main": "f5ec6c545c9a2727ca708bc4c6822daf07a2c4dc",
+  "record_commit_resolver": "git log -1 --format=%H -- doc/performance_experiments/f4_premerge_review_20260906.md",
+  "schema": "csplendor.f4-premerge.v1",
+  "wheel": {
+    "existing_cases": {
+      "MCTS": "legacy 48-action, 8 simulations, batch=1, synthetic evaluator, no NN",
+      "fixture_file_sha256": {
+        "test_reveal_verified_solver.py": "daaa805b7cbe80e3f96894c7300649a97f61584c4f1e0195b6401237e6ce4cb6",
+        "test_state_feature_numpy.py": "40df44a2d42e9093763be7ea4889e16688e9a2c8e2b4b79f21bef2f318d8cfcd"
+      },
+      "passed": [
+        "test_reveal_verified_solver_proves_seven_move_mate_at_exact_depth",
+        "test_exact_depth_search_honors_external_cancellation",
+        "test_mate_search_session_reuses_position_after_opponent_response",
+        "test_mate_search_session_resumes_incomplete_same_depth_search",
+        "test_json_mate_frontier_state_round_trip_preserves_phase_fields",
+        "test_lazy_frontier_reaches_terminal_for_five_and_seven_move_mates",
+        "test_retained_featurizer_array_survives_search_and_game_destruction"
+      ],
+      "solver": "existing 5/7 frontier, exact 7, session/cancel/resume; original asserts/budgets unchanged"
+    },
+    "identity": {
+      "cwd": "/home/kuboyu/workspace/csplendor-f4-acceptance-20260906/run2",
+      "executable": "/home/kuboyu/workspace/csplendor-f4-acceptance-20260906/wheel-env/bin/python",
+      "extension": "/home/kuboyu/workspace/csplendor-f4-acceptance-20260906/wheel-env/lib/python3.12/site-packages/csplendor/_csplendor.cpython-312-x86_64-linux-gnu.so",
+      "extension_sha256": "f2f653f4794d5454be82bce17ee4cb0ac38f9141fc7789e4275a7d01f01bb597",
+      "installed_files": {
+        "csplendor/__init__.py": "19cef99d3750cd093d4a67f5208d1d9f9c1923bb54b20c60f1c0afa1b9036cbc",
+        "csplendor/_csplendor.cpython-312-x86_64-linux-gnu.so": "f2f653f4794d5454be82bce17ee4cb0ac38f9141fc7789e4275a7d01f01bb597",
+        "csplendor/action_space.py": "e881d7f3b8ebdb8dda909657a8c2007a8ca33245c8c69af32c3676e7f0f47aea",
+        "csplendor/api/__init__.py": "0d4145d65780b5b8ce90223a801b8420df00f452264b06f6fa959262ca00e1b2",
+        "csplendor/api/ai_manager.py": "faa63cdc9206b18958e8b892584519734db9ebe2246beae62c6b4d2a11d263b9",
+        "csplendor/api/ai_provider.py": "83217f94a657ec688d3e68af97c0a2b86474e2c08fc257f620c0f50526973156",
+        "csplendor/api/app.py": "fa0ae36ebea765a71f8811447c8a1551a2b69324198205147c5e4994deafd5e9",
+        "csplendor/api/application_errors.py": "45b2078998a4d75ed5d611500a7ca4216bcee743ee822fb9c82089d6a72179d5",
+        "csplendor/api/external_ai_bridge.py": "27ddbfd5d789ffab15e692f74374e6c0b5e1a6a004286f5b78255d75c9da68ee",
+        "csplendor/api/game_presenter.py": "bb69ff4ce07b944ec41576fa57d587f5ca39eab86cf0c013898613b921086810",
+        "csplendor/api/game_service.py": "6515691d57b8716dc69d4e7a04f872d84114c3458a768d7676abfa48766d81ad",
+        "csplendor/api/kifu_codec.py": "8d393d73b7b2f762dbec7348fdd4fcf45a05b56c460a12ddd236ff34fe5d331e",
+        "csplendor/api/kifu_service.py": "0d2b48faac361e650321c3a6666727b90b7eba2c7ccabd06af33b58603b2c9d8",
+        "csplendor/api/legacy_replay_reader.py": "8f8737f441bae4f610af5b37f9398eebc9add05564973feada683e1e0969bbf7",
+        "csplendor/api/replay.py": "44421cd308c1ebd09e820a6e689cf2232be24403469fa845f568b9ac1cc2e0c1",
+        "csplendor/api/schemas.py": "1f581859afb965d55d08fb6e90cdc160927ad56ded6e2c2b4f5ab27c40e53aae",
+        "csplendor/api/spn_codec.py": "7e1364fa780ff8624e9705937b8d7b05c6b9c3fe1b1990779b3c80c16ef8611c",
+        "csplendor/api/stores.py": "9a82b5886bba8dbff306b1000ef35dbe353772d00ed8725387b984a90383be5a",
+        "csplendor/api/usi_kifu.py": "87bdc8e7eed6ef16a5490b80225e2e2df213bcc47836d053de74f0b56f5fd2da",
+        "csplendor/api/usi_parser.py": "99694c16f4ac790b13e619a8cf7c0ccb98d2c2979674ec4d7d16f35c106f51cb",
+        "csplendor/api/usi_resolver.py": "c5b0bef9045e6d2b76540accd602102c855eff5cca75d1d6a986dbf3fcd005a1",
+        "csplendor/api/usi_serializer.py": "e909e617695fcc31c4081699017ef8686c3401a0bb24ff152b0c7a766a84bbad",
+        "csplendor/api/usi_tokens.py": "18456812aaac8d9b655df044972632938fd825ad2d81f697f570b82d54c95ca9",
+        "csplendor/api/usi_types.py": "4d5ca5ca2293cb1df63005a9943564533b5cade58c4e3c06dc33a4bab9c196a2",
+        "csplendor/features.py": "d22d0a860aa4fff8f6d3a0c9ab7e3b1476772c59fba560cd49e9e7b8c780cd13",
+        "csplendor/gem_colors.py": "4afd396015e4fe66cb3ad85ffc7b9a57b9225b05187de3232f26671023311e3d",
+        "csplendor/mate_depth.py": "ee92000f7eafa764289761e6863b5c83a7991fe9b723889e708f4729d77a699c",
+        "csplendor/mate_frontier.py": "c96c7ffccea901ea5981a548ba1de6641525c5fa2e33839e7e7f62d518f88089",
+        "csplendor/mate_session.py": "97ee34e73d6d82d0ead2817d925db3b7082d2e1c88918d5cf6e8786f5d5aeead"
+      },
+      "package": "/home/kuboyu/workspace/csplendor-f4-acceptance-20260906/wheel-env/lib/python3.12/site-packages/csplendor/__init__.py",
+      "prefix": "/home/kuboyu/workspace/csplendor-f4-acceptance-20260906/wheel-env",
+      "python": "3.12.1 (main, Jan  9 2025, 22:10:40) [GCC 11.4.0]",
+      "sys_path": [
+        "/home/kuboyu/.pyenv/versions/3.12.1/lib/python312.zip",
+        "/home/kuboyu/.pyenv/versions/3.12.1/lib/python3.12",
+        "/home/kuboyu/.pyenv/versions/3.12.1/lib/python3.12/lib-dynload",
+        "/home/kuboyu/workspace/csplendor-f4-acceptance-20260906/wheel-env/lib/python3.12/site-packages"
+      ],
+      "versions": {
+        "csplendor": "0.1.0",
+        "numpy": "2.2.6",
+        "pip": "23.2.1"
+      },
+      "wheel": "/home/kuboyu/workspace/csplendor-f4-acceptance-20260906/wheels/csplendor-0.1.0-cp312-cp312-linux_x86_64.whl",
+      "wheel_bytes": 797747,
+      "wheel_sha256": "575b9b6e4e8e8b75a67a2765bde434367a388ecd88d8855884c819f9caf21258"
+    },
+    "smoke": [
+      {
+        "features": 196,
+        "legal_v3_ids": 30,
+        "owning_numpy": true,
+        "simple_payment_mode": false,
+        "snapshot_roundtrip": true
+      },
+      {
+        "features": 196,
+        "legal_v3_ids": 30,
+        "owning_numpy": true,
+        "simple_payment_mode": true,
+        "snapshot_roundtrip": true
+      }
+    ],
+    "status": "PASS"
+  }
+}
