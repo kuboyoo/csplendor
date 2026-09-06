@@ -1,5 +1,10 @@
 # F4前半：PR・remote CI・clean wheel受入（2026-09-06）
 
+追記：[F4互換性是正報告](f4_compat_review_20260906.md)で承認済み3原因を修正・再検証した。
+元のconstexpr／Python3.8 flag／Windows slot4件は解消。新wheel受入はPASSだが、
+後続のClang unused警告・macOS GNU time前提・Windows native test縮小変換によりBLOCKEDを維持。
+以下は是正前の結果として保持する。最終headのCIはPR本文を参照。merge・導入は承認待ち。
+
 ## 判定：BLOCKED（候補の互換性修正が必要）
 
 [PR #26](https://github.com/kuboyoo/csplendor/pull/26)を作成し、通常push・remote CI確認・

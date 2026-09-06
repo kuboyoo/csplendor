@@ -1,5 +1,12 @@
 # F4統合・導入runbook：merge・導入は承認待ち
 
+2026-09-06是正追記：[F4互換性是正](f4_compat_review_20260906.md)で元の3原因を修正し通常pushした。
+修正コード／新wheel sourceは`c725b5ed33e5ba4cd4cc99d9ccee8627550b754e`。
+本体header・計測driverにはF1から差分あり、同条件新拡張のbyte一致と新source digestを記録した。
+旧3原因の承認待ちは終了したが、後続Clang unused／macOS GNU time／Windows native test警告が残る。
+これらの是正・再検証と、その後のmerge・導入は未承認。以下の統合操作は実行しない。
+記録commit後の最新head・CIはPR #26本文で照合する。origin/mainは`f5ec6c545c9a2727ca708bc4c6822daf07a2c4dc`のまま。
+
 2026-09-06追記。F3 lint是正は完了。承認されたF4前半（作業branch push・PR作成・
 remote CI・隔離clean wheel受入）を実施した。wheelはPASS、CIで互換性failureが残り **BLOCKED**。
 [PR #26](https://github.com/kuboyoo/csplendor/pull/26)と[前半報告](f4_premerge_review_20260906.md)を参照。
