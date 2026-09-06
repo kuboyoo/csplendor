@@ -1288,7 +1288,7 @@ def _wait_for_proc_termination(process_state):
     while True:
         try:
             fields = process_state.read_text(encoding="ascii").split()
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             return  # includes exit/reap between successive reads
         assert len(fields) >= 3
         if fields[2] == "Z":
@@ -1297,7 +1297,7 @@ def _wait_for_proc_termination(process_state):
         time.sleep(0.02)
 
 
-@pytest.mark.parametrize("states", [["Z"], [None], ["R", None], ["R", "Z"]])
+@pytest.mark.parametrize("states", [["Z"], [None], ["R", None], ["R", "Z"], ["R", "gone"]])
 def test_proc_state_exit_race_contract(monkeypatch, states):
     pending = iter(states)
 
@@ -1306,6 +1306,8 @@ def test_proc_state_exit_race_contract(monkeypatch, states):
             state = next(pending)
             if state is None:
                 raise FileNotFoundError("child was reaped")
+            if state == "gone":
+                raise ProcessLookupError("child disappeared during proc read")
             return "123 (python) " + state
 
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
