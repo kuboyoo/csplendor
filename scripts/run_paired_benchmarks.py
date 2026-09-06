@@ -594,7 +594,8 @@ def _manifest_compatibility_view(manifest: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def manifest_mismatches(
-    baseline: Mapping[str, Any], candidate: Mapping[str, Any]
+    baseline: Mapping[str, Any], candidate: Mapping[str, Any],
+    *, build_profile_axis: str | None = None,
 ) -> list[str]:
     mismatches: list[str] = []
     if baseline.get("schema") != MANIFEST_SCHEMA:
@@ -605,6 +606,14 @@ def manifest_mismatches(
         return mismatches
     left = _manifest_compatibility_view(baseline)
     right = _manifest_compatibility_view(candidate)
+    if build_profile_axis is not None:
+        if build_profile_axis not in {"cpu", "lto", "pgo"}:
+            raise ValueError("unsupported build profile axis")
+        for original, view in ((baseline, left), (candidate, right)):
+            # Only the explicitly selected build axis may differ. Compiler,
+            # flags, sanitizer, verification and all semantic gates remain.
+            view["build"]["benchmark_build_fingerprint_sha256"] = original.get(
+                "build", {}).get("profile_axis_fingerprints_sha256", {}).get(build_profile_axis)
     for side, view in (("baseline", left), ("candidate", right)):
         build = view["build"]
         if build.get("available") is not True or not build.get(
@@ -633,9 +642,10 @@ def manifest_mismatches(
 
 
 def validate_manifest_compatibility(
-    baseline: Mapping[str, Any], candidate: Mapping[str, Any]
+    baseline: Mapping[str, Any], candidate: Mapping[str, Any],
+    *, build_profile_axis: str | None = None,
 ) -> None:
-    mismatches = manifest_mismatches(baseline, candidate)
+    mismatches = manifest_mismatches(baseline, candidate, build_profile_axis=build_profile_axis)
     if mismatches:
         raise BenchmarkContractError(
             "benchmark manifests are incompatible: " + ", ".join(mismatches)
@@ -847,6 +857,20 @@ class _FixedBinarySlotRotator:
                 raise OSError("short write while staging benchmark binary")
             remaining = remaining[written:]
 
+    @staticmethod
+    def _open_slot_for_write(path: Path, flags: int) -> tuple[int, int]:
+        # Even after the wrapper and workers have been reaped, Linux can
+        # briefly retain an executable mapping. Retry only ETXTBSY, outside
+        # all benchmark timing; never replace the fixed inode or waive checks.
+        for attempt in range(51):
+            try:
+                return os.open(path, flags), attempt
+            except OSError as error:
+                if error.errno != errno.ETXTBSY or attempt == 50:
+                    raise
+                time.sleep(0.005)
+        raise AssertionError("unreachable")
+
     def _copy_to_slot(self, side: str, slot_id: str) -> dict[str, Any]:
         _source, expected_sha256, snapshot = self._sources[side]
         self._assert_live_slot(slot_id)
@@ -854,7 +878,7 @@ class _FixedBinarySlotRotator:
         target_flags |= getattr(os, "O_CLOEXEC", 0)
         target_flags |= getattr(os, "O_NOFOLLOW", 0)
         try:
-            target_fd = os.open(self._slot_paths[slot_id], target_flags)
+            target_fd, busy_retries = self._open_slot_for_write(self._slot_paths[slot_id], target_flags)
         except OSError as error:
             raise BenchmarkContractError(
                 f"cannot stage benchmark binary into {slot_id}"
@@ -889,6 +913,7 @@ class _FixedBinarySlotRotator:
             "source_binary_sha256": expected_sha256,
             "source_binary_size_bytes": len(snapshot),
             "staged_binary_sha256": verified_sha256,
+            "text_busy_retries_before_timing": busy_retries,
         }
 
     def verify(self, slot_id: str, expected_sha256: str) -> str:
@@ -1559,6 +1584,7 @@ def run_paired(
     baseline_cmake_cache: Path | str | None = None,
     candidate_cmake_cache: Path | str | None = None,
     rotate_binary_slots: bool = False,
+    build_profile_axis: str | None = None,
 ) -> dict[str, Any]:
     if pairs < 1 or warmups < 0:
         raise ValueError("pairs must be positive and warmups non-negative")
@@ -1585,7 +1611,7 @@ def run_paired(
             benchmark_affinity=selected_cpus,
             cmake_cache=candidate_cmake_cache,
         )
-    validate_manifest_compatibility(manifest_a, manifest_b)
+    validate_manifest_compatibility(manifest_a, manifest_b, build_profile_axis=build_profile_axis)
 
     commands = {"A": list(baseline_command), "B": list(candidate_command)}
     paired_samples = []
@@ -1677,6 +1703,7 @@ def run_paired(
             "bootstrap_iterations": bootstrap_iterations,
             "rss_scope": "process; per-workload only for single-row commands",
             "rotate_binary_slots": rotate_binary_slots,
+            "build_profile_axis": build_profile_axis,
             "statistical_unit": (
                 "two_pair_crossover_block" if rotate_binary_slots else "pair"
             ),
@@ -1900,6 +1927,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     paired_parser.add_argument("--candidate-manifest", type=Path)
     paired_parser.add_argument("--baseline-cmake-cache", type=Path)
     paired_parser.add_argument("--candidate-cmake-cache", type=Path)
+    paired_parser.add_argument("--build-profile-axis", choices=("cpu", "lto", "pgo"),
+                               help="Explicit build-profile experiment; all other build gates stay strict")
     paired_parser.add_argument(
         "--rotate-binary-slots",
         action="store_true",
@@ -1952,6 +1981,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             baseline_cmake_cache=args.baseline_cmake_cache,
             candidate_cmake_cache=args.candidate_cmake_cache,
             rotate_binary_slots=args.rotate_binary_slots,
+            build_profile_axis=args.build_profile_axis,
         )
     else:
         payload = compare_collections(

@@ -76,6 +76,9 @@ _SAFE_CMAKE_CACHE_KEYS = frozenset(
         "CSPLENDOR_VERIFY_SOLVER_ROLLBACK",
         "CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER",
         "CSPLENDOR_CPU_TARGET",
+        "CSPLENDOR_ENABLE_LTO",
+        "CSPLENDOR_PGO_MODE",
+        "CSPLENDOR_PGO_DIR",
         "CSPLENDOR_INCREMENTAL_EXACT_HASH",
         "CSPLENDOR_INCREMENTAL_REVEAL_SEARCH_STATE",
         "CSPLENDOR_NOBLE_ELIGIBILITY_TABLE",
@@ -304,6 +307,19 @@ def _cmake_build_metadata(cache_path: Path | None) -> tuple[dict[str, Any], str 
     # while ON must still prevent comparison with a deployment timing build.
     benchmark_entries.setdefault("CSPLENDOR_VERIFY_REVEAL_SCORE_ORDER", "OFF")
     benchmark_entries.setdefault("CSPLENDOR_VERIFY_SOLVER_ROLLBACK", "OFF")
+    benchmark_entries.setdefault("CSPLENDOR_ENABLE_LTO", "OFF")
+    benchmark_entries.setdefault("CSPLENDOR_PGO_MODE", "none")
+    benchmark_entries.setdefault("CSPLENDOR_PGO_DIR", "")
+    profile_fingerprints = {}
+    for axis, ignored in {
+        "cpu": {"CSPLENDOR_CPU_TARGET"},
+        "lto": {"CSPLENDOR_ENABLE_LTO"},
+        "pgo": {"CSPLENDOR_PGO_MODE", "CSPLENDOR_PGO_DIR"},
+    }.items():
+        profile_fingerprints[axis] = hashlib.sha256(json.dumps(
+            {k: v for k, v in benchmark_entries.items() if k not in ignored},
+            sort_keys=True, separators=(",", ":")
+        ).encode()).hexdigest()
     benchmark_canonical = json.dumps(
         benchmark_entries, sort_keys=True, separators=(",", ":")
     )
@@ -323,6 +339,7 @@ def _cmake_build_metadata(cache_path: Path | None) -> tuple[dict[str, Any], str 
             "benchmark_build_fingerprint_sha256": hashlib.sha256(
                 benchmark_canonical.encode("utf-8")
             ).hexdigest(),
+            "profile_axis_fingerprints_sha256": profile_fingerprints,
         },
         raw_entries.get("CMAKE_CXX_COMPILER"),
     )

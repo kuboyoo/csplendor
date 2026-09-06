@@ -151,6 +151,13 @@ Python経路は約5.97倍です。native MCTS・実NN全体の倍率ではあり
 固定特徴量の定数表案はMCTSで改善が再現せず撤去しました。
 詳細は[Phase 5C-B測定記録](doc/performance_experiments/phase5cb_features_20260906.md)を参照してください。
 
+Phase 6ではportable既定を維持し、native実行ファイル向けのRelease LTOをopt-inで追加しました。
+同じ採用コードの厳密めくれ探索で約1.06倍（独立再測定でも約1.06倍）です。
+Python拡張は既にpybind11がLTOを付けており、今回の追加効果とは扱いません。
+Linux nativeとPGOは別経路の回帰が再現したため棄却・撤去しました。
+[Phase 6検証報告](doc/performance_experiments/phase6_build_profiles_20260906.md)と
+[共通要件§19–22の監査](doc/performance_experiments/phase6_common_audit_20260906.md)を参照してください。
+
 ### 実験的な並列MCTS
 
 共有tree並列探索はStage Bのexperimental opt-inです。既定の`num_threads=1`はworker queueを
@@ -238,6 +245,23 @@ cp _csplendor.*.so ../csplendor/
 
 `CSPLENDOR_CPU_TARGET`で、配布用とローカル最適化用を同じソースから
 分けてビルドできます。
+
+Linuxのnative実行ファイルでは、次のようにCPU互換性を保ったRelease LTOを選択できます。
+`CSPLENDOR_ENABLE_LTO`の既定はOFFです。OFFでもPython拡張の既存pybind11 LTOは無効化しません。
+ONではCMakeでcompiler/linkerのIPO対応を検査し、Release構成だけに適用します。
+
+```bash
+cmake -S . -B build/portable-lto \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCSPLENDOR_CPU_TARGET=portable \
+  -DCSPLENDOR_ENABLE_LTO=ON \
+  -DCSPLENDOR_BUILD_PYTHON_MODULE=OFF \
+  -DCSPLENDOR_BUILD_ENGINE_BENCHMARK=ON
+cmake --build build/portable-lto --parallel 4
+```
+
+Linux x86_64向け`-march=native`とPGOはPhase 6の比較で棄却したため、正式profileには含めません。
+以下のApple Silicon向けnative profileと配布wheel制限は従来どおりです。
 
 - `portable`（既定）: CPU固有フラグを追加しません。汎用arm64 wheelなどの
   配布物には必ずこちらを使用します。
