@@ -171,12 +171,13 @@ std::string serialize(const Game &game, uint8_t observer) {
       payload.u8(reservation.value);
     }
 
-    if (player.purchased_cards.size() != player.purchased_count)
+    if (player.purchased_cards.size() > player.purchased_count)
       throw std::invalid_argument(
-          "purchased count does not match information-state cards");
+          "known purchased cards exceed information-state purchase count");
     const std::vector<uint8_t> purchased = sorted_ids(
         player.purchased_cards, false, "information-state purchased cards");
     append_counted(payload, purchased);
+    payload.u8(static_cast<uint8_t>(player.purchased_count - purchased.size()));
 
     const std::vector<uint8_t> acquired = sorted_ids(
         player.acquired_nobles, true, "information-state acquired nobles");

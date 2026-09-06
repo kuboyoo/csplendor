@@ -11,7 +11,7 @@ namespace csplendor::information_state {
 // Durable, observer-safe identity used by offline analysis and opening books.
 // The bytes are an identity only: they deliberately omit the authoritative
 // hidden partition and therefore cannot be deserialized into a Game.
-static constexpr uint16_t FORMAT_VERSION = 1;
+static constexpr uint16_t FORMAT_VERSION = 2;
 static constexpr uint16_t RULES_VERSION = 1;
 static constexpr std::array<uint8_t, 8> MAGIC = {
     {'C', 'S', 'P', 'L', 'I', 'N', 'F', 'O'}};

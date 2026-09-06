@@ -145,6 +145,30 @@ def _newly_revealed_purchase_fixture():
     return game
 
 
+def _pruned_reserve_hint_fixture():
+    game = cs.Game(seed=0)
+    board = game.board
+    board.bank = [0, 0, 0, 0, 0, 1]
+    board.visible = [[7, 15, 23, 31], [-1] * 4, [-1] * 4]
+    board.decks = [[], [], []]
+    board.nobles = []
+    board.current_player = 1
+    board.turn = 1
+
+    for player_index in range(2):
+        player = board.get_player(player_index)
+        player.gems = [0] * 6
+        player.bonuses = [0, 0, 3, 0, 0] if player_index == 1 else [0] * 5
+        player.points = 14 if player_index == 1 else 0
+        player.acquired_nobles = []
+        player.reserved = [-1] * 3
+        player.reserved_is_hidden = [False] * 3
+        player.purchased_cards = []
+        player.purchased_count = 0
+        board.set_player(player_index, player)
+    return game
+
+
 def test_reveal_verified_solver_proves_known_five_move_mate_within_node_budget():
     result = solve_reveal_verified_mate(
         load_game_from_usi_text(BENCH_POSITION),
@@ -790,6 +814,29 @@ def test_reveal_verified_frontier_uses_principal_line_action_hints():
     assert result["unknown_reason"] is None
     assert {int(edge["action_code"]) for edge in result["edges"]} == {2184}
     assert result["stats"]["nodes"] < 500000
+
+
+def test_reveal_verified_frontier_keeps_hint_beyond_reserve_pruning_limit():
+    game = _pruned_reserve_hint_fixture()
+    hint = next(
+        int(action.pack())
+        for action in game.legal_actions
+        if action.type == cs.ActionType.RESERVE_VISIBLE and action.card_id == 31
+    )
+
+    result = cs.solve_reveal_verified_frontier_cpp(
+        game,
+        attacker=1,
+        depth=2,
+        max_nodes=1000,
+        time_limit_seconds=1.0,
+        edge_limit=100,
+        preferred_attacker_actions=[hint],
+    )
+
+    assert result["proven"] is True
+    assert result["complete"] is True
+    assert [int(edge["action_code"]) for edge in result["edges"]] == [hint]
 
 
 def test_reveal_verified_frontier_default_budget_materializes_wide_defender():

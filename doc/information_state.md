@@ -12,7 +12,7 @@
 - observer-safeなtier別未知card pool
 - 両playerのtoken、bonus、点数、購入枚数
 - 公開予約、observer自身の伏せ予約、相手伏せ予約のtier
-- 公開済み購入cardと獲得貴族
+- 既知の購入card、未知購入枚数、獲得貴族
 
 含まれない情報は次のとおり。
 
@@ -21,8 +21,9 @@
 - 相手の伏せ予約と物理山札のpartition
 - undo/history、探索木、controller側の反復回避履歴
 
-公開カード・貴族・予約・購入cardのスロットまたは格納順はrule上の意味を持たないため、
-ID順にcanonicalizeする。相手の伏せ予約と物理山札は、現在のMCTSと同じく
+公開カード・貴族・予約・既知購入cardのスロットまたは格納順はrule上の意味を持たないため、
+ID順にcanonicalizeする。USI/SPNで`bought:[_,...]`と表される購入cardは、
+総購入枚数から既知ID数を引いた未知購入枚数として保持する。相手の伏せ予約と物理山札は、現在のMCTSと同じく
 `observable_card_pool()`の集合として表す。従ってobserver-perspective
 determinizationでhidden allocationだけを変更してもbytesは変わらない。
 
@@ -41,5 +42,5 @@ fingerprint、payload長、checksumを持つ。fieldの追加・削除・canonic
 `information_state::FORMAT_VERSION`を更新する。同じlayoutのままrule上の意味を変更する
 場合は`RULES_VERSION`を更新する。
 
-色置換による対称性圧縮はversion 1では行わない。cardとnobleの実catalogueがその置換で
+色置換による対称性圧縮はversion 2では行わない。cardとnobleの実catalogueがその置換で
 閉じていることを証明せずに色をcanonicalizeしてはならない。
