@@ -7,8 +7,26 @@
 #include <new>
 #include <stdexcept>
 
+#if defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define CSPLENDOR_TEST_TSAN_ALLOCATIONS 1
+#endif
+#endif
+#if defined(__SANITIZE_THREAD__) && !defined(CSPLENDOR_TEST_TSAN_ALLOCATIONS)
+#define CSPLENDOR_TEST_TSAN_ALLOCATIONS 1
+#endif
+#ifdef CSPLENDOR_TEST_TSAN_ALLOCATIONS
+#include <sanitizer/allocator_interface.h>
+#endif
+
 namespace {
 std::atomic<size_t> allocations{0};
+#ifdef CSPLENDOR_TEST_TSAN_ALLOCATIONS
+void count_allocation(const volatile void *, size_t) {
+  allocations.fetch_add(1, std::memory_order_relaxed);
+}
+void observe_free(const volatile void *) {}
+#endif
 using csplendor::solver_internal::NormalBranchRollback;
 using csplendor::detail::UndoRecord;
 void require(bool condition, const char *message) {
@@ -317,6 +335,7 @@ void fault_injection() {
 #endif
 } // namespace
 
+#ifndef CSPLENDOR_TEST_TSAN_ALLOCATIONS
 void *operator new(std::size_t size) {
   allocations.fetch_add(1, std::memory_order_relaxed);
   if (void *p = std::malloc(size ? size : 1)) return p;
@@ -324,9 +343,21 @@ void *operator new(std::size_t size) {
 }
 void operator delete(void *p) noexcept { std::free(p); }
 void operator delete(void *p, std::size_t) noexcept { std::free(p); }
+#endif
 
 int main() {
   try {
+#ifdef CSPLENDOR_TEST_TSAN_ALLOCATIONS
+    // TSan owns new/delete. Its supported hook keeps the no-allocation oracle
+    // active (also observing malloc), without replacing sanitizer interceptors.
+    require(__sanitizer_install_malloc_and_free_hooks(count_allocation, observe_free) > 0,
+            "allocation observer installation failed");
+#endif
+    const auto before_probe = allocations.load();
+    void *probe = ::operator new(17);
+    const auto after_probe = allocations.load();
+    ::operator delete(probe);
+    require(after_probe > before_probe, "allocation observer is inactive");
     unsigned types = 0;
     size_t visited = 0;
     transition_corpus(types, visited);
