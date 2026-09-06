@@ -6,47 +6,86 @@
 
 ## 特長
 
-- **高速なロジック**: C++17による合法手生成・局面更新・探索。最新候補とmainの同条件比較、および過去の測定を下記で区別しています。
+- **高速なロジック**: C++17による合法手生成・局面更新・探索。F1計測候補とmainの累積比較、CI互換版の追加検証、過去の測定を下記で区別しています。
 - **Python バインディング**: `pybind11` によりシームレスに連携できます。
 - **機械学習対応**: 状態の特徴量化と行動空間のエンコードを内蔵しています。
 - **Web API**: GUI 開発向けの FastAPI 連携を備えています。
 
 ### 性能目安
 
-#### 最終候補とmainの累積比較（2026-09-06）
+#### 今回の累積ベンチマーク（F1計測候補、2026-09-06）
 
-`main f5ec6c5`対、計測コード`b202e6a`の直接paired A/Bです。Ryzen 9 7900X、
-GCC 15.2、portable Release、22 pairs / 11 blocks。nativeはLTOなし、Python拡張は
-両側とも既存pybind11 LTOを維持しています。記録追加後のcommitは計測コードと区別します。
+main `f5ec6c545c9a2727ca708bc4c6822daf07a2c4dc` と、F1計測コード
+`b202e6a0cbb2eded9bc2ee5e59f750428e73ca49` の直接paired A/Bです。
+以下は同じ固定入力を使った独立再測定系列で、時間は1実行の中央値です。
+倍率は候補/mainの処理速度比で、大きいほど高速です。
 
-| 処理 | main | 最終候補 | 倍率［95%信頼区間］ |
+| 処理（独立再測定） | main | F1計測候補 | 倍率［95%信頼区間］ |
 |---|---:|---:|---:|
-| C++内部合法手count（20万回） | 1,185,093 回/秒 | 3,112,934 回/秒 | 2.629［2.615–2.651］ |
-| C++内部合法手codes（20万回） | 155,366 回/秒 | 378,400 回/秒 | 2.438［2.429–2.447］ |
-| C++内部合法手actions（20万回） | 172,136 回/秒 | 346,226 回/秒 | 2.008［1.959–2.057］ |
-| 厳密めくれ・深さ7・100万node（独立再測定） | 2,505.49 ms | 1,051.16 ms | 2.373［2.361–2.403］ |
-| Python StateFeaturizer・5万回（独立再測定） | 372.14 ms | 29.04 ms | 12.808［12.514–13.048］ |
-| Python特徴量＋環境step・5万手（独立再測定） | 529.33 ms | 89.37 ms | 6.044［5.732–6.164］ |
+| 厳密めくれ・depth7・100万node上限 | 2,505.49 ms | 1,051.16 ms | 2.373［2.361–2.403］ |
+| Python StateFeaturizer・5万回 | 372.14 ms | 29.04 ms | 12.808［12.514–13.048］ |
+| Python特徴量＋環境step・5万手 | 529.33 ms | 89.37 ms | 6.044［5.732–6.164］ |
 
-生成速度3行はnative benchmarkであり、Pythonの`legal_actions`取得速度ではありません。
-倍率はcrossover block比の中央値で、上表の速度・時間中央値の比とは必ずしも一致しません。
-深さ7の速度fixtureはnode上限でUNKNOWNです。7手詰めの完遂時間、AI全体、問題保存速度へは
-外挿しません。探索のcurrent RSSは約30%減少しました。
+**これはF1計測バイナリの値です。** 後続のCI互換性修正によりnative実行ファイル・Python拡張は
+byte不一致であり、最終PR headやmerge後バイナリの直接測定値ではありません。
+F1の記録commit `49878b661298bf45e39c5f5ca5afa6d0e363736a` も計測コードとは区別します。
 
-並列MCTSの累積高速化とLTO単独の追加効果は未確定です。`CSPLENDOR_ENABLE_LTO`は
-既定OFFを維持し、全用途に推奨しません。詳しくは[F1報告・CSV・manifest](doc/performance_experiments/final_main_vs_candidate_20260906.md)。
+厳密めくれのfixtureは `hidden_reserve`、cold探索のnode上限で **UNKNOWN** となる固定仕事です。
+7手詰めの完全証明時間ではありません。Pythonの2行は `reachable_32_seed42` の各経路の実測で、
+実NN・GPU・AI全体・問題保存速度の倍率ではありません。
+同じ独立再測定で、探索終了時にnative側が取得したLinux **current RSS** の中央値は
+70,152→49,208 KiB（約30%減）でした。正式系列も70,192→49,188 KiBです。
+peak RSSや累計allocation bytesではなく、他局面の省メモリ率も保証しません。
 
-F2では実モデルselfplay12/selfplay17をCPUで小さく検証しました。利用側は**Python MCTS＋V3**、
-canonical/public特徴量313次元で、native 48手やStateFeaturizerの測定経路とは異なります。
-実モデルのmain対速度比較、ブラウザ描画、GPU受入は未実施です。
-F3の追加テスト5ファイル・CI lint違反7件は最小修正済みで、ローカル判定は**READY_FOR_REVIEW**。
-関連73件とPython 3.12の595件・coverage 58.89%が通過しました。
-その後の[F4前半](doc/performance_experiments/f4_premerge_review_20260906.md)では隔離clean wheel受入が通過しましたが、
-[PR #26](https://github.com/kuboyoo/csplendor/pull/26)のCIでClang・Python 3.8・Windows互換性の失敗があり、統合判定は**BLOCKED**です。
-[是正報告](doc/performance_experiments/f3_lint_correction_20260906.md)、
-[受入・最終レビュー](doc/performance_experiments/f2_f3_shipping_review_20260906.md)と
-[F4準備・復帰手順](doc/performance_experiments/f4_integration_runbook_20260906.md)を参照してください。
-作業ブランチのpush・PR作成のみ実施済みです。mainへのmerge・push・常用環境更新は承認待ちです。
+測定条件：Ryzen 9 7900X、Linux x86_64、GCC 15.2.0、Python 3.12.1、CMake 4.2.3、
+pybind11 3.0.1。portable Release `-O3 -DNDEBUG -std=c++17`、PERF/VERIFY OFF、CPU4に1thread固定。
+native追加LTOはOFF、Python拡張は両側とも既存pybind11 LTOを維持しました。
+warmup 2回、22 pairs / 11個の2-pair fixed-slot crossover blocks、block bootstrap 10,000回。
+倍率はblock比の中央値なので、表示時間の中央値同士の比とは必ずしも一致しません。
+[F1詳細・再現手順](doc/performance_experiments/final_main_vs_candidate_20260906.md)、
+[CSV](doc/performance_experiments/final_main_vs_candidate_20260906.csv)、
+[manifest](doc/performance_experiments/final_main_vs_candidate_manifest_20260906.json)を正本とします。
+
+#### CI互換版の追加検証（2026-09-06）
+
+CI修正版コード `8b6dd8b48526dfa1eda8ccbc00a9355f5abc8cdb` と保存済みF1候補バイナリを、
+同じportable条件・CPU4・22 pairs / 11 blocksで限定比較しました。
+
+| 固定順solver・fixture | CI修正版/F1候補の速度比［95%信頼区間］ |
+|---|---:|
+| exact_reveal・hidden_reserve・depth7・100万node上限 | 1.0103［0.9981–1.0269］ |
+| visible_solver・five_moves・10万node上限 | 1.0192［0.9973–1.0444］ |
+
+全pairのsemantic digest・正しさcounterは一致しました。両区間は1を含み、
+「限定solver比較では明確な退行を検出していない」範囲の結果です。
+追加高速化や全経路の非劣性を確定したものではなく、F1倍率との乗算もしません。
+最終コードの適用CI 16 jobs（Python 3.8–3.12、Clang/GCC strict、ASan/UBSan・TSan実行、
+macOS/Windows native・適用wheelを含む）と隔離clean wheel受入は通過しました。
+詳細は[CI仕上げ報告](doc/performance_experiments/f4_ci_finish_review_20260906.md)・
+[manifest](doc/performance_experiments/f4_ci_finish_manifest_20260906.json)、
+記録追加後やREADME更新後のheadに対するCI・統合状況は[PR #26](https://github.com/kuboyoo/csplendor/pull/26)を参照してください。
+過去のF3/F4報告・runbookのBLOCKEDや承認待ちは各記録時点の状態です。
+
+並列MCTSの累積高速化、最終候補に対するLTO追加効果、現バイナリの実モデル速度は未確定です。
+`CSPLENDOR_ENABLE_LTO`は既定OFFを維持し、過去のnative solver向けopt-in LTO結果を
+Python拡張の追加効果へ転用しません。
+[F2実利用受入](doc/performance_experiments/f2_f3_shipping_review_20260906.md)は旧バイナリのCPU機能確認で、
+selfplay12/selfplay17のPython MCTS＋V3/3133 actions・canonical/public 313特徴を使用しています。
+native 48手やStateFeaturizerの測定経路とは異なり、実モデルsmoke通過も速度A/Bの代わりにはなりません。
+GPU・ブラウザ描画・実モデルpaired速度比較は未実施です。
+[導入・復帰手順](doc/performance_experiments/f4_integration_runbook_20260906.md)に従い、常用環境の切替は別途承認が必要です。
+
+#### F1のその他の参考測定（2026-09-06、正式系列）
+
+同じF1のmain/計測候補・build条件で、`midgame_250` を20万回処理したnative生成速度です。
+上の独立再測定とは別系列で、Python `legal_actions`取得やCI修正後の最新速度ではありません。
+自己対戦・MCTS等のF1結果は詳細報告に保持しています。
+
+| C++内部処理 | main | F1計測候補 | 倍率［95%信頼区間］ |
+|---|---:|---:|---:|
+| 合法手count | 1,185,093 回/秒 | 3,112,938 回/秒 | 2.629［2.615–2.651］ |
+| 合法手codes | 155,366 回/秒 | 378,400 回/秒 | 2.438［2.429–2.447］ |
+| 合法手actions | 172,136 回/秒 | 346,226 回/秒 | 2.008［1.959–2.057］ |
 
 #### 過去の生成速度（2026-07/08、現行候補の再測定ではない）
 
