@@ -1265,16 +1265,7 @@ def test_runner_timeout_kills_descendant_process_group(tmp_path, monkeypatch, rs
         )
     child_pid = int(child_pid_path.read_text(encoding="ascii"))
     assert len(processes) == 1 and processes[0].poll() is not None
-    process_state = Path(f"/proc/{child_pid}/stat")
-    deadline = time.monotonic() + 2.0
-    while process_state.exists() and time.monotonic() < deadline:
-        fields = process_state.read_text(encoding="ascii").split()
-        if len(fields) >= 3 and fields[2] == "Z":
-            break
-        time.sleep(0.02)
-    if process_state.exists():
-        fields = process_state.read_text(encoding="ascii").split()
-        assert len(fields) >= 3 and fields[2] == "Z"
+    _wait_for_proc_termination(Path(f"/proc/{child_pid}/stat"))
     # macOS has no /proc. Verify the actual child's state there too. An orphan
     # zombie is already terminated; the direct process above must be reaped.
     deadline = time.monotonic() + 2.0
@@ -1290,6 +1281,67 @@ def test_runner_timeout_kills_descendant_process_group(tmp_path, monkeypatch, rs
             break
         assert time.monotonic() < deadline, "descendant is still running"
         time.sleep(0.02)
+
+
+def _wait_for_proc_termination(process_state):
+    deadline = time.monotonic() + 2.0
+    while True:
+        try:
+            fields = process_state.read_text(encoding="ascii").split()
+        except FileNotFoundError:
+            return  # includes exit/reap between successive reads
+        assert len(fields) >= 3
+        if fields[2] == "Z":
+            return  # exited, waiting only for the container init's reap
+        assert time.monotonic() < deadline, "descendant is still running"
+        time.sleep(0.02)
+
+
+@pytest.mark.parametrize("states", [["Z"], [None], ["R", None], ["R", "Z"]])
+def test_proc_state_exit_race_contract(monkeypatch, states):
+    pending = iter(states)
+
+    class ProcState:
+        def read_text(self, **_kwargs):
+            state = next(pending)
+            if state is None:
+                raise FileNotFoundError("child was reaped")
+            return "123 (python) " + state
+
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    _wait_for_proc_termination(ProcState())
+    assert next(pending, "exhausted") == "exhausted"
+
+
+@pytest.mark.parametrize("group_remains", [False, True])
+def test_group_permission_error_requires_confirmed_disappearance(monkeypatch, group_remains):
+    class Process:
+        pid = 12345
+        polls = 0
+        waited = False
+
+        def poll(self):
+            self.polls += 1
+            return -15 if self.polls > 1 else None
+
+        def wait(self, timeout=None):
+            self.waited = True
+            return -15
+
+    process = Process()
+
+    def killpg(_pid, _signal):
+        raise PermissionError("Darwin zombie or a genuinely protected group")
+
+    monkeypatch.setattr(os, "killpg", killpg, raising=False)
+    monkeypatch.setattr(runner, "_process_group_exists", lambda _pid: group_remains)
+    if group_remains:
+        with pytest.raises(PermissionError):
+            runner._terminate_process_group(process, grace_seconds=0)
+    else:
+        runner._terminate_process_group(process, grace_seconds=0)
+        assert process.waited
+    assert process.polls >= 2
 
 
 @pytest.mark.parametrize("returncode, payload, expected", [

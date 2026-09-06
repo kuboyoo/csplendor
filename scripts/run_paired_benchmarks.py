@@ -1186,18 +1186,28 @@ def _terminate_process_group(
     """Terminate the complete benchmark wrapper/process group and reap it."""
     if hasattr(os, "killpg"):
         process_group = process.pid
-        try:
-            os.killpg(process_group, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        deadline = time.monotonic() + grace_seconds
-        while time.monotonic() < deadline and _process_group_exists(process_group):
-            time.sleep(0.01)
-        if _process_group_exists(process_group):
+        def signal_group(signum: int) -> None:
             try:
-                os.killpg(process_group, signal.SIGKILL)
+                os.killpg(process_group, signum)
             except ProcessLookupError:
                 pass
+            except PermissionError:
+                # Darwin may report EPERM for a group containing only the
+                # unreaped leader. Never hide errors for a remaining group.
+                process.poll()
+                if _process_group_exists(process_group):
+                    raise
+
+        process.poll()
+        signal_group(signal.SIGTERM)
+        deadline = time.monotonic() + grace_seconds
+        while time.monotonic() < deadline:
+            process.poll()  # reap a SIGTERM-exited leader before probing its group
+            if not _process_group_exists(process_group):
+                break
+            time.sleep(0.01)
+        if _process_group_exists(process_group):
+            signal_group(signal.SIGKILL)
     elif process.poll() is None:
         process.terminate()
         try:
