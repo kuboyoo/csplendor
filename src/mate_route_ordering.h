@@ -18,8 +18,8 @@ namespace csplendor::solver_internal {
 class MateRouteOrdering {
   std::unordered_map<uint64_t, int> estimates_;
 
-  static uint64_t estimate_key(const Board &board, int player_id,
-                               bool extended) {
+  static uint64_t estimate_key(const Board &board, int player_id, bool extended,
+                               bool hidden_routes) {
     uint64_t hash = 14695981039346656037ULL;
     const auto mix = [&](int value) {
       hash = (hash ^ static_cast<uint8_t>(value)) * 1099511628211ULL;
@@ -42,6 +42,18 @@ class MateRouteOrdering {
     for (int color = 0; color < 6; ++color)
       mix(board.bank[color] == 0 ? 0 : board.bank[color] >= 4 ? 2 : 1);
     mix(extended);
+    mix(hidden_routes);
+    if (hidden_routes) {
+      uint64_t low = 0, high = 0;
+      for (const auto &deck : board.decks)
+        for (int card : deck)
+          if (card < 64)
+            low |= uint64_t(1) << card;
+          else
+            high |= uint64_t(1) << (card - 64);
+      hash ^= low * 0x9e3779b97f4a7c15ULL;
+      hash ^= high * 0xc2b2ae3d27d4eb4fULL;
+    }
     return hash;
   }
 
@@ -107,12 +119,16 @@ class MateRouteOrdering {
 public:
   void clear() { estimates_.clear(); }
 
-  int distance(const Board &board, int player_id, bool extended = true) {
-    const uint64_t key = estimate_key(board, player_id, extended);
+  int distance(const Board &board, int player_id, bool extended = true,
+               bool hidden_routes = false) {
+    hidden_routes = hidden_routes && extended;
+    const uint64_t key =
+        estimate_key(board, player_id, extended, hidden_routes);
     const auto cached = estimates_.find(key);
     if (cached != estimates_.end())
       return cached->second;
-    const int result = compute_distance(board, player_id, extended);
+    const int result =
+        compute_distance(board, player_id, extended, hidden_routes);
     if (estimates_.size() >= 131072)
       estimates_.clear();
     // This bounded cache holds estimates, not proofs. Even a hash collision
@@ -125,8 +141,8 @@ private:
   // Smaller is better. Fractional-turn tie breakers reward points and retained
   // resources. Multiple routes are examined so blocking one target is not
   // mistaken for blocking every way to win.
-  static int compute_distance(const Board &board, int player_id,
-                              bool extended) {
+  static int compute_distance(const Board &board, int player_id, bool extended,
+                              bool hidden_routes) {
     const PlayerState &player = board.players[player_id];
     Runner start;
     std::copy(player.gems.begin(), player.gems.end(), start.gems.begin());
@@ -137,8 +153,9 @@ private:
     if (start.points >= 15)
       return -100 * (start.points - 15);
 
-    std::array<int, 15> cards{};
-    std::array<bool, 15> reserved{};
+    std::array<int, 25> cards{};
+    std::array<bool, 25> reserved{};
+    std::array<bool, 25> hidden{};
     int count = 0;
     for (const auto &row : board.visible) {
       for (int card : row) {
@@ -150,6 +167,32 @@ private:
       if (is_valid_card_id(card)) {
         reserved[count] = true;
         cards[count++] = card;
+      }
+    }
+    if (hidden_routes) {
+      // Nature can supply a useful hidden reservation to the defender. Model
+      // the reserve turn and slot before buying, rather than assuming that
+      // every future target must already be face up. This remains ONLY an
+      // ordering heuristic; all actual moves/reveals are checked by the solver.
+      std::array<std::vector<std::pair<int, int>>, 5> targets;
+      for (const auto &deck : board.decks) {
+        for (int id : deck) {
+          const Card &card = get_card(id);
+          int gap = 0;
+          for (int color = 0; color < 5; ++color)
+            gap += std::max(0, int(card.cost[color]) - start.bonuses[color] -
+                                   start.gems[color]);
+          gap = std::max(0, gap - start.gems[GOLD] - int(board.bank[GOLD] > 0));
+          targets[card.bonus].emplace_back(gap * 100 - card.points * 25, id);
+        }
+      }
+      for (auto &color : targets) {
+        std::sort(color.begin(), color.end());
+        for (size_t i = 0; i < std::min<size_t>(2, color.size()); ++i) {
+          hidden[count] = true;
+          reserved[count] = true;
+          cards[count++] = color[i].second;
+        }
       }
     }
     int best = 20000 + (15 - start.points) * 1000;
@@ -167,7 +210,7 @@ private:
     struct Route {
       Runner runner;
       int turns;
-      uint16_t used;
+      uint32_t used;
       int priority;
     };
     // At most six competing routes, three purchases deep. This beam limits
@@ -178,10 +221,17 @@ private:
       next.reserve(beam.size() * count);
       for (const Route &route : beam) {
         for (int card = 0; card < count; ++card) {
-          if (route.used & (uint16_t(1) << card))
+          if (route.used & (uint32_t(1) << card))
             continue;
           Route child = route;
-          child.used |= uint16_t(1) << card;
+          child.used |= uint32_t(1) << card;
+          if (hidden[card]) {
+            if (child.runner.reserved >= Board::MAX_RESERVED)
+              continue;
+            ++child.runner.reserved;
+            child.runner.gems[GOLD] += int(board.bank[GOLD] > 0);
+            ++child.turns;
+          }
           child.turns +=
               purchase(board, child.runner, cards[card], reserved[card]);
           consider(child.runner, child.turns);

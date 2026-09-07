@@ -19,6 +19,7 @@ def main() -> None:
     parser.add_argument("--required-action")
     parser.add_argument("--refutation", action="store_true")
     parser.add_argument("--candidates", action="store_true")
+    parser.add_argument("--dfpn", action="store_true")
     parser.add_argument("--preferred-action-code", action="append", type=int, default=[])
     parser.add_argument(
         "--require-conclusion", action="store_true",
@@ -40,6 +41,7 @@ def main() -> None:
         exhaustive_attacker_actions=not args.candidates, exact_reveal_search=True,
         use_route_ordering=not args.baseline, include_proof_dag=False,
         cooperative_reveals=args.refutation,
+        use_dfpn=args.dfpn,
         preferred_attacker_actions=args.preferred_action_code,
     )
     legal = {a.pack(): a for a in game.legal_actions}

@@ -5,6 +5,19 @@ import random
 from csplendor import Game
 
 
+def legacy_reveal_stats(stats):
+    """Keep old search/DAG goldens, requiring new exact-search stats to be zero."""
+    normalized = dict(stats)
+    for key in (
+        "refutation_probe_nodes", "refutation_probe_refutations",
+        "score_bound_prunes", "score_bound_cache_hits",
+        "dfpn_expansions", "dfpn_proof", "dfpn_disproof",
+        "protected_reply_prunes", "permanent_memo_hits", "counter_policy_hits",
+    ):
+        assert normalized.pop(key) == 0, key
+    return normalized
+
+
 def action_signature(action):
     """Return every semantically relevant Action field as immutable values."""
     return (

@@ -517,6 +517,56 @@ def test_mate_search_session_reuses_position_after_opponent_response():
     assert next_turn["stats"]["reused_memo_hits"] == 1
 
 
+def test_native_exact_cache_canonicalizes_slots_but_not_payment_rules():
+    from csplendor._csplendor import NativeMateSearchSession
+
+    game = _six_move_mate_fixture()
+    session = NativeMateSearchSession(0)
+    original = session.search(game, 6, time_limit_seconds=5)
+    assert original["proven"] is True
+    game.board.visible = [list(reversed(row)) for row in game.board.visible]
+    player = game.board.get_player(1)
+    player.reserved = list(reversed(player.reserved))
+    player.reserved_is_hidden = list(reversed(player.reserved_is_hidden))
+    game.board.set_player(1, player)
+    reordered = session.search(game, 6, time_limit_seconds=5)
+    assert reordered["proven"] is True
+    assert reordered["stats"]["nodes"] == 1
+    assert reordered["stats"]["persistent_memo_hits"] == 1
+
+    game.simple_payment_mode = not game.simple_payment_mode
+    changed_rules = session.search(game, 6, time_limit_seconds=5)
+    assert changed_rules["proven"] is True
+    assert changed_rules["stats"]["nodes"] > 1
+    assert changed_rules["stats"]["persistent_memo_hits"] == 0
+
+
+def test_bounded_refutations_do_not_poison_deeper_mate_proofs():
+    from csplendor._csplendor import NativeMateSearchSession
+
+    game = _six_move_mate_fixture()
+    session = NativeMateSearchSession(0)
+    shallow = session.search(game, 5, time_limit_seconds=5)
+    assert shallow["unknown_reason"] is None
+    assert shallow["proven"] is False
+    deeper = session.search(game, 6, time_limit_seconds=5)
+    assert deeper["unknown_reason"] is None
+    assert deeper["proven"] is True
+
+
+@pytest.mark.parametrize("depth,fixture", [(6, _six_move_mate_fixture), (7, _seven_move_mate_fixture)])
+def test_native_dfpn_finds_known_deep_mates(depth, fixture):
+    result = cs.solve_reveal_verified_mate_cpp(
+        fixture(), attacker=0, depth=depth, max_nodes=0, time_limit_seconds=5,
+        exhaustive_attacker_actions=True, exact_reveal_search=True,
+        include_proof_dag=False, use_dfpn=True,
+    )
+    assert result["unknown_reason"] is None
+    assert result["proven"] is True
+    assert result["stats"]["dfpn_expansions"] > 0
+    assert result["stats"]["dfpn_proof"] == 0
+
+
 def test_mate_search_session_uses_shallower_result_for_iterative_ordering():
     game = _six_move_mate_fixture()
     session = cs.MateSearchSession(attacker=0, jobs=1)
@@ -547,7 +597,9 @@ def test_mate_search_session_resumes_incomplete_same_depth_search():
         game,
         min_depth=5,
         max_depth=5,
-        max_nodes=500,
+        # The admissible score bound now completes this fixture in fewer than
+        # 500 nodes. Keep this explicitly a cache-resume interruption test.
+        max_nodes=80,
         time_limit_seconds=5.0,
     )
 

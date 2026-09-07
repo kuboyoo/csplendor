@@ -1,6 +1,7 @@
 #include "reveal_verified_solver.h"
 #include "action.h"
 #include "mate_route_ordering.h"
+#include "mate_score_bound.h"
 #include "reveal_solver_components.h"
 #include "rule_transition.h"
 #include <algorithm>
@@ -36,8 +37,9 @@ public:
        size_t strict_preferred_attacker_prefix,
        bool exhaustive_attacker_actions, bool exact_reveal_search,
        std::shared_ptr<RevealSearchCancellationToken> cancellation_token,
-       bool use_route_ordering, bool cooperative_reveals)
+       bool use_route_ordering, bool cooperative_reveals, bool use_dfpn)
       : attacker_(attacker), depth_(depth), max_nodes_(max_nodes),
+        time_limit_seconds_(time_limit_seconds),
         limits_(max_nodes, time_limit_seconds, std::move(cancellation_token)),
         preferred_attacker_actions_(std::move(preferred_attacker_actions)),
         include_proof_dag_(include_proof_dag),
@@ -48,7 +50,7 @@ public:
         exhaustive_attacker_actions_(exhaustive_attacker_actions),
         exact_reveal_search_(exact_reveal_search),
         use_route_ordering_(use_route_ordering),
-        cooperative_reveals_(cooperative_reveals) {
+        cooperative_reveals_(cooperative_reveals), use_dfpn_(use_dfpn) {
     if (cooperative_reveals_ && (!exact_reveal_search_ || include_proof_dag_))
       throw std::invalid_argument(
           "cooperative reveals require exact search without a proof DAG");
@@ -63,9 +65,11 @@ public:
     result.depth = depth_;
     try {
       std::unordered_set<DepthStateKey, DepthStateKeyHash> path;
-      const ForceStatus status =
-          forced_win(game, path, depth_, exact_reveal_search_);
+      const ForceStatus status = search_with_refutation_probe(
+          game, path, depth_, exact_reveal_search_);
       result.proven = status == ForceStatus::PROVEN;
+      if (status == ForceStatus::UNKNOWN)
+        result.unknown_reason = "incomplete proof search";
       result.reason =
           result.proven ? (cooperative_reveals_ ? "cooperative_reveals_verified"
                                                 : "all_reveals_verified")
@@ -98,6 +102,7 @@ public:
       size_t max_cache_states) {
     depth_ = depth;
     max_nodes_ = max_nodes;
+    time_limit_seconds_ = time_limit_seconds;
     limits_ = SearchLimit(max_nodes, time_limit_seconds,
                           std::move(cancellation_token));
     preferred_attacker_actions_ = std::move(preferred_attacker_actions);
@@ -116,8 +121,11 @@ public:
     result.depth = depth_;
     try {
       std::unordered_set<DepthStateKey, DepthStateKeyHash> path;
-      const ForceStatus status = forced_win(game, path, depth_, true);
+      const ForceStatus status =
+          search_with_refutation_probe(game, path, depth_, true);
       result.proven = status == ForceStatus::PROVEN;
+      if (status == ForceStatus::UNKNOWN)
+        result.unknown_reason = "incomplete proof search";
       result.reason =
           result.proven ? (cooperative_reveals_ ? "cooperative_reveals_verified"
                                                 : "all_reveals_verified")
@@ -136,8 +144,13 @@ public:
   }
 
   void clear_exact_cache() {
+    counter_action_hints_.clear();
+    counter_reveal_hints_.clear();
+    dfpn_table_.clear();
+    score_bound_.clear();
     exact_memo_.clear();
     exact_bounds_.clear();
+    probe_memo_.clear();
     route_ordering_.clear();
   }
 
@@ -289,10 +302,16 @@ public:
 
 private:
   Game begin_search(const Game &input, bool clear_memo = true) {
+    dfpn_table_.clear();
+    score_bound_.clear();
+    refutation_probe_ = false;
+    probe_memo_.clear();
     exact_bounds_.clear();
     route_ordering_.clear();
     cutoff_actions_.clear();
     if (clear_memo) {
+      counter_action_hints_.clear();
+      counter_reveal_hints_.clear();
       memo_.clear();
       exact_memo_.clear();
     }
@@ -345,13 +364,15 @@ private:
     uint64_t acquired_hidden_high = 0;
     uint8_t reserved0 = 0;
     uint8_t reserved1 = 0;
+    bool simple_payment = false;
 
     bool operator==(const StateKey &other) const {
       return core == other.core && unseen_low == other.unseen_low &&
              unseen_high == other.unseen_high &&
              acquired_hidden_low == other.acquired_hidden_low &&
              acquired_hidden_high == other.acquired_hidden_high &&
-             reserved0 == other.reserved0 && reserved1 == other.reserved1;
+             reserved0 == other.reserved0 && reserved1 == other.reserved1 &&
+             simple_payment == other.simple_payment;
     }
   };
 
@@ -366,6 +387,7 @@ private:
       meta |= static_cast<uint64_t>(key.core.final_round ? 1 : 0) << 48;
       meta |= static_cast<uint64_t>(static_cast<uint8_t>(key.core.winner + 2))
               << 49;
+      meta |= static_cast<uint64_t>(key.simple_payment) << 52;
       const uint64_t mixed =
           key.core.board_hash ^ (key.unseen_low * 0x9e3779b97f4a7c15ULL) ^
           (key.unseen_high * 0xc2b2ae3d27d4eb4fULL) ^
@@ -401,6 +423,15 @@ private:
     bool replayable = true;
     uint64_t generation = 0;
     uint64_t last_touched = 0;
+    bool permanent_refutation = false;
+  };
+
+  struct ProofValue {
+    ForceStatus status;
+    bool permanent_refutation;
+    ProofValue(ForceStatus value, bool permanent = false)
+        : status(value), permanent_refutation(permanent) {}
+    operator ForceStatus() const { return status; }
   };
 
   struct OrderedAction : ActionOrderKey, OracleActionMetadata {
@@ -431,18 +462,26 @@ private:
   int attacker_ = 0;
   int depth_ = 0;
   uint64_t max_nodes_ = 0;
+  double time_limit_seconds_ = 0;
   size_t max_cache_states_ = 0;
   SearchLimit limits_;
   RevealVerifiedSearchStats stats_;
   std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash> memo_;
   std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash> exact_memo_;
+  std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash> probe_memo_;
+  bool refutation_probe_ = false;
+  double probe_deadline_ms_ = 0;
+  struct ProbeBudgetExpired {};
   std::unordered_map<StateKey, ExactBounds, StateKeyHash> exact_bounds_;
   std::unordered_map<uint64_t, std::array<uint64_t, 2>> cutoff_actions_;
+  std::unordered_map<uint64_t, uint64_t> counter_action_hints_;
+  std::unordered_map<uint64_t, int> counter_reveal_hints_;
   uint64_t search_generation_ = 0;
   uint64_t cache_touch_counter_ = 0;
   Game root_{0};
   HiddenOutcomeCatalog hidden_catalog_;
   csplendor::solver_internal::MateRouteOrdering route_ordering_;
+  csplendor::solver_internal::MateScoreBound score_bound_;
   std::vector<uint64_t> preferred_attacker_actions_;
   bool include_proof_dag_ = false;
   RevealProofDagBuilder proof_builder_;
@@ -453,13 +492,331 @@ private:
   bool exact_reveal_search_ = false;
   bool use_route_ordering_ = true;
   bool cooperative_reveals_ = false;
+  bool use_dfpn_ = false;
+  static constexpr uint64_t PN_INFINITY = uint64_t(1) << 60;
+  struct Numbers {
+    uint64_t proof = 1, disproof = 1;
+    bool solved() const { return proof == 0 || disproof == 0; }
+  };
+  struct DfpnAction {
+    OrderedAction action;
+    Numbers value;
+    int reveal = -1;
+  };
+  struct DfpnEntry {
+    Numbers value;
+    std::vector<DfpnAction> actions;
+    bool expanded = false;
+  };
+  std::unordered_map<DepthStateKey, DfpnEntry, DepthStateKeyHash> dfpn_table_;
   std::unordered_map<DepthStateKey, size_t, DepthStateKeyHash> proof_node_ids_;
   std::unordered_map<DepthStateKey, size_t, DepthStateKeyHash>
       proof_terminal_node_ids_;
   static constexpr size_t ATTACKER_TAKE_LIMIT = 6;
   static constexpr size_t ATTACKER_RESERVE_LIMIT = 3;
 
-  ForceStatus
+  ForceStatus search_with_refutation_probe(
+      Game &game, std::unordered_set<DepthStateKey, DepthStateKeyHash> &path,
+      int depth, bool exact) {
+    if (exact && use_dfpn_ && exhaustive_attacker_actions_ &&
+        !cooperative_reveals_ && !include_proof_dag_ &&
+        !strict_preferred_attacker_actions_ &&
+        !strict_preferred_attacker_prefix_) {
+      const Numbers value =
+          dfpn_state(game, depth, PN_INFINITY, PN_INFINITY, true);
+      stats_.dfpn_proof = value.proof;
+      stats_.dfpn_disproof = value.disproof;
+      return value.proof == 0      ? ForceStatus::PROVEN
+             : value.disproof == 0 ? ForceStatus::REFUTED
+                                   : ForceStatus::UNKNOWN;
+    }
+    if (exact && exact_memo_.find(DepthStateKey{state_key(game, true),
+                                                depth}) != exact_memo_.end())
+      return forced_win(game, path, depth, exact);
+    if (exact && use_route_ordering_ && exhaustive_attacker_actions_ &&
+        !cooperative_reveals_ && !include_proof_dag_ && depth >= 4 &&
+        required_root_action_ == UINT64_MAX &&
+        !strict_preferred_attacker_actions_ &&
+        !strict_preferred_attacker_prefix_) {
+      // Restrict nature and the defender, never the attacker's legal actions.
+      // Losing even this easier game is a sound refutation. A win in
+      // the relaxation is NEVER a mate proof: verify it with every reveal.
+      const Board previous = game.board;
+      const uint64_t before_nodes = stats_.nodes;
+      probe_deadline_ms_ = limits_.elapsed_ms() +
+                           (time_limit_seconds_ > 0
+                                ? std::min(30000.0, time_limit_seconds_ * 350.0)
+                                : 30000.0);
+      refutation_probe_ = true;
+      ForceStatus probe = ForceStatus::UNKNOWN;
+      try {
+        probe = forced_win(game, path, depth, true);
+      } catch (const ProbeBudgetExpired &) {
+        // This is a scheduling slice, not a global search/node limit.
+      }
+      refutation_probe_ = false;
+      stats_.refutation_probe_nodes += stats_.nodes - before_nodes;
+      game.board = previous;
+      path.clear();
+      probe_memo_.clear();
+      if (probe == ForceStatus::REFUTED) {
+        ++stats_.refutation_probe_refutations;
+        return probe;
+      }
+    }
+    return forced_win(game, path, depth, exact);
+  }
+
+  static Numbers proof_numbers(ForceStatus status) {
+    return status == ForceStatus::PROVEN    ? Numbers{0, PN_INFINITY}
+           : status == ForceStatus::REFUTED ? Numbers{PN_INFINITY, 0}
+                                            : Numbers{};
+  }
+
+  static uint64_t pn_add(uint64_t left, uint64_t right) {
+    return std::min(PN_INFINITY, left + right);
+  }
+
+  static uint64_t pn_remaining(uint64_t limit, uint64_t total, uint64_t child) {
+    return limit == PN_INFINITY ? PN_INFINITY : limit - total + child;
+  }
+
+  static uint64_t pn_next_threshold(uint64_t second) {
+    // Widen a scheduling threshold on this very bushy game, not the proof
+    // criterion. +/- infinity and zero retain their exact AND/OR meanings.
+    // A unit increment spends its entire budget on the first few layers.
+    return pn_add(second, std::max<uint64_t>(1024, second / 2));
+  }
+
+  template <typename Children>
+  static Numbers pn_update(const Children &children, bool is_or) {
+    Numbers value{is_or ? PN_INFINITY : 0, is_or ? 0 : PN_INFINITY};
+    for (const auto &child : children) {
+      value.proof = is_or ? std::min(value.proof, child.value.proof)
+                          : pn_add(value.proof, child.value.proof);
+      value.disproof = is_or ? pn_add(value.disproof, child.value.disproof)
+                             : std::min(value.disproof, child.value.disproof);
+    }
+    return value;
+  }
+
+  template <typename Children>
+  static std::pair<size_t, uint64_t> pn_select(const Children &children,
+                                               bool is_or) {
+    size_t best = 0;
+    uint64_t first = PN_INFINITY, second = PN_INFINITY;
+    for (size_t i = 0; i < children.size(); ++i) {
+      const uint64_t value =
+          is_or ? children[i].value.proof : children[i].value.disproof;
+      if (value < first) {
+        second = first;
+        first = value;
+        best = i;
+      } else if (value < second) {
+        second = value;
+      }
+    }
+    return {best, second};
+  }
+
+  ForceStatus dfpn_leaf(const Game &game, int depth, bool is_root) {
+    if (game.is_game_over())
+      return game.winner() == attacker_ ? ForceStatus::PROVEN
+                                        : ForceStatus::REFUTED;
+    if (game.current_player() == attacker_ && depth <= 0)
+      return ForceStatus::REFUTED;
+    if (!use_route_ordering_)
+      return ForceStatus::UNKNOWN;
+    if (attacker_ == 0 && protected_reply_refutes(game)) {
+      ++stats_.protected_reply_prunes;
+      return ForceStatus::REFUTED;
+    }
+    if (!is_root && game.current_player() == 1 && !game.board.waiting_noble &&
+        player1_can_win_now(game))
+      return attacker_ == 1 ? ForceStatus::PROVEN : ForceStatus::REFUTED;
+    if (can_resolve_final_round(game)) {
+      ForceStatus value;
+      if (resolve_final_round_direct(game, value, true)) {
+        ++stats_.final_round_direct_resolutions;
+        return value;
+      }
+    }
+    if (!game.board.final_round && !game.board.waiting_noble) {
+      if (depth == 1 && max_last_turn_score(game, attacker_) < 15)
+        return ForceStatus::REFUTED;
+      if (depth >= 2 && depth <= 3) {
+        bool cached = false;
+        const bool possible =
+            score_bound_.can_reach_15(game.board, attacker_, depth, cached);
+        stats_.score_bound_cache_hits += cached;
+        if (!possible) {
+          ++stats_.score_bound_prunes;
+          return ForceStatus::REFUTED;
+        }
+      }
+    }
+    return ForceStatus::UNKNOWN;
+  }
+
+  Numbers dfpn_state(Game &game, int depth, uint64_t proof_limit,
+                     uint64_t disproof_limit, bool is_root = false) {
+    check_limits();
+    ++stats_.nodes;
+    const ForceStatus terminal = dfpn_leaf(game, depth, is_root);
+    if (terminal != ForceStatus::UNKNOWN)
+      return proof_numbers(terminal);
+    const DepthStateKey key{state_key(game, true), depth};
+    const auto exact = exact_memo_.find(key);
+    if (exact != exact_memo_.end()) {
+      ++stats_.memo_hits;
+      return proof_numbers(exact->second.status);
+    }
+    if (depth <= 3 && !is_root) {
+      // Solve the small remaining AND/OR tree directly. This is an exact leaf
+      // evaluator, not a heuristic evaluation of an unfinished proof.
+      std::unordered_set<DepthStateKey, DepthStateKeyHash> path;
+      path.insert(DepthStateKey{state_key(root_, true), depth_ + 1});
+      return proof_numbers(forced_win(game, path, depth, true));
+    }
+    DfpnEntry &node = dfpn_table_[key];
+    if (!node.expanded) {
+      node.expanded = true;
+      ++stats_.dfpn_expansions;
+      auto actions = proof_ordered_actions(game);
+      const bool counter_hint = prefer_counter_action(game, key.state, actions);
+      if (use_route_ordering_ && depth >= 3 && !counter_hint)
+        prioritize_routes(game, actions, depth);
+      if (game.current_player() == attacker_)
+        actions = forced_attacker_actions(game, actions, depth, is_root);
+      stats_.legal_moves += actions.size();
+      for (const auto &action : actions)
+        node.actions.push_back(DfpnAction{action, Numbers{}, -1});
+    }
+    if (node.actions.empty())
+      return proof_numbers(ForceStatus::REFUTED);
+    const bool is_or = game.current_player() == attacker_;
+    node.value = pn_update(node.actions, is_or);
+    while (!node.value.solved() && node.value.proof < proof_limit &&
+           node.value.disproof < disproof_limit) {
+      check_limits();
+      const auto [index, second] = pn_select(node.actions, is_or);
+      DfpnAction &child = node.actions[index];
+      if (is_root) {
+        stats_.root_actions = node.actions.size();
+        stats_.root_action = child.action.code;
+        stats_.root_actions_completed =
+            std::count_if(node.actions.begin(), node.actions.end(),
+                          [](const DfpnAction &a) { return a.value.solved(); });
+        stats_.dfpn_proof = node.value.proof;
+        stats_.dfpn_disproof = node.value.disproof;
+      }
+      const uint64_t next_proof =
+          is_or
+              ? std::min(proof_limit, pn_next_threshold(second))
+              : pn_remaining(proof_limit, node.value.proof, child.value.proof);
+      const uint64_t next_disproof =
+          is_or ? pn_remaining(disproof_limit, node.value.disproof,
+                               child.value.disproof)
+                : std::min(disproof_limit, pn_next_threshold(second));
+      dfpn_action(game, depth, child, next_proof, next_disproof);
+      node.value = pn_update(node.actions, is_or);
+    }
+    if (node.value.solved()) {
+      const auto selected = std::find_if(
+          node.actions.begin(), node.actions.end(), [&](const DfpnAction &a) {
+            return is_or ? a.value.proof == 0 : a.value.disproof == 0;
+          });
+      const DfpnAction &best =
+          selected == node.actions.end() ? node.actions.front() : *selected;
+      store_entry(exact_memo_, key,
+                  Entry{node.value.proof == 0 ? ForceStatus::PROVEN
+                                              : ForceStatus::REFUTED,
+                        best.action.code, best.reveal, true,
+                        node.actions.size()});
+      if (!is_or && node.value.disproof == 0)
+        remember_counter_action(game, key.state, best.action.code);
+      if (is_root)
+        stats_.root_actions_completed =
+            std::count_if(node.actions.begin(), node.actions.end(),
+                          [](const DfpnAction &a) { return a.value.solved(); });
+      std::vector<DfpnAction>().swap(node.actions);
+    }
+    return node.value;
+  }
+
+  void dfpn_action(Game &game, int depth, DfpnAction &node,
+                   uint64_t proof_limit, uint64_t disproof_limit) {
+    struct Outcome {
+      int reveal;
+      int depth;
+      DepthStateKey key;
+      Numbers value;
+    };
+    std::vector<Outcome> outcomes;
+    const int actor = game.current_player();
+    const Action action = Action::unpack(node.action.code);
+    for_each_proof_outcome(
+        game, node.action,
+        [&](int reveal) {
+          check_limits();
+          ++stats_.nodes;
+          const int next_depth =
+              depth - int(actor == attacker_ && game.current_player() != actor);
+          const DepthStateKey key{state_key(game, true), next_depth};
+          const ForceStatus leaf = dfpn_leaf(game, next_depth, false);
+          Numbers value = proof_numbers(leaf);
+          if (leaf == ForceStatus::UNKNOWN) {
+            const auto exact = exact_memo_.find(key);
+            if (exact != exact_memo_.end())
+              value = proof_numbers(exact->second.status);
+            else {
+              const auto partial = dfpn_table_.find(key);
+              if (partial != dfpn_table_.end())
+                value = partial->second.value;
+            }
+          }
+          outcomes.push_back(Outcome{reveal, next_depth, key, value});
+          return value.disproof != 0;
+        },
+        true, use_route_ordering_ ? depth : 0);
+    if (outcomes.empty())
+      throw std::logic_error("DFPN action has no legal outcome");
+    node.value = pn_update(outcomes, false);
+    const Board previous = game.board;
+    while (!node.value.solved() && node.value.proof < proof_limit &&
+           node.value.disproof < disproof_limit) {
+      check_limits();
+      const auto [index, second] = pn_select(outcomes, false);
+      auto &child = outcomes[index];
+      const uint64_t next_proof =
+          pn_remaining(proof_limit, node.value.proof, child.value.proof);
+      const uint64_t next_disproof =
+          std::min(disproof_limit, pn_next_threshold(second));
+      bool applied;
+      if (action.type == RESERVE_DECK)
+        applied = apply_deck_reserve_outcome(game, action, child.reveal);
+      else if (child.reveal >= 0)
+        applied = apply_visible_refill_outcome(
+            game, action, visible_refill_level(action),
+            visible_refill_slot(game.board, action), child.reveal);
+      else
+        applied = game.apply_trusted(action, false);
+      if (!applied)
+        throw std::logic_error("DFPN could not replay an outcome");
+      child.value = dfpn_state(game, child.depth, next_proof, next_disproof);
+      game.board = previous;
+      node.value = pn_update(outcomes, false);
+    }
+    const auto counter =
+        std::find_if(outcomes.begin(), outcomes.end(),
+                     [](const Outcome &o) { return o.value.disproof == 0; });
+    node.reveal =
+        counter == outcomes.end() ? outcomes.front().reveal : counter->reveal;
+    if (node.value.disproof == 0 && node.reveal >= 0)
+      remember_counter_reveal(game, node.action.code, node.reveal);
+  }
+
+  ProofValue
   forced_win(Game &game,
              std::unordered_set<DepthStateKey, DepthStateKeyHash> &path,
              int depth, bool exact_refinement) {
@@ -470,18 +827,27 @@ private:
                                   "game_over"};
     if (terminal.terminal) {
       ++stats_.terminal_nodes;
-      return terminal.winner == attacker_ ? ForceStatus::PROVEN
-                                          : ForceStatus::REFUTED;
+      return ProofValue{terminal.winner == attacker_ ? ForceStatus::PROVEN
+                                                     : ForceStatus::REFUTED,
+                        terminal.winner != attacker_};
     }
     if (game.current_player() == attacker_ && depth <= 0)
       return ForceStatus::REFUTED;
+
+    if (exact_refinement && use_route_ordering_ && attacker_ == 0 &&
+        protected_reply_refutes(game)) {
+      ++stats_.protected_reply_prunes;
+      return ProofValue{ForceStatus::REFUTED, true};
+    }
 
     if (exact_refinement && use_route_ordering_ && !include_proof_dag_ &&
         !path.empty() && game.current_player() == 1 &&
         !game.board.waiting_noble && player1_can_win_now(game)) {
       // P1's turn closes the round: an immediately winning purchase is a
       // terminal witness, regardless of its replacement card.
-      return attacker_ == 1 ? ForceStatus::PROVEN : ForceStatus::REFUTED;
+      return ProofValue{attacker_ == 1 ? ForceStatus::PROVEN
+                                       : ForceStatus::REFUTED,
+                        attacker_ != 1};
     }
 
     if (exact_refinement && use_route_ordering_ && depth == 1 &&
@@ -497,11 +863,51 @@ private:
         can_resolve_final_round(game)) {
       // This inexpensive exact calculation is cheaper than hashing and
       // retaining millions of final-round boards that differ only by refills.
-      return resolve_final_round(game, true).status;
+      const auto status = resolve_final_round(game, true).status;
+      return ProofValue{status, status == ForceStatus::REFUTED};
+    }
+
+    if (exact_refinement && use_route_ordering_ && depth >= 2 && depth <= 3 &&
+        !game.board.waiting_noble && !game.board.final_round) {
+      bool cached = false;
+      const bool possible =
+          score_bound_.can_reach_15(game.board, attacker_, depth, cached);
+      stats_.score_bound_cache_hits += cached;
+      if (!possible) {
+        ++stats_.score_bound_prunes;
+        return ForceStatus::REFUTED;
+      }
     }
 
     const DepthStateKey key{state_key(game, exact_refinement), depth};
-    auto &memo = exact_refinement ? exact_memo_ : memo_;
+    if (exact_refinement && monotone_bounds_enabled()) {
+      const auto timeless = exact_memo_.find(
+          DepthStateKey{key.state, std::numeric_limits<int>::max()});
+      if (timeless != exact_memo_.end()) {
+        ++stats_.memo_hits;
+        ++stats_.permanent_memo_hits;
+        if (timeless->second.generation != search_generation_)
+          ++stats_.persistent_memo_hits;
+        timeless->second.generation = search_generation_;
+        timeless->second.last_touched = ++cache_touch_counter_;
+        return ProofValue{ForceStatus::REFUTED, true};
+      }
+    }
+    if (refutation_probe_) {
+      const auto known = exact_memo_.find(key);
+      if (known != exact_memo_.end()) {
+        ++stats_.memo_hits;
+        if (known->second.generation != search_generation_)
+          ++stats_.persistent_memo_hits;
+        known->second.generation = search_generation_;
+        known->second.last_touched = ++cache_touch_counter_;
+        return ProofValue{known->second.status,
+                          known->second.permanent_refutation};
+      }
+    }
+    auto &memo = refutation_probe_  ? probe_memo_
+                 : exact_refinement ? exact_memo_
+                                    : memo_;
     auto memo_it = memo.find(key);
     if (memo_it != memo.end()) {
       ++stats_.memo_hits;
@@ -509,7 +915,8 @@ private:
         ++stats_.persistent_memo_hits;
       memo_it->second.generation = search_generation_;
       memo_it->second.last_touched = ++cache_touch_counter_;
-      return memo_it->second.status;
+      return ProofValue{memo_it->second.status,
+                        memo_it->second.permanent_refutation};
     }
     if (exact_refinement && monotone_bounds_enabled()) {
       const auto bound = exact_bounds_.find(key.state);
@@ -521,7 +928,9 @@ private:
         }
         if (exhaustive_attacker_actions_ && depth <= bound->second.last_refuted) {
           ++stats_.memo_hits;
-          return ForceStatus::REFUTED;
+          return ProofValue{ForceStatus::REFUTED,
+                            bound->second.last_refuted ==
+                                std::numeric_limits<int>::max()};
         }
       }
     }
@@ -530,21 +939,27 @@ private:
       return ForceStatus::UNKNOWN;
     }
     if (can_resolve_final_round(game)) {
-      const Entry resolved = resolve_final_round(game, exact_refinement);
+      Entry resolved = resolve_final_round(game, exact_refinement);
+      resolved.permanent_refutation = resolved.status == ForceStatus::REFUTED;
       store_entry(memo, key, resolved);
-      return resolved.status;
+      return ProofValue{resolved.status, resolved.permanent_refutation};
     }
 
     std::vector<OrderedAction> actions =
         exact_refinement ? proof_ordered_actions(game) : ordered_actions(game);
-    if (exact_refinement && use_route_ordering_ && depth > 1)
+    const bool counter_hint =
+        exact_refinement && prefer_counter_action(game, key.state, actions);
+    if (exact_refinement && use_route_ordering_ && depth > 1 && !counter_hint)
       prioritize_routes(game, actions, depth);
-    if (exact_refinement && use_route_ordering_ && depth > 1)
+    if (exact_refinement && use_route_ordering_ && depth > 1 && !counter_hint)
       prefer_cutoff_actions(game.current_player(), depth, actions);
     if (exact_refinement)
       prefer_iterative_action(key.state, depth, game.current_player(), actions);
     if (game.current_player() == attacker_)
       actions = forced_attacker_actions(game, actions, depth, path.empty());
+    else if (refutation_probe_ && actions.size() > 1 &&
+             !game.board.waiting_noble)
+      actions.resize(1);
     stats_.legal_moves += actions.size();
     if (actions.empty()) {
       ++stats_.terminal_nodes;
@@ -555,10 +970,14 @@ private:
 
     const int current_player = game.current_player();
     const bool is_root = path.empty();
-    if (is_root)
+    if (is_root) {
       stats_.root_actions = actions.size();
+      stats_.root_actions_completed = 0;
+      stats_.root_action = 0;
+    }
     path.insert(key);
     bool has_unknown = false;
+    bool all_actions_permanent = true;
     Entry representative;
     representative.action_count = actions.size();
 
@@ -568,14 +987,20 @@ private:
       bool action_unknown = false;
       bool action_refuted = false;
       bool action_proven = false;
+      bool action_permanent = false;
+      bool all_outcomes_permanent = true;
       int representative_reveal = -1;
       bool has_representative_reveal = false;
       const auto visit_outcome = [&](int reveal_card) {
         const int next_depth =
             depth - static_cast<int>(current_player == attacker_ &&
                                      game.current_player() != current_player);
-        const ForceStatus child =
+        const ProofValue child_value =
             forced_win(game, path, next_depth, exact_refinement);
+        const ForceStatus child = child_value.status;
+        all_outcomes_permanent = all_outcomes_permanent &&
+                                 child == ForceStatus::REFUTED &&
+                                 child_value.permanent_refutation;
         if (!has_representative_reveal) {
           representative_reveal = reveal_card;
           has_representative_reveal = true;
@@ -596,6 +1021,7 @@ private:
         if (child == ForceStatus::REFUTED) {
           representative_reveal = reveal_card;
           action_refuted = true;
+          action_permanent = child_value.permanent_refutation;
           return false;
         }
         action_unknown = action_unknown || child == ForceStatus::UNKNOWN;
@@ -608,10 +1034,14 @@ private:
                                            !include_proof_dag_,
                                        use_route_ordering_ ? depth : 0)
               : for_each_search_outcome(game, ordered, visit_outcome);
-      if (cooperative_reveals_)
+      if (cooperative_reveals_) {
         action_refuted = completed && !action_proven && !action_unknown;
+        action_permanent = action_refuted && all_outcomes_permanent;
+      }
       if (!completed && !action_refuted && !action_proven)
         action_unknown = true;
+      if (exact_refinement && action_refuted && representative_reveal >= 0)
+        remember_counter_reveal(game, ordered.code, representative_reveal);
       if (is_root)
         ++stats_.root_actions_completed;
 
@@ -630,14 +1060,19 @@ private:
         return ForceStatus::PROVEN;
       }
       if (current_player != attacker_ && action_refuted) {
+        if (exact_refinement)
+          remember_counter_action(game, key.state, ordered.code);
         remember_cutoff_action(current_player, depth, ordered.code);
         path.erase(key);
-        store_entry(memo, key,
-                    Entry{ForceStatus::REFUTED,  ordered.code,
-                          representative_reveal, true,
-                          actions.size(),        is_replayable(ordered)});
-        return ForceStatus::REFUTED;
+        Entry refutation{ForceStatus::REFUTED,  ordered.code,
+                         representative_reveal, true,
+                         actions.size(),        is_replayable(ordered)};
+        refutation.permanent_refutation = action_permanent;
+        store_entry(memo, key, refutation);
+        return ProofValue{ForceStatus::REFUTED, action_permanent};
       }
+      all_actions_permanent =
+          all_actions_permanent && action_refuted && action_permanent;
       has_unknown = has_unknown || action_unknown;
     }
     path.erase(key);
@@ -648,13 +1083,17 @@ private:
                                    ? ForceStatus::REFUTED
                                    : ForceStatus::PROVEN;
     representative.status = status;
+    representative.permanent_refutation =
+        status == ForceStatus::REFUTED && all_actions_permanent;
     store_entry(memo, key, representative);
-    return status;
+    return ProofValue{status, representative.permanent_refutation};
   }
 
   void store_entry(
       std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash> &memo,
       const DepthStateKey &key, Entry entry) {
+    if (&memo == &probe_memo_ && entry.status == ForceStatus::REFUTED)
+      store_entry(exact_memo_, key, entry);
     entry.generation = search_generation_;
     entry.last_touched = ++cache_touch_counter_;
     if (&memo == &exact_memo_ && monotone_bounds_enabled()) {
@@ -669,8 +1108,16 @@ private:
         bounds.first_proven = key.depth;
         bounds.winning = entry;
       }
-      if (exhaustive_attacker_actions_ && entry.status == ForceStatus::REFUTED)
-        bounds.last_refuted = std::max(bounds.last_refuted, key.depth);
+      if (exhaustive_attacker_actions_ &&
+          entry.status == ForceStatus::REFUTED) {
+        bounds.last_refuted =
+            std::max(bounds.last_refuted, entry.permanent_refutation
+                                              ? std::numeric_limits<int>::max()
+                                              : key.depth);
+        if (entry.permanent_refutation)
+          memo[DepthStateKey{key.state, std::numeric_limits<int>::max()}] =
+              entry;
+      }
     }
     memo[key] = std::move(entry);
   }
@@ -681,6 +1128,85 @@ private:
            required_root_action_ == UINT64_MAX &&
            !strict_preferred_attacker_actions_ &&
            strict_preferred_attacker_prefix_ == 0;
+  }
+
+  uint64_t counter_policy_key(const Game &game, StateKey state) const {
+    // This is deliberately an ABSTRACT key for ORDERING ONLY. Discard the
+    // attacker's token holdings and the bank, retaining card identities,
+    // scores, discounts and the defender's holdings. Legality is rechecked.
+    const auto &z = Zobrist::get_instance();
+    for (int color = 0; color < 6; ++color) {
+      const int bank = game.board.bank[color];
+      const int gems = game.board.players[attacker_].gems[color];
+      if (bank < 13)
+        state.core.board_hash ^= z.bank_gems[color][bank];
+      if (gems < 13)
+        state.core.board_hash ^= z.player_gems[attacker_][color][gems];
+    }
+    return StateKeyHash{}(state);
+  }
+
+  bool prefer_counter_action(const Game &game, const StateKey &state,
+                             std::vector<OrderedAction> &actions) {
+    if (!use_route_ordering_ || cooperative_reveals_ ||
+        game.current_player() == attacker_)
+      return false;
+    const auto hint =
+        counter_action_hints_.find(counter_policy_key(game, state));
+    if (hint == counter_action_hints_.end())
+      return false;
+    const auto action = std::find_if(
+        actions.begin(), actions.end(),
+        [&](const OrderedAction &a) { return a.code == hint->second; });
+    if (action == actions.end())
+      return false;
+    std::rotate(actions.begin(), action, action + 1);
+    ++stats_.counter_policy_hits;
+    return true;
+  }
+
+  void remember_counter_action(const Game &game, const StateKey &state,
+                               uint64_t code) {
+    if (!use_route_ordering_ || cooperative_reveals_)
+      return;
+    if (counter_action_hints_.size() >= 131072)
+      counter_action_hints_.clear();
+    counter_action_hints_[counter_policy_key(game, state)] = code;
+  }
+
+  uint64_t counter_reveal_key(const Game &game, uint64_t code) const {
+    const Action action = Action::unpack(code);
+    // Payment and token returns can vary; only the card / reserve tier matters
+    // for this hint. It can never serve as a transposition/proof key.
+    const uint64_t move = uint64_t(action.type) |
+                          (uint64_t(action.card_id + 1) << 8) |
+                          (uint64_t(action.deck_level + 1) << 16);
+    return counter_policy_key(game, state_key(game, true)) ^
+           (move * 0x9e3779b97f4a7c15ULL);
+  }
+
+  void remember_counter_reveal(const Game &game, uint64_t code, int card) {
+    if (!use_route_ordering_ || cooperative_reveals_)
+      return;
+    if (counter_reveal_hints_.size() >= 131072)
+      counter_reveal_hints_.clear();
+    counter_reveal_hints_[counter_reveal_key(game, code)] = card;
+  }
+
+  bool prefer_counter_reveal(const Game &game, const Action &action,
+                             std::vector<int> &cards) {
+    if (!use_route_ordering_ || cooperative_reveals_)
+      return false;
+    const auto hint =
+        counter_reveal_hints_.find(counter_reveal_key(game, action.pack()));
+    if (hint == counter_reveal_hints_.end())
+      return false;
+    const auto card = std::find(cards.begin(), cards.end(), hint->second);
+    if (card == cards.end())
+      return false;
+    std::rotate(cards.begin(), card, card + 1);
+    ++stats_.counter_policy_hits;
+    return true;
   }
 
   void remember_cutoff_action(int player, int depth, uint64_t code) {
@@ -728,7 +1254,18 @@ private:
       game.board = before;
       // Blank refills avoid pretending that one sampled replacement is certain.
       // The search will subsequently examine all real replacement cards.
-      if (!game.apply_action_code_trusted(ordered.code, false)) {
+      const Action action = Action::unpack(ordered.code);
+      bool applied;
+      if (action.type == RESERVE_DECK && depth >= 3) {
+        std::vector<int> cards = deck_reserve_cards(game, action);
+        if (!prefer_counter_reveal(game, action, cards))
+          prioritize_deck_reserve_routes(game, action, cards, depth);
+        applied = !cards.empty() &&
+                  apply_deck_reserve_outcome(game, action, cards.front());
+      } else {
+        applied = game.apply_action_code_trusted(ordered.code, false);
+      }
+      if (!applied) {
         scored.push_back({-100000000, ordered});
         continue;
       }
@@ -744,11 +1281,18 @@ private:
         } else {
           score = 0;
         }
+      } else if (player == 1 && attacker_ == 0 &&
+                 protected_reply_refutes(game)) {
+        // On a blank-refill probe this is ONLY an ordering hint. The real
+        // replacement is materialized before any such bound can prune.
+        score = 80000000;
       } else {
         const bool extended = depth >= 3;
-        const int own = route_ordering_.distance(game.board, player, extended);
-        const int other =
-            route_ordering_.distance(game.board, 1 - player, extended);
+        const int favored = cooperative_reveals_ ? attacker_ : 1 - attacker_;
+        const int own = route_ordering_.distance(game.board, player, extended,
+                                                 player == favored);
+        const int other = route_ordering_.distance(
+            game.board, 1 - player, extended, 1 - player == favored);
         const bool attacking =
             cooperative_reveals_ ? player != attacker_ : player == attacker_;
         score = attacking ? other - 2 * own : 2 * other - own;
@@ -821,7 +1365,8 @@ private:
                               int ordering_depth = 0) {
     const Action action = Action::unpack(ordered.code);
     if (action.type == RESERVE_DECK)
-      return for_each_deck_reserve_outcome(game, action, visitor);
+      return for_each_deck_reserve_outcome(game, action, visitor,
+                                           ordering_depth);
 
     const int level = visible_refill_level(action);
     if (level >= 0 && !game.board.decks[level].empty())
@@ -850,12 +1395,16 @@ private:
     if (level < 0 || level >= 3 || slot < 0 || game.board.decks[level].empty())
       return false;
     std::vector<int> cards = visible_refill_cards(game, action, level, slot);
-    if (ordering_depth >= 3)
+    const bool hint =
+        ordering_depth > 0 && prefer_counter_reveal(game, action, cards);
+    if (ordering_depth >= 3 && !hint)
       prioritize_refill_routes(game, action, level, slot, cards,
                                ordering_depth);
     if (cooperative_reveals_ && !exhaustive_attacker_actions_ &&
         cards.size() > 3)
       cards.resize(3);
+    if (refutation_probe_ && cards.size() > 1)
+      cards.resize(1);
     if (cards.empty())
       return false;
     const Board previous = game.board;
@@ -883,8 +1432,17 @@ private:
 
   template <typename Visitor>
   bool for_each_deck_reserve_outcome(Game &game, const Action &action,
-                                     Visitor visitor) {
-    const std::vector<int> cards = deck_reserve_cards(game, action);
+                                     Visitor visitor, int ordering_depth = 0) {
+    std::vector<int> cards = deck_reserve_cards(game, action);
+    const bool hint =
+        ordering_depth > 0 && prefer_counter_reveal(game, action, cards);
+    if (ordering_depth >= 3 && !hint)
+      prioritize_deck_reserve_routes(game, action, cards, ordering_depth);
+    if (refutation_probe_ && cards.size() > 1)
+      cards.resize(1);
+    if (cooperative_reveals_ && !exhaustive_attacker_actions_ &&
+        cards.size() > 3)
+      cards.resize(3);
     stats_.deck_reserve_candidates += cards.size();
     if (cards.empty())
       return false;
@@ -950,9 +1508,6 @@ private:
         return left < right;
       });
     }
-    if (cooperative_reveals_ && !exhaustive_attacker_actions_ &&
-        cards.size() > 3)
-      cards.resize(3);
     return cards;
   }
 
@@ -991,6 +1546,32 @@ private:
     return immediate_win_bonus + (gap == 0 ? 100000 : 0) +
            static_cast<int>(card.points) * 10000 + noble_points * 1000 -
            gap * 100 + static_cast<int>(card.bonus);
+  }
+
+  void prioritize_deck_reserve_routes(const Game &game, const Action &action,
+                                      std::vector<int> &cards, int depth) {
+    if (cards.size() < 2)
+      return;
+    Game child = game.clone_light();
+    const Board previous = game.board;
+    const int favored = cooperative_reveals_ ? attacker_ : 1 - attacker_;
+    std::vector<std::pair<int, int>> scored;
+    for (int card : cards) {
+      limits_.check(0);
+      child.board = previous;
+      if (!apply_deck_reserve_outcome(child, action, card))
+        continue;
+      const int own =
+          route_ordering_.distance(child.board, favored, depth >= 3, true);
+      const int other =
+          route_ordering_.distance(child.board, 1 - favored, depth >= 3);
+      scored.emplace_back(other - 2 * own, card);
+    }
+    std::stable_sort(
+        scored.begin(), scored.end(),
+        [](const auto &a, const auto &b) { return a.first > b.first; });
+    for (size_t i = 0; i < scored.size(); ++i)
+      cards[i] = scored[i].second;
   }
 
   std::vector<int> visible_refill_cards(const Game &game, const Action &action,
@@ -1058,7 +1639,7 @@ private:
     for (int card : cards) {
       blank.board.visible[level][slot] = card;
       const int own =
-          route_ordering_.distance(blank.board, favored, depth >= 4);
+          route_ordering_.distance(blank.board, favored, depth >= 4, true);
       const int other =
           route_ordering_.distance(blank.board, 1 - favored, depth >= 4);
       scored.emplace_back(other - 2 * own, card);
@@ -1298,6 +1879,82 @@ private:
           std::max(max_score,
                    score_after_purchase(board, player, player.reserved[slot]));
     return max_score;
+  }
+
+  static bool protected_reply_refutes(const Game &game) {
+    const Board &board = game.board;
+    if (game.current_player() != 0 || board.waiting_noble || board.final_round)
+      return false;
+    const PlayerState &p0 = board.players[0];
+    const PlayerState &p1 = board.players[1];
+    const auto eligible = [&](const std::array<uint8_t, 5> &bonuses) {
+      uint16_t mask = 0;
+      for (int id : board.nobles) {
+        bool yes = true;
+        for (int color = 0; color < 5; ++color)
+          yes = yes && bonuses[color] >= get_noble(id).requirement[color];
+        if (yes)
+          mask |= uint16_t(1) << id;
+      }
+      return mask;
+    };
+    const auto noble_points = [&](uint16_t mask) {
+      int points = 0;
+      for (int id : board.nobles)
+        if (mask & (uint16_t(1) << id))
+          points = std::max(points, int(get_noble(id).points));
+      return points;
+    };
+    uint16_t stealable = eligible(p0.bonuses);
+    // Lexicographic score includes the exact tie break. Grant P0 even an
+    // unavailable nonpurchase, an optimistic upper bound on its best result.
+    std::pair<int, int> best0{p0.points + noble_points(stealable),
+                              -int(p0.purchased_count)};
+    const auto consider0 = [&](int id) {
+      if (!is_valid_card_id(id) || !p0.can_afford(get_card(id)))
+        return;
+      const Card &card = get_card(id);
+      auto bonuses = p0.bonuses;
+      ++bonuses[card.bonus];
+      const uint16_t mask = eligible(bonuses);
+      stealable |= mask;
+      best0 = std::max(best0, std::pair<int, int>{
+                                  p0.points + card.points + noble_points(mask),
+                                  -int(p0.purchased_count) - 1});
+    };
+    for (const auto &row : board.visible)
+      for (int id : row)
+        consider0(id);
+    for (int id : p0.reserved)
+      consider0(id);
+
+    const auto holds = [&](int id) {
+      if (!is_valid_card_id(id) || !p1.can_afford(get_card(id)))
+        return false;
+      const Card &card = get_card(id);
+      auto bonuses = p1.bonuses;
+      ++bonuses[card.bonus];
+      // A noble that P0 could take with ANY one move is unavailable in this
+      // lower bound. All other eligible nobles are safe for P1's reply.
+      const int points = p1.points + card.points +
+                         noble_points(eligible(bonuses) & ~stealable);
+      return points >= 15 &&
+             std::pair<int, int>{points, -int(p1.purchased_count) - 1} >= best0;
+    };
+    for (int id : p1.reserved)
+      if (holds(id))
+        return true;
+    // P0 can remove at most ONE visible card before P1 replies. Two distinct
+    // safe winning/drawing targets therefore suffice. Refills only add cards.
+    int first_safe_visible = -1;
+    for (const auto &row : board.visible)
+      for (int id : row)
+        if (holds(id)) {
+          if (first_safe_visible >= 0 && id != first_safe_visible)
+            return true;
+          first_safe_visible = id;
+        }
+    return false;
   }
 
   static int max_final_round_score(const Game &game) {
@@ -1819,7 +2476,29 @@ private:
     const CardIdSet acquired_hidden =
         root_independent ? CardIdSet{}
                          : hidden_catalog_.acquired_hidden_cards(board);
-    const uint64_t rule_position_hash = board.compute_set_deck_search_hash();
+    // Actions address card/noble IDs, never slot offsets. Keep each reserved
+    // card's visibility flag attached while canonicalizing these permutations.
+    // Deck order and turn metadata are already excluded by the set-deck hash.
+    Board canonical = board;
+    // Preserve the legacy blank-reveal/DAG search shape. Only the exact
+    // transposition table uses slot-independent positions.
+    if (root_independent) {
+      for (auto &row : canonical.visible)
+        std::sort(row.begin(), row.end());
+      std::sort(canonical.nobles.begin(), canonical.nobles.end());
+      for (auto &player : canonical.players) {
+        std::array<std::pair<int8_t, bool>, Board::MAX_RESERVED> reserved;
+        for (int i = 0; i < Board::MAX_RESERVED; ++i)
+          reserved[i] = {player.reserved[i], player.reserved_is_hidden[i]};
+        std::sort(reserved.begin(), reserved.end());
+        for (int i = 0; i < Board::MAX_RESERVED; ++i) {
+          player.reserved[i] = reserved[i].first;
+          player.reserved_is_hidden[i] = reserved[i].second;
+        }
+      }
+    }
+    const uint64_t rule_position_hash =
+        canonical.compute_set_deck_search_hash();
     return StateKey{StateKeyCore{rule_position_hash, board.players[0].points,
                                  board.players[1].points,
                                  board.players[0].purchased_count,
@@ -1830,7 +2509,8 @@ private:
                     acquired_hidden.low,
                     acquired_hidden.high,
                     board.players[0].reserved_count,
-                    board.players[1].reserved_count};
+                    board.players[1].reserved_count,
+                    game.simple_payment_mode};
   }
 
   bool collect_frontier_action(
@@ -2284,7 +2964,12 @@ private:
     return line;
   }
 
-  void check_limits() const { limits_.check(stats_.nodes); }
+  void check_limits() const {
+    limits_.check(stats_.nodes);
+    if (refutation_probe_ && (stats_.nodes & 255) == 0 &&
+        limits_.elapsed_ms() >= probe_deadline_ms_)
+      throw ProbeBudgetExpired{};
+  }
 };
 
 RevealVerifiedSolver::RevealVerifiedSolver(
@@ -2295,7 +2980,7 @@ RevealVerifiedSolver::RevealVerifiedSolver(
     size_t strict_preferred_attacker_prefix, bool exhaustive_attacker_actions,
     bool exact_reveal_search,
     std::shared_ptr<RevealSearchCancellationToken> cancellation_token,
-    bool use_route_ordering, bool cooperative_reveals)
+    bool use_route_ordering, bool cooperative_reveals, bool use_dfpn)
     : impl_(std::make_unique<Impl>(
           attacker, depth, max_nodes, time_limit_seconds,
           std::move(preferred_attacker_actions), include_proof_dag,
@@ -2303,7 +2988,7 @@ RevealVerifiedSolver::RevealVerifiedSolver(
           strict_preferred_attacker_actions, strict_preferred_attacker_prefix,
           exhaustive_attacker_actions, exact_reveal_search,
           std::move(cancellation_token), use_route_ordering,
-          cooperative_reveals)) {}
+          cooperative_reveals, use_dfpn)) {}
 
 RevealVerifiedSolver::~RevealVerifiedSolver() = default;
 

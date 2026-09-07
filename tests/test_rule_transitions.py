@@ -8,6 +8,7 @@ import pytest
 
 import csplendor as cs
 from tests.support import game_state_signature as _game_signature
+from tests.support import legacy_reveal_stats
 
 TARGET_TYPES = {
     cs.ActionType.RESERVE_VISIBLE,
@@ -174,7 +175,7 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
     )
     stats = {
         key: value
-        for key, value in result["stats"].items()
+        for key, value in legacy_reveal_stats(result["stats"]).items()
         # Root progress is an additive diagnostic, not a rule/search-tree change.
         if key not in {"elapsed_ms", "root_actions", "root_actions_completed", "root_action"}
     }

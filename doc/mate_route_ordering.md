@@ -1,5 +1,9 @@
 # 双方の勝ち筋を使う詰み探索（2026-09-07）
 
+本書の計測は最初のルート優先順位版（`24cb05f`）の記録。
+続く厳密な枝刈り・反証手再利用・DFPNの検証では、深さ6〜8の全78初手を
+解決できた。最新の実測と判定範囲は [厳密な枝刈りとDFPN](mate_exact_pruning_dfpn.md) を参照。
+
 ## 対象と判定範囲
 
 `bga_910749228.kifu` の50手終了後、P0が51手目を選ぶ局面。
@@ -56,7 +60,7 @@ PYTHONPATH=. python scripts/benchmark_mate_routes.py tests/fixtures/mate_routes_
 PYTHONPATH=. python scripts/benchmark_mate_routes.py tests/fixtures/mate_routes_bga_910749228_ply50.spn --depth 4 --seconds 30
 ```
 
-最終実装の実測例（時間は実行環境に依存）：
+初回実装 `24cb05f` の実測例（時間は実行環境に依存）：
 
 | 条件 | 結果 | ノード数 | 実時間 |
 | --- | --- | ---: | ---: |
@@ -76,7 +80,7 @@ PYTHONPATH=. python scripts/benchmark_mate_routes.py tests/fixtures/mate_routes_
 PYTHONPATH=. python scripts/benchmark_mate_routes.py tests/fixtures/mate_routes_bga_910749228_ply50.spn --depth 7 --seconds 180 --refutation --candidates --require-conclusion
 ```
 
-現時点で、局面全体についての成功条件は未達。
+この初回実装の時点では、局面全体についての成功条件は未達。
 上記の通常探索は深さ5以内の不詰みで終了し、反証探索は深さ7・180秒で
 時間切れとなったため、成功条件付きコマンドは両方とも終了コード1となった。
 `take:RR/return:W` に限定した後の局面については、開発中の反証探索で

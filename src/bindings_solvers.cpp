@@ -297,11 +297,26 @@ void bind_solvers(py::module_ &m) {
 
             py::dict stats;
             stats["nodes"] = result.stats.nodes;
+            stats["root_actions"] = result.stats.root_actions;
+            stats["root_actions_completed"] =
+                result.stats.root_actions_completed;
+            stats["root_action"] = result.stats.root_action;
             stats["memo_hits"] = result.stats.memo_hits;
             stats["persistent_memo_hits"] =
                 result.stats.persistent_memo_hits;
             stats["iterative_order_hits"] =
                 result.stats.iterative_order_hits;
+            stats["refutation_probe_nodes"] =
+                result.stats.refutation_probe_nodes;
+            stats["refutation_probe_refutations"] =
+                result.stats.refutation_probe_refutations;
+            stats["score_bound_prunes"] = result.stats.score_bound_prunes;
+            stats["score_bound_cache_hits"] =
+                result.stats.score_bound_cache_hits;
+            stats["protected_reply_prunes"] =
+                result.stats.protected_reply_prunes;
+            stats["permanent_memo_hits"] = result.stats.permanent_memo_hits;
+            stats["counter_policy_hits"] = result.stats.counter_policy_hits;
             stats["terminal_nodes"] = result.stats.terminal_nodes;
             stats["legal_moves"] = result.stats.legal_moves;
             stats["reveal_branches"] = result.stats.reveal_branches;
@@ -434,6 +449,9 @@ void bind_solvers(py::module_ &m) {
         stats["root_actions"] = result.stats.root_actions;
         stats["root_actions_completed"] = result.stats.root_actions_completed;
         stats["root_action"] = result.stats.root_action;
+        stats["refutation_probe_nodes"] = result.stats.refutation_probe_nodes;
+        stats["refutation_probe_refutations"] =
+            result.stats.refutation_probe_refutations;
         stats["final_round_reveal_collapses"] =
             result.stats.final_round_reveal_collapses;
         stats["final_round_score_prunes"] =
@@ -576,7 +594,7 @@ void bind_solvers(py::module_ &m) {
          bool exact_reveal_search,
          const std::shared_ptr<RevealSearchCancellationToken>
              &cancellation_token,
-         bool use_route_ordering, bool cooperative_reveals) {
+         bool use_route_ordering, bool cooperative_reveals, bool use_dfpn) {
         if (proof_dag_format != "v1" && proof_dag_format != "compact") {
           throw std::invalid_argument(
               "proof_dag_format must be 'v1' or 'compact'");
@@ -596,7 +614,7 @@ void bind_solvers(py::module_ &m) {
                   required_root_action, strict_preferred_attacker_actions,
                   strict_preferred_attacker_prefix, exhaustive_attacker_actions,
                   exact_reveal_search, cancellation_token, use_route_ordering,
-                  cooperative_reveals)
+                  cooperative_reveals, use_dfpn)
                   .solve(input_snapshot);
         }
 
@@ -605,6 +623,9 @@ void bind_solvers(py::module_ &m) {
         stats["root_actions"] = result.stats.root_actions;
         stats["root_actions_completed"] = result.stats.root_actions_completed;
         stats["root_action"] = result.stats.root_action;
+        stats["refutation_probe_nodes"] = result.stats.refutation_probe_nodes;
+        stats["refutation_probe_refutations"] =
+            result.stats.refutation_probe_refutations;
         stats["memo_hits"] = result.stats.memo_hits;
         stats["terminal_nodes"] = result.stats.terminal_nodes;
         stats["legal_moves"] = result.stats.legal_moves;
@@ -623,6 +644,14 @@ void bind_solvers(py::module_ &m) {
             result.stats.deck_reserve_candidates;
         stats["deck_reserve_branches"] = result.stats.deck_reserve_branches;
         stats["elapsed_ms"] = result.stats.elapsed_ms;
+        stats["score_bound_prunes"] = result.stats.score_bound_prunes;
+        stats["score_bound_cache_hits"] = result.stats.score_bound_cache_hits;
+        stats["dfpn_expansions"] = result.stats.dfpn_expansions;
+        stats["dfpn_proof"] = result.stats.dfpn_proof;
+        stats["dfpn_disproof"] = result.stats.dfpn_disproof;
+        stats["protected_reply_prunes"] = result.stats.protected_reply_prunes;
+        stats["permanent_memo_hits"] = result.stats.permanent_memo_hits;
+        stats["counter_policy_hits"] = result.stats.counter_policy_hits;
 
         py::list line;
         for (const RevealVerifiedLineEntry &entry : result.line) {
@@ -665,7 +694,7 @@ void bind_solvers(py::module_ &m) {
       py::arg("exact_reveal_search") = false,
       py::arg("cancellation_token") = nullptr,
       py::arg("use_route_ordering") = true,
-      py::arg("cooperative_reveals") = false);
+      py::arg("cooperative_reveals") = false, py::arg("use_dfpn") = false);
 }
 
 } // namespace csplendor::python

@@ -22,6 +22,7 @@ from scripts.puzzle_candidates import (
     generate_candidate_positions as component_candidate_positions,
 )
 from scripts.puzzle_engine_adapter import PuzzlePlayer as ComponentPuzzlePlayer
+from tests.support import legacy_reveal_stats
 
 
 def _digest_without_elapsed(result: dict[str, object]) -> str:
@@ -95,6 +96,7 @@ def test_reveal_solver_proof_dag_and_action_order_golden():
     # The proof and its order are unchanged; the stats now expose root progress.
     assert result["stats"]["root_actions"] == 24
     assert result["stats"]["root_actions_completed"] == 1
+    result["stats"] = legacy_reveal_stats(result["stats"])
     assert _digest_without_elapsed(result) == (
         "b2d99b3d6f708148e9e0d1a02d5d506a67dbf1186ef87022ae8f67979db3a621"
     )

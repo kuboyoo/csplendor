@@ -45,6 +45,16 @@ struct RevealVerifiedSearchStats {
   uint64_t memo_hits = 0;
   uint64_t persistent_memo_hits = 0;
   uint64_t iterative_order_hits = 0;
+  uint64_t refutation_probe_nodes = 0;
+  uint64_t refutation_probe_refutations = 0;
+  uint64_t score_bound_prunes = 0;
+  uint64_t score_bound_cache_hits = 0;
+  uint64_t dfpn_expansions = 0;
+  uint64_t dfpn_proof = 0;
+  uint64_t dfpn_disproof = 0;
+  uint64_t protected_reply_prunes = 0;
+  uint64_t permanent_memo_hits = 0;
+  uint64_t counter_policy_hits = 0;
   uint64_t terminal_nodes = 0;
   uint64_t legal_moves = 0;
   uint64_t reveal_branches = 0;

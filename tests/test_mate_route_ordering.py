@@ -9,12 +9,13 @@ from csplendor.api.usi_kifu import action_to_usi, spn_to_game
 POSITION = Path(__file__).parent / "fixtures/mate_routes_bga_910749228_ply50.spn"
 
 
-def solve(game, *, attacker=0, depth=2, ordering=True, cooperative=False, candidates=False):
+def solve(game, *, attacker=0, depth=2, ordering=True, cooperative=False, candidates=False, dfpn=False):
     return cs.solve_reveal_verified_mate_cpp(
         game, attacker=attacker, depth=depth, max_nodes=0, time_limit_seconds=10,
         exhaustive_attacker_actions=not candidates, exact_reveal_search=True,
         include_proof_dag=False, use_route_ordering=ordering,
         cooperative_reveals=cooperative,
+        use_dfpn=dfpn,
     )
 
 
@@ -199,3 +200,151 @@ def test_race_shortcuts_match_exhaustive_tiny_endgames(current, attacker, cooper
             result = solve(game, attacker=attacker, depth=depth, ordering=ordering, cooperative=cooperative)
             assert result["unknown_reason"] is None
             assert result["proven"] == expected
+
+
+@pytest.mark.parametrize("attacker", [0, 1])
+@pytest.mark.parametrize("current", [0, 1])
+def test_native_dfpn_matches_independent_full_tree(attacker, current):
+    for points, depth in [((12, 14), 2), ((14, 12), 2), ((11, 10), 3)]:
+        game = chance_fixture()
+        game.board.current_player = current
+        game.board.bank = [0] * 6
+        game.board.visible = [[0, 7, -1, -1], [-1] * 4, [-1] * 4]
+        game.board.decks = [[15], [], []]
+        for pid in range(2):
+            player = game.board.get_player(pid)
+            player.points = points[pid]
+            player.bonuses = [3] * 5
+            player.gems = [0, 0, 0, 1, 0, 0]
+            game.board.set_player(pid, player)
+        expected = exhaustive_oracle(game, attacker, depth, False)
+        for ordering in [False, True]:
+            result = solve(game, attacker=attacker, depth=depth, ordering=ordering, dfpn=True)
+            assert result["unknown_reason"] is None
+            assert result["proven"] == expected
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_pruning_and_dfpn_match_tiny_resource_trees(seed):
+    import random
+
+    rng = random.Random(seed)
+    game = chance_fixture()
+    game.board.current_player = seed % 2
+    game.board.visible = [[0, 7, -1, -1], [-1] * 4, [-1] * 4]
+    game.board.decks = [[15], [], []]
+    game.board.bank = [1, 0, 0, 1, 0, 1]
+    game.board.nobles = [10] if seed % 3 == 0 else []
+    for pid in range(2):
+        player = game.board.get_player(pid)
+        player.points = rng.choice([8, 11, 13, 14])
+        player.bonuses = [rng.choice([2, 3]) for _ in range(5)]
+        player.gems = [0, 0, 0, rng.randrange(2), 0, rng.randrange(2)]
+        game.board.set_player(pid, player)
+    attacker = (seed // 2) % 2
+    before = cs.encode_mate_frontier_state(game)
+    expected = exhaustive_oracle(game, attacker, 2, False)
+    for dfpn in [False, True]:
+        result = solve(game, attacker=attacker, depth=2, dfpn=dfpn)
+        assert result["unknown_reason"] is None
+        assert result["proven"] == expected
+        assert cs.encode_mate_frontier_state(game) == before
+
+
+@pytest.mark.parametrize("attacker", [0, 1])
+def test_negative_only_probe_does_not_publish_relaxed_positive(attacker):
+    game = chance_fixture()
+    before = cs.encode_mate_frontier_state(game)
+    expected = exhaustive_oracle(game, attacker, 4, False)
+    result = solve(game, attacker=attacker, depth=4)
+    assert result["unknown_reason"] is None
+    assert result["proven"] == expected
+    assert cs.encode_mate_frontier_state(game) == before
+
+
+def test_dfpn_timeout_is_unknown_and_keeps_input():
+    game = spn_to_game(POSITION.read_text())
+    before = cs.encode_mate_frontier_state(game)
+    result = cs.solve_reveal_verified_mate_cpp(
+        game, attacker=0, depth=8, max_nodes=1,
+        exhaustive_attacker_actions=True, exact_reveal_search=True, use_dfpn=True,
+    )
+    assert result["proven"] is False
+    assert result["unknown_reason"] == "node limit exceeded"
+    assert cs.encode_mate_frontier_state(game) == before
+
+
+@pytest.mark.parametrize("case", ["reserved", "one_visible", "two_visible_draw", "tie_break", "noble_theft"])
+def test_protected_reply_bound_respects_blocking_nobles_and_ties(case):
+    game = chance_fixture()
+    one_point = [i for i in range(40) if cs.get_card(i).points == 1]
+    game.board.bank = [0] * 6
+    game.board.decks = [[], [], []]
+    game.board.visible = [[0, one_point[0], -1, -1], [-1] * 4, [-1] * 4]
+    for pid in range(2):
+        p = game.board.get_player(pid)
+        p.points = 14
+        p.bonuses = [10] * 5
+        p.gems = [0] * 6
+        game.board.set_player(pid, p)
+    if case in {"reserved", "noble_theft"}:
+        p = game.board.get_player(1)
+        p.reserved = [one_point[1]]
+        if case == "noble_theft":
+            game.board.nobles = [10]
+            p.points = 11
+            p0 = game.board.get_player(0)
+            p0.points = 11
+            game.board.set_player(0, p0)
+        game.board.set_player(1, p)
+    if case in {"two_visible_draw", "tie_break"}:
+        game.board.visible = [[0, one_point[0], one_point[1], -1], [-1] * 4, [-1] * 4]
+    if case == "tie_break":
+        p = game.board.get_player(1)
+        p.purchased_count = 1
+        game.board.set_player(1, p)
+    expected = exhaustive_oracle(game, 0, 2, False)
+    assert expected is (case in {"one_visible", "tie_break", "noble_theft"})
+    for dfpn in [False, True]:
+        result = solve(game, depth=2, dfpn=dfpn)
+        assert result["unknown_reason"] is None
+        assert result["proven"] == expected
+        if not expected:
+            assert result["stats"]["protected_reply_prunes"] > 0
+
+
+def test_protected_reply_cannot_count_a_noble_stolen_by_a_purchase():
+    game = chance_fixture()
+    game.board.bank = [0] * 6
+    game.board.decks = [[], [], []]
+    game.board.visible = [[-1] * 4, [61, -1, -1, -1], [-1] * 4]
+    game.board.nobles = [10]
+    for pid in range(2):
+        player = game.board.get_player(pid)
+        player.bonuses = [2, 3, 0, 3, 3]
+        player.points = 10 + pid
+        player.gems = [0, 0, 0, 2 if pid == 0 else 0, 0, 0]
+        player.reserved = [] if pid == 0 else [59]
+        game.board.set_player(pid, player)
+    # Buying C61 lets P0 take N10 first. P1's reserved C59 can no longer
+    # deliver the three noble points on which a supposed safe reply relies.
+    assert exhaustive_oracle(game, 0, 2, False) is True
+    for dfpn in [False, True]:
+        result = solve(game, depth=2, dfpn=dfpn)
+        assert result["unknown_reason"] is None
+        assert result["proven"] is True
+
+
+@pytest.mark.performance
+@pytest.mark.parametrize("depth", [6, 7, 8])
+def test_bga_ply51_completes_every_root_action_at_deeper_depths(depth):
+    result = cs.solve_reveal_verified_mate_cpp(
+        spn_to_game(POSITION.read_text()), attacker=0, depth=depth,
+        max_nodes=0, time_limit_seconds=300,
+        exhaustive_attacker_actions=True, exact_reveal_search=True,
+        include_proof_dag=False,
+    )
+    assert result["unknown_reason"] is None
+    assert result["proven"] is False
+    assert result["stats"]["root_actions"] == 78
+    assert result["stats"]["root_actions_completed"] == 78

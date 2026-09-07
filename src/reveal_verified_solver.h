@@ -47,7 +47,8 @@ public:
       bool exact_reveal_search = false,
       std::shared_ptr<csplendor::solver_internal::RevealSearchCancellationToken>
           cancellation_token = {},
-      bool use_route_ordering = true, bool cooperative_reveals = false);
+      bool use_route_ordering = true, bool cooperative_reveals = false,
+      bool use_dfpn = false);
   ~RevealVerifiedSolver();
 
   RevealVerifiedSolver(const RevealVerifiedSolver &other);
