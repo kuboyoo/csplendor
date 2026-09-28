@@ -303,7 +303,7 @@ if result["status"] == "mate":
 # 同じ対局ではsessionを再利用し、対局終了時にsession.clear()する
 ```
 
-時間・node上限による `Unknown` は不詰みではありません。`search_anytime()` は正の証明を探す実戦用で、最短手数を保証しません。最短深さの解析には `session.search()` / `search_reveal_verified_mate_depths()` を使います。深さの単位や証明DAG、逐次展開、CLIは [詰み探索ガイド](doc/mate_usage.md) と [ソルバー仕様](doc/SOLVER.md) を参照してください。
+時間・node上限による `Unknown` は不詰みではありません。深さは攻撃側の手数を数え、両者の着手数の合計ではありません。`search_anytime()` は正の証明を探す実戦用で、最短手数を保証しません。最短深さの解析には `session.search()` / `search_reveal_verified_mate_depths()` を使います。証明DAG、逐次展開、CLIは [詰み探索ガイド](doc/mate_usage.md) と [ソルバー仕様](doc/SOLVER.md) を参照してください。
 
 ## 局面保存・非公開情報・棋譜
 
