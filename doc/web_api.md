@@ -1,134 +1,66 @@
-# Web API Reference
+# Web API
 
-The Splendor engine can be accessed over HTTP using a FastAPI-based web server. This is ideal for browser-based GUI development.
+[README](../README.md#web-apiと対戦サービスへの組み込み) / [ドキュメント索引](index.md)
 
-## 1. Running the Server
+## 起動
+
 ```bash
-# From the project root
-uvicorn csplendor.api:app --reload
-```
-The server will be available at `http://localhost:8000`. OpenAPI (Swagger) documentation can be viewed at `http://localhost:8000/docs`.
-
-## 2. API Endpoints
-
-### `POST /game`
-Creates a new game session.
-- **Query Params**: `seed` (int, optional).
-- **Response**: `{"session_id": "uuid-string"}`.
-
-### `GET /game/{session_id}`
-Returns the current full state of the game.
-- **Response**: `GameStateSchema` (JSON).
-
-### `POST /game/{session_id}/action`
-Applies a legal action to the game.
-- **Query Params**: `action_idx` (int) - The index of the action within the `legal_actions` list returned by the state.
-- **Response**: `GameStateSchema` (Updated state).
-
-### `POST /game/{session_id}/undo`
-Undoes the last action.
-- **Response**: `GameStateSchema` (Updated state).
-
-### `POST /game/{session_id}/ai_move`
-Optional compatibility bridge to external AI projects. It is not required by
-the rule/session/replay API and model code is not bundled in csplendor. Without
-torch and the external `dlsplendor` package the endpoint returns HTTP 503.
-Unknown AI modes and missing fixed search budgets return HTTP 400 before any
-model stack is loaded. The `ml` package extra supplies torch only;
-`dlsplendor` and its models must be provided separately by the integrating
-project.
-
-The endpoint is called through the `AIProvider` protocol. Embedding
-applications can install a provider with `set_ai_provider()`; tests can use a
-provider with no ML dependencies. Merely importing the engine or web
-application does not inspect sibling repositories or model directories.
-During the compatibility period, explicit external source roots can be set by
-`CSPLENDOR_DLSPLENDOR_PATH`, `CSPLENDOR_ALPHAZERO_PATH`,
-`CSPLENDOR_DEEPSETS_PATH`, and `CSPLENDOR_NNUE_PATH`.
-
-### Legacy replay endpoints
-
-`GET /replay/files`, `POST /replay/load?path=<filename>`, and
-`GET /replay/{session_id}/game/{game_idx}/{step}` expose the optional legacy
-pickle replay viewer. Pickle files are executable input and must therefore be
-created or installed only by a trusted server administrator. `/replay/load`
-accepts only `.pkl` files that resolve inside the configured replay data
-directory; uploads, arbitrary paths resolving outside it, and symlinks escaping
-that directory are rejected. The listing endpoint returns directory-local names
-and does not unpickle files merely to inspect them. This endpoint is not an
-upload or untrusted-data ingestion API; use a non-executable serialization
-format if replays must cross a trust boundary.
-Both listing and loading responses include `X-Replay-Format-Warning` to make
-this unsafe-format boundary visible without changing the established JSON
-response schema.
-
-## 3. JSON Schema Overview (Simplified)
-
-Gem arrays always use `Diamond/White, Sapphire/Blue, Emerald/Green, Ruby/Red, Onyx/Black, Gold` order. Five-element arrays omit Gold.
-
-### `GameStateSchema`
-```json
-{
-  "board": {
-    "bank": [4, 4, 4, 4, 4, 5],
-    "visible_cards": [[...], [...], [...]],
-    "deck_counts": [40, 30, 20],
-    "nobles": [1, 5, 9],
-    "current_player": 0,
-    "turn": 0,
-    "game_over": false,
-    "winner": -1
-  },
-  "players": [
-    {
-      "index": 0,
-      "gems": [0, 0, 0, 0, 0, 0],
-      "bonuses": [0, 0, 0, 0, 0],
-      "points": 0,
-      "reserved_cards": [],
-      "purchased_cards": []
-    },
-    ...
-  ],
-  "legal_actions": [
-    {
-      "type": 0,
-      "take": [1, 1, 1, 0, 0, 0],
-      "card_id": null,
-      ...
-    }
-  ]
-}
+python -m pip install -e '.[web]'
+python -m uvicorn csplendor.api:app --host 127.0.0.1 --port 8000
 ```
 
-## 4. Integration for GUI
-The GUI should:
-1. Call `POST /game` to start a session.
-2. Call `GET /game/{session_id}` to get the initial layout.
-3. Map user interactions (clicks) to the indices in the `legal_actions` array.
-4. Call `POST /game/{session_id}/action?action_idx=X` to progress the game.
+OpenAPI: `http://127.0.0.1:8000/docs`。現在のリクエスト・レスポンス定義は [app.py](../csplendor/api/app.py) と [schemas.py](../csplendor/api/schemas.py) が正本です。
 
-If the only legal action has type `6` (`PASS`), it is a forced transition and
-may be submitted like any other legal-action index. If neither player has an
-ordinary move, applying it ends the game as a draw.
+## 対局API
 
-## 5. PURCHASE Actions and Payment Options
+| method / path | 入力 | 応答 |
+|---|---|---|
+| `POST /game` | query: `seed=0`, `simple_payment_mode=true`, `player0_name`, `player1_name` | `{"session_id":"..."}` |
+| `GET /game/{session_id}` | なし | `GameStateSchema` |
+| `POST /game/{session_id}/action` | query: `action_idx`, 任意の `time_ms`, `comment` | 更新後の `GameStateSchema` |
+| `POST /game/{session_id}/action_usi` | JSON: `usi_move`, 任意の `time_ms`, `comment` | `action_idx`, `action_usi`, `state` |
+| `POST /game/{session_id}/undo` | なし | 更新後の `GameStateSchema` |
+| `POST /game/{session_id}/ai_move` | query: `ai_type` など | 外部AIによる着手結果 |
 
-The engine generates **all valid payment combinations** for each purchasable card.
+`seed=0` も再現可能な固定seedです。ランダムな初期配置を作る場合は呼出し側でseedを生成します。
 
-### `gold_as` Field
-Each PURCHASE action includes a `gold_as` array (5 elements, one per color: White, Blue, Green, Red, Black).
-- `gold_as[i]` indicates how many Gold tokens are used as color `i`.
-- Example: `gold_as: [0, 2, 1, 0, 0]` means 2 Gold used as Blue, 1 Gold used as Green.
+`action_idx` は**その局面の `legal_actions` 一覧内の添字**で、V2/V3の行動IDやpacked codeではありません。局面更新後は一覧を取り直します。対局終了時の合法手は空です。`PASS`（type 6）も一覧の添字で適用できます。
 
-### Multiple Actions per Card
-The same `card_id` may appear in multiple PURCHASE actions with different `gold_as` values.
-```json
-{"type": 4, "card_id": 15, "gold_as": [0, 0, 0, 0, 0]},
-{"type": 4, "card_id": 15, "gold_as": [1, 0, 0, 0, 0]},
-{"type": 4, "card_id": 15, "gold_as": [0, 1, 0, 0, 0]}
-```
+### 支払いモード
 
-### GUI Implementation Tips
-1. **Simple UI**: Pick any valid action for the card (e.g., the first one).
-2. **Detailed UI**: Filter actions by `card_id`, then let the user choose how to pay.
+- `simple_payment_mode=true`（HTTP既定）: 購入ごとにGold最小使用の1通り。
+- `simple_payment_mode=false`: 有効なGold代替・色トークン支払いをすべて列挙。
+
+Pythonの `Game` は `False` が既定です。対局サーバー・AI・棋譜に同じモードを設定してください。簡易モードでもトークン返却の選択肢は残ります。
+
+購入Actionの `gold_as` は白・青・緑・赤・黒の5要素です。例: `[0,2,1,0,0]` は青2個分と緑1個分を金で払います。同じ `card_id` に複数の支払Actionが存在できます。GUIでは対象カードを絞った後、支払いと返却の選択肢を提示します。
+
+## 状態レスポンス
+
+`GameStateSchema` は次を返します。
+
+- `board`: `bank`, `visible_cards`, `deck_counts`, `nobles`, `current_player`, `turn`, `waiting_noble`, `game_over`, `winner`。
+- `players`: 各プレイヤーのトークン、ボーナス、点数、予約・購入カードID、獲得貴族ID。
+- `legal_actions`: 行動種別、対象、取得・返却、支払い、貴族選択、USI表記。
+
+初期銀行は `[4,4,4,4,4,5]`、公開後の初期山札残数は `[36,26,16]` です。色順は白・青・緑・赤・黒・金で、5要素の配列は金を含みません。カード・貴族の描画用データは [カタログ](card_catalog.md) または `get_all_cards()` / `get_all_nobles()` から取得できます。
+
+`waiting_noble` の間は同じプレイヤーが貴族を選びます。状態の購入Actionの `usi` は `/pay:` 拡張を含むことがあるため、外部USIエンジンの対応表記を確認してください。
+
+## 外部AIと棋譜
+
+`/ai_move` は互換用のoptional bridgeです。外部 `dlsplendor`・PyTorch・モデルがない場合は503を返します。`[ml]` はPyTorchのみを提供し、モデルやAI実装を同梱しません。不明なAIモードや必要な固定探索予算の欠落は、モデルをloadする前に400となります。
+
+組み込みアプリは `AIProvider` と `set_ai_provider()` で独自のAIを接続できます。エンジン/Webアプリのimportだけでは外部repoやモデルを探索しません。互換bridgeの外部ルートは `CSPLENDOR_DLSPLENDOR_PATH`、`CSPLENDOR_ALPHAZERO_PATH`、`CSPLENDOR_DEEPSETS_PATH`、`CSPLENDOR_NNUE_PATH` で指定できます。
+
+棋譜のメタデータ更新・保存・再生APIもあります。ルート一覧はOpenAPI、形式は [KIFU](KIFU.md) を参照してください。
+
+旧replay API `GET /replay/files`、`POST /replay/load`、`GET /replay/{session_id}/game/{game_idx}/{step}` は管理者が置いた信頼済みpickle向けです。load対象は設定directory内の `.pkl` に制限され、外部pathやdirectory外へ出るsymlinkは拒否されます。pickleはコード実行を伴う形式なので、ユーザーuploadの入力形式として使わないでください。
+
+## 公開対戦サービスとの境界
+
+現行APIのセッションはプロセス内メモリです。永続化、複数worker共有、認証、対局ごとの排他・局面version検査はサービス側で用意します。
+
+**現在の状態レスポンスには、両プレイヤーの伏せ予約の実カードIDが含まれます。** 観測者別の秘匿レスポンスではありません。プレイヤーや観戦者への配信前に、`reserved_is_hidden` と観測者を使って秘匿してください。完全snapshot・山札順もサーバー内部だけに保持します。
+
+ゲームを管理するworkerとAIプロセスを分け、持ち時間、切断、不正手、`stop` 後も終了しないAIの扱いを対局規定として定めます。基本構成は [README](../README.md#web-apiと対戦サービスへの組み込み) を参照してください。

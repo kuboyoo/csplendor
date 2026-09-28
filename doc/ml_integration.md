@@ -1,75 +1,71 @@
-# Machine Learning Integration Guide
+# 機械学習・AI連携
 
-`csplendor` provides specialized tools to bridge the gap between game logic and neural network training.
+[README](../README.md) / [ドキュメント索引](index.md)
 
-## 1. State Featurization (`StateFeaturizer`)
+## 状態特徴量V1（196要素）
 
-`StateEncoder.feature_shape()`、`schema_sections()`、`gem_color_ids()`でversioned schema
-metadataを取得できる。無指定時は既存モデル互換のstate schema v1を使用する。
-The `StateFeaturizer` class converts the current game state into a fixed-length NumPy vector of size **196**. All values are normalized to a range of [0, 1] to facilitate training.
+`StateFeaturizer.featurize(game, observer=...)` は `float32` のNumPy配列を返します。定義は [encoding_schema.h](../src/encoding_schema.h) と [state_encoder.h](../src/state_encoder.h) が正本です。
 
-### Feature Map (196 elements)
-1. **Bank Gems (6)**: Normalized by 5.0 (for gold) or 4.0 (for colors).
-2. **Player 0 Information (36)**:
-    - Current Gems (6): Normalized by 10.0.
-    - Current Bonuses (5): Normalized by 8.0.
-    - Prestige Points (1): Normalized by 15.0.
-    - Reserved Cards (3 cards * 8 features = 24): Each card has [id/90, level/3, points/5, bonus/5, cost[5]/7].
-3. **Player 1 Information (36)**: Same structure as Player 0.
-4. **Visible Cards (12 cards * 8 features = 96)**: Cards on the board (3 levels * 4 slots). Same 8 features as reserved cards.
-5. **Deck Counts (3)**: Number of cards remaining in each deck. Normalized by 40.0.
-6. **Nobles (3 nobles * 6 features = 18)**: Nobles available on board. [id/10, requirement[5]/4].
-7. **Current Player (1)**: 0 or 1.
+| offset | 要素数 | 内容 | スケーリング |
+|---:|---:|---|---|
+| 0 | 6 | 銀行のトークン | 全色とも `/7` |
+| 6 | 36 | player 0 | トークン6 `/10`、ボーナス5 `/10`、点数1 `/15`、予約3×8 |
+| 42 | 36 | player 1 | 同上 |
+| 78 | 96 | 公開カード12×8 | レベル順・スロット順 |
+| 174 | 3 | 山札枚数 | 各レベル `/40` |
+| 177 | 18 | 貴族3×6 | 点数 `/3`、要求5色 `/4` |
+| 195 | 1 | 手番 | player ID `0` または `1` |
 
-### Usage
+カード1枚の8要素は `[点数/5, コスト白/7, 青/7, 緑/7, 赤/7, 黒/7, bonus ID/5, level/3]` です。カードID自体は含みません。空きスロットはゼロ、相手の伏せ予約はレベルだけを残します。正規化はclippingではないため、点数などが1を超えることがあります。
+
 ```python
-from csplendor import Game, StateFeaturizer
-game = Game()
-featurizer = StateFeaturizer()
-feature_vector = featurizer.featurize(game) # numpy array of shape (196,)
+import csplendor as cs
+
+game = cs.Game(seed=42)
+observer = game.current_player
+features = cs.StateFeaturizer().featurize(game, observer=observer)
+assert features.shape == (196,)
+canonical = cs.StateEncoder.encode_canonical(game, player=observer, observer=observer)
+assert len(canonical) == 196
 ```
 
-## 2. Action Encoding (`ActionEncoder`)
-The native `ActionEncoderCpp` maps complex Splendor actions to a fixed action
-space of size **48**.
+`observer=-1`（既定）は完全情報です。対戦AIでは `0` / `1` を明示します。`encode_canonical()` の `player` は特徴量内のプレイヤー順、`observer` は情報公開範囲の指定であり、別の意味です。
 
-### Action Index Mapping (0-47)
-- **0-9**: `TAKE_DIFFERENT` (10 combinations of 3 colors from 5).
-- **10-14**: `TAKE_SAME` (5 colors).
-- **15-26**: `RESERVE_VISIBLE` (12 board slots).
-- **27-29**: `RESERVE_DECK` (3 levels).
-- **30-41**: `PURCHASE` from board (12 board slots).
-- **42-44**: `PURCHASE` from reserved (3 slots).
-- **45-47**: `VISIT_NOBLE` (3 noble slots).
+V1に `waiting_noble`・`final_round` の独立した特徴はありません。新モデルに追加する場合は、既存196要素の意味を変えず別schemaとして定義してください。`StateEncoder.schema_version()`、`schema_fingerprint()`、`schema_sections()`、`gem_color_ids()` で既存契約を取得できます。
 
-### Action Masking
-For RL, use `get_action_mask(game)` to obtain a boolean mask of size 48, indicating which of the 48 base actions are legal in the current state.
+公開カード統計は `StateEncoder.encode_public_card_statistics(game, player, observer)` で別途取得できます。長さは `public_card_feature_size()` を参照し、モデル独自の入力と混同しないでください。
 
-### Usage
+## 行動空間
+
+| エンコーダ | サイズ | 意味 |
+|---|---:|---|
+| Python `ActionEncoder` / native `ActionEncoderCpp` | 48 | 基本行動。返却・支払いを圧縮 |
+| `ActionEncoderV2` | 4869 | 場・予約スロットを基準に全選択肢を表現 |
+| `ActionEncoderV3` | 3133 | 購入をカードID、貴族を貴族IDで表現 |
+
+全行動policyにはV3を利用できます。V2/V3の詳細は [V2仕様](action_space_v2.md) / [V3仕様](action_space_v3.md)。`Game.legal_actions` の添字や `Action.pack()` の整数と、policyの行動IDは別物です。
+
 ```python
-from csplendor import ActionEncoder
-encoder = ActionEncoder()
-mask = encoder.get_action_mask(game) # boolean numpy array of shape (48,)
-action_idx = model.predict(feature_vector, mask) # Hypothetical model call
-action = encoder.decode(action_idx, game)
-game.apply(action)
+import numpy as np
+import csplendor as cs
+
+game = cs.Game(seed=42)
+game.simple_payment_mode = False
+mask = cs.ActionEncoderV3.get_action_mask(game)
+action_id = int(np.flatnonzero(mask)[0])
+action = cs.ActionEncoderV3.decode(action_id, game)
+assert cs.ActionEncoderV3.encode(action, game) == action_id
+assert game.apply(action)
 ```
 
-> [!NOTE]
-> `encoder.decode()` automatically handles the complexities of gem return and noble choice by picking the first valid combination for the chosen base action.
+着手する局面のマスクでpolicyを制限します。終局時はV2/V3のマスクが全ゼロです。モデルには行動schemaのversion・fingerprintと支払いモードも保存してください。
 
-## 3. Extended encoders
+## 内蔵MCTSとの接続
 
-`ActionEncoderV2` (4869 IDs) preserves a slot-based full action encoding for
-compatibility. `ActionEncoderV3` (3133 IDs) is the recommended full encoder:
-purchase IDs are card-ID based and noble IDs are noble-ID based. Both expose a
-forced `PASS` rule action as their final ID (4868 for V2, 3132 for V3). It is
-enabled only in an ongoing state where no non-PASS action is legal; terminal
-state masks are all zero.
+内蔵C++ MCTSは48枠の `ActionEncoderCpp` を使用します。V3の3133枠policyには別の探索実装または明示的な変換が必要です。48枠では返却・支払いの全パターンを独立した枝として選べません。
 
-The built-in C++ MCTS uses `ActionEncoderCpp` and its fixed 48-action mask.
-That policy has no PASS slot because the move is forced. Apply
-`game.apply_forced_pass()` before searching a root for which
-`game.requires_forced_pass` is true; passes reached below the root are resolved
-inside the native search. V2/V3 cannot be passed to that MCTS without an
-adapter that changes the tree's fixed action-space contract.
+48枠の区分は異色取得 `0..9`、同色取得 `10..14`、公開予約 `15..26`、山札予約 `27..29`、場から購入 `30..41`、予約から購入 `42..44`、貴族選択 `45..47` です。
+
+パス枠はありません。rootで `game.requires_forced_pass` なら先に `game.apply_forced_pass()` で進めます。探索内部の強制パスはnative側で処理します。
+
+非公開情報を扱う場合は観測者視点のdeterminizationを使い、実際の山札順や相手の伏せ予約を探索入力へ漏らさないでください。[並列MCTSの例](parallel_mcts_usage.md)、[情報集合の契約](information_state.md) も参照してください。
