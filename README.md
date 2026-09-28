@@ -1,644 +1,413 @@
-[English](https://github.com/kuboyoo/csplendor/blob/main/README.en.md)
+[English](README.en.md)
 
-# csplendor: 高性能 Splendor エンジン
+# csplendor
 
-`csplendor` は、ボードゲーム Splendor 向けの高速な C++ ベースのエンジンです。2人対戦と機械学習の学習用途に最適化されています。
+Splendorの**2人対戦用ルールエンジン**です。C++17の合法手生成・局面更新・探索をPythonから利用できます。AIの学習環境、対局管理、棋譜再生、Webサービスのルール判定に使えます。
 
-## 特長
+このリポジトリはエンジンとPython/API補助を管理します。学習済みモデル、学習実験、ブラウザGUI、対戦サービスの認証・運用基盤は別プロジェクトで実装します。USI仕様の正本は [usi](https://github.com/kuboyoo/usi) です。
 
-- **高速なロジック**: C++17による合法手生成・局面更新・探索。F1計測候補とmainの累積比較、CI互換版の追加検証、過去の測定を下記で区別しています。
-- **Python バインディング**: `pybind11` によりシームレスに連携できます。
-- **機械学習対応**: 状態の特徴量化と行動空間のエンコードを内蔵しています。
-- **Web API**: GUI 開発向けの FastAPI 連携を備えています。
+## 目次
 
-### 性能目安
+- [必要環境](#必要環境) / [セットアップ](#セットアップ)
+- [サンプルコード](#サンプルコード)
+- [速度ベンチマーク](#速度ベンチマーク)
+- [ゲームルールと合法手生成モード](#ゲームルールと合法手生成モード)
+- [色・カード・貴族の仕様](#色カード貴族の仕様)
+- [AI向けの特徴量・行動空間・探索](#ai向けの特徴量行動空間探索)
+- [局面保存・非公開情報・棋譜](#局面保存非公開情報棋譜)
+- [USIプロトコル](#usiプロトコル)
+- [Web APIと対戦サービスへの組み込み](#web-apiと対戦サービスへの組み込み)
+- [テスト・詳細資料](#テスト詳細資料)
 
-#### 今回の累積ベンチマーク（F1計測候補、2026-09-06）
+## 必要環境
 
-main `f5ec6c545c9a2727ca708bc4c6822daf07a2c4dc` と、F1計測コード
-`b202e6a0cbb2eded9bc2ee5e59f750428e73ca49` の直接paired A/Bです。
-以下は同じ固定入力を使った独立再測定系列で、時間は1実行の中央値です。
-倍率は候補/mainの処理速度比で、大きいほど高速です。
+| 項目 | 要件 |
+|---|---|
+| Python | 3.8以上（[パッケージ定義](pyproject.toml)） |
+| C++ | C++17対応コンパイラ。LinuxはGCC/Clang、macOSはClang、WindowsはMSVC |
+| ビルド | CMake 3.13以上、setuptools 68以上、wheel、pybind11 2.10以上 |
+| 実行時 | NumPy 1.20以上 |
+| Web API（任意） | `[web]` extra: FastAPI、Uvicorn、Pydantic、HTTPX |
+| 開発（任意） | `[dev]` extra: pytest、coverage、Ruffなど |
+| ML（任意） | `[ml]` extra: PyTorch。外部AIやモデルは別途必要 |
 
-| 処理（独立再測定） | main | F1計測候補 | 倍率［95%信頼区間］ |
-|---|---:|---:|---:|
-| 厳密めくれ・depth7・100万node上限 | 2,505.49 ms | 1,051.16 ms | 2.373［2.361–2.403］ |
-| Python StateFeaturizer・5万回 | 372.14 ms | 29.04 ms | 12.808［12.514–13.048］ |
-| Python特徴量＋環境step・5万手 | 529.33 ms | 89.37 ms | 6.044［5.732–6.164］ |
+`pip`はPythonの依存関係とビルド依存を導入します。C++コンパイラは事前に用意してください。ルールエンジン単体にGPUやPyTorchは不要です。
 
-**これはF1計測バイナリの値です。** 後続のCI互換性修正によりnative実行ファイル・Python拡張は
-byte不一致であり、最終PR headやmerge後バイナリの直接測定値ではありません。
-F1の記録commit `49878b661298bf45e39c5f5ca5afa6d0e363736a` も計測コードとは区別します。
+## セットアップ
 
-厳密めくれのfixtureは `hidden_reserve`、cold探索のnode上限で **UNKNOWN** となる固定仕事です。
-7手詰めの完全証明時間ではありません。Pythonの2行は `reachable_32_seed42` の各経路の実測で、
-実NN・GPU・AI全体・問題保存速度の倍率ではありません。
-同じ独立再測定で、探索終了時にnative側が取得したLinux **current RSS** の中央値は
-70,152→49,208 KiB（約30%減）でした。正式系列も70,192→49,188 KiBです。
-peak RSSや累計allocation bytesではなく、他局面の省メモリ率も保証しません。
+```bash
+git clone https://github.com/kuboyoo/csplendor.git
+cd csplendor
+python -m venv .venv
+source .venv/bin/activate
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
 
-測定条件：Ryzen 9 7900X、Linux x86_64、GCC 15.2.0、Python 3.12.1、CMake 4.2.3、
-pybind11 3.0.1。portable Release `-O3 -DNDEBUG -std=c++17`、PERF/VERIFY OFF、CPU4に1thread固定。
-native追加LTOはOFF、Python拡張は両側とも既存pybind11 LTOを維持しました。
-warmup 2回、22 pairs / 11個の2-pair fixed-slot crossover blocks、block bootstrap 10,000回。
-倍率はblock比の中央値なので、表示時間の中央値同士の比とは必ずしも一致しません。
-[F1詳細・再現手順](doc/performance_experiments/final_main_vs_candidate_20260906.md)、
-[CSV](doc/performance_experiments/final_main_vs_candidate_20260906.csv)、
-[manifest](doc/performance_experiments/final_main_vs_candidate_manifest_20260906.json)を正本とします。
+Web APIと開発ツールも使う場合:
 
-#### CI互換版の追加検証（2026-09-06）
+```bash
+python -m pip install -e '.[dev,web]'
+python -c 'import csplendor as cs; print(cs.Game(seed=42).legal_action_count)'
+```
 
-CI修正版コード `8b6dd8b48526dfa1eda8ccbc00a9355f5abc8cdb` と保存済みF1候補バイナリを、
-同じportable条件・CPU4・22 pairs / 11 blocksで限定比較しました。
+C++を変更した場合は `python -m pip install -e .` を再実行して拡張をビルドします。既定はRelease・`portable`です。配布用wheelは次で作成できます。
 
-| 固定順solver・fixture | CI修正版/F1候補の速度比［95%信頼区間］ |
-|---|---:|
-| exact_reveal・hidden_reserve・depth7・100万node上限 | 1.0103［0.9981–1.0269］ |
-| visible_solver・five_moves・10万node上限 | 1.0192［0.9973–1.0444］ |
+```bash
+python -m pip wheel . --no-deps --wheel-dir dist
+```
 
-全pairのsemantic digest・正しさcounterは一致しました。両区間は1を含み、
-「限定solver比較では明確な退行を検出していない」範囲の結果です。
-追加高速化や全経路の非劣性を確定したものではなく、F1倍率との乗算もしません。
-最終コードの適用CI 16 jobs（Python 3.8–3.12、Clang/GCC strict、ASan/UBSan・TSan実行、
-macOS/Windows native・適用wheelを含む）と隔離clean wheel受入は通過しました。
-詳細は[CI仕上げ報告](doc/performance_experiments/f4_ci_finish_review_20260906.md)・
-[manifest](doc/performance_experiments/f4_ci_finish_manifest_20260906.json)、
-記録追加後やREADME更新後のheadに対するCI・統合状況は[PR #26](https://github.com/kuboyoo/csplendor/pull/26)を参照してください。
-過去のF3/F4報告・runbookのBLOCKEDや承認待ちは各記録時点の状態です。
+`CSPLENDOR_CPU_TARGET=native` はApple Siliconのローカル最適化用です。配布wheelでは `portable` を使います。architectureやdeployment targetの指定は [macOSビルド設定](doc/building.md) を参照してください。
 
-並列MCTSの累積高速化、最終候補に対するLTO追加効果、現バイナリの実モデル速度は未確定です。
-`CSPLENDOR_ENABLE_LTO`は既定OFFを維持し、過去のnative solver向けopt-in LTO結果を
-Python拡張の追加効果へ転用しません。
-[F2実利用受入](doc/performance_experiments/f2_f3_shipping_review_20260906.md)は旧バイナリのCPU機能確認で、
-selfplay12/selfplay17のPython MCTS＋V3/3133 actions・canonical/public 313特徴を使用しています。
-native 48手やStateFeaturizerの測定経路とは異なり、実モデルsmoke通過も速度A/Bの代わりにはなりません。
-GPU・ブラウザ描画・実モデルpaired速度比較は未実施です。
-[導入・復帰手順](doc/performance_experiments/f4_integration_runbook_20260906.md)に従い、常用環境の切替は別途承認が必要です。
+## サンプルコード
 
-#### F1のその他の参考測定（2026-09-06、正式系列）
+### 初期化・合法手生成・着手・保存
 
-同じF1のmain/計測候補・build条件で、`midgame_250` を20万回処理したnative生成速度です。
-上の独立再測定とは別系列で、Python `legal_actions`取得やCI修正後の最新速度ではありません。
-自己対戦・MCTS等のF1結果は詳細報告に保持しています。
+```python
+import csplendor as cs
 
-| C++内部処理 | main | F1計測候補 | 倍率［95%信頼区間］ |
-|---|---:|---:|---:|
-| 合法手count | 1,185,093 回/秒 | 3,112,938 回/秒 | 2.629［2.615–2.651］ |
-| 合法手codes | 155,366 回/秒 | 378,400 回/秒 | 2.438［2.429–2.447］ |
-| 合法手actions | 172,136 回/秒 | 346,226 回/秒 | 2.008［1.959–2.057］ |
+# 同じエンジン版・seedで同じ初期配置。seed=0も固定seedです。
+game = cs.Game(seed=42)
+game.simple_payment_mode = False  # 全支払いを列挙する上級者相当
 
-#### 過去の生成速度（2026-07/08、現行候補の再測定ではない）
+legal = game.legal_actions
+print("手番:", game.current_player, "合法手数:", len(legal))
+action = legal[0]
+assert game.is_legal(action)
+assert game.apply(action)         # 不正な着手は適用しない
+print("得点:", game.scores)
 
-`Phase 0--7 後`は2026-07-13にRyzen 9 7900X、GCC 13.3で、`2026-08-30`は
-2026-08-30に同じCPU、GCC 15.2で測定しました。いずれもRelease build、Python 3.12.1、
-CPU 1論理コア固定です。代表値は `tests/test_perf.py` と同じseed 42・12手・
-合法手250件の中盤局面です。`Phase 0--7 後`はbest-of-5を7回、`2026-08-30`は同じ測定を
-3 batch実行した21標本の中央値です。自己対戦行はseed 0--9の10 gameを1標本とし、
-それぞれ30標本、90標本を測定した別workloadです。
+snapshot = game.serialize_snapshot()
+restored = cs.Game.deserialize_snapshot(snapshot)
+assert restored.serialize_snapshot() == snapshot
+```
 
-| 処理 | リファクタ前 | Phase 0--7 後 | 2026-08-30 | 2026-08-30/リファクタ前 |
-|---|---:|---:|---:|---:|
-| Python `legal_actions` | 21,473 回/秒 | 26,586 回/秒 | 27,084 回/秒 | 1.26倍 |
-| C++ `legal_action_codes` | 61,313 回/秒 | 118,594 回/秒 | 125,444 回/秒 | 2.05倍 |
-| C++ `legal_action_count` | 316,991 回/秒 | 981,149 回/秒 | 1,011,935 回/秒 | 3.19倍 |
-| C++ 内部自己対戦 | 160,545 moves/sec | 740,538 moves/sec | 892,607 moves/sec | 5.56倍 |
+`legal_actions` はPythonの `Action` 一覧、`legal_action_codes` はpacked整数一覧、`legal_action_count` は件数だけを返します。**一覧内の添字、packed整数、後述のV3行動IDは別物**です。外部入力には検証付きの `apply()` / `apply_action_code()` を使い、`*_trusted()` は同じ局面で生成済みの合法手に限定してください。
 
-Phase 0--7 後を測定した同じ250件局面の30-pair sustained A/Bでは、
-`legal_actions` は約1.19倍（95% CI:
-1.11--1.19倍）、codesは約1.97倍、countは約3.11倍でした。一方、合法手5件の
-固定中盤局面では固定長buffer初期化の削減が強く効き、`legal_actions` は5.07倍、
-codesは9.17倍、countは9.62倍です。したがって合法手生成が一律5倍になったわけではなく、
-Python Action object生成の割合と合法手数で倍率が変わります。
+### ランダム対局
 
-2026-08-30とリファクタ前の単純比較は、`legal_actions` が1.26倍、codesが2.05倍、
-countが3.19倍、自己対戦が5.56倍です。2026-08-30列はcompiler更新を含む再測定値であり、
-Phase 0--7 後との差だけを個別最適化の効果とはみなしません。厳密な変更評価には、
-同一build条件のpaired A/Bを用いてください。
+```python
+import random
+import csplendor as cs
 
-#### 過去のMCTS探索性能
+rng = random.Random(7)
+game = cs.Game(seed=42)
+game.simple_payment_mode = True
 
-2026-08-04に同じRyzen 9 7900X、GCC 13、portable Release buildで、高速化前の`main`
-（`6ddb47c`）とMCTSホットパス高速化後を同一host・seed・tree size・batch sizeで比較した
-結果です。zero-latency native evaluatorを使い、5標本の中央値を示しています。
+# 無限対局を避けるアプリ側の上限。上限到達自体はエンジンの引き分け判定ではありません。
+for _ in range(500):
+    if game.is_game_over():
+        break
+    assert game.apply(rng.choice(game.legal_actions))
 
-| mode/backend | 高速化前`main` | 高速化後 | 高速化 |
-|---|---:|---:|---:|
-| exact legacy 1 thread | 37,487 sim/s | 387,132 sim/s | 10.33倍 |
-| exact sharded 1 thread | 31,773 sim/s | 222,253 sim/s | 7.00倍 |
-| exact sharded 4 threads | 94,819 sim/s | 217,910 sim/s | 2.30倍 |
-| exact sharded 8 threads | 125,095 sim/s | 194,405 sim/s | 1.55倍 |
-| exact root-parallel 8 workers | 286,487 sim/s | 1,418,195 sim/s | 4.95倍 |
-| determinized legacy 1 thread | 56,969 sim/s | 358,261 sim/s | 6.29倍 |
-| determinized sharded 4 threads | 156,161 sim/s | 294,279 sim/s | 1.88倍 |
-| determinized root-parallel 8 workers | 440,313 sim/s | 1,584,560 sim/s | 3.60倍 |
+print("終了:", game.is_game_over(), "勝者:", game.winner, "得点:", game.scores)
+```
 
-構成要素のmicrobenchmarkでは、48手action maskが624.6 nsから32.7 ns（19.10倍）、
-action decodeが3,240.5 nsから15.4 ns（210.07倍）、dense mask走査が22.0 nsから
-4.7 ns（4.69倍）になりました。40,000 simulationのsharded 8-thread実行では最大RSSが
-159,832 KiBから44,644 KiBへ約72%減少しています。
+貴族選択待ちでは同じプレイヤーが続けて行動します。通常手がない場合の `PASS` も合法手一覧に含まれるため、このループで処理できます。
 
-実モデル込みの速度向上はNN推論時間の割合に依存します。測定方法、O(1)監査、compact
-edgeの詳細は[MCTSホットパス高速化](https://github.com/kuboyoo/csplendor/blob/main/doc/mcts_hotpath_optimizations.md)を参照してください。
-
-#### 過去のめくれ厳密詰み探索・Phase別測定
-
-2026-08-30にRyzen 9 7900X、GCC 15.2、portable Release build、Python 3.12.1、
-CPU 1論理コア固定で測定しました。5手詰め収集局面の初手を固定し、深さ7、
-`exact_reveal_search=True`、1実行1,000万ノードで、warmup 2回後の15標本の
-中央値を比較しています。高速化項目だけを切り替え、探索順と訪問ノード数は同一です。
-
-| 指標 | 高速化前 | 高速化後 | 効果 |
-|---|---:|---:|---:|
-| 探索速度 | 4,928,183 nodes/sec | 5,440,074 nodes/sec | 1.104倍 |
-| 1,000万ノードの実時間 | 2.029秒 | 1.838秒 | 9.4%短縮 |
-
-探索速度の改善率は10.39%で、bootstrap 95% CIは+9.19%--+11.73%でした。
-両実装とも合法手8,524,863件、置換表hit 778,150件、保存局面643,158件で停止しており、
-この測定では探索量を変えずにノード処理を高速化しています。
-
-厳密めくれ探索では、山札を順列ではなく残存カード集合として扱います。探索専用hashから
-山札順と絶対turnを除き、残存カードbitsetを別keyとして保持することで、完全情報用の
-`Board.hash()`の意味を変えずに重複計算と同値局面の分断を避けます。さらに、node budgetから
-置換表容量を保守的に事前確保してrehashを抑えます。node limitは従来どおり毎nodeで厳密に
-検査し、wall-clockと外部cancelだけを64 nodeごとに検査します。node 0では必ず検査するため、
-事前cancelと即時timeoutの挙動は維持されます。
-
-2026-09-05のPhase 3Cでは、詰み探索の置換表を用途別に圧縮しました。portable Releaseの
-paired A/Bで、exact 5手局面は3.91%高速化し、exact/visible solverのpeak RSSは局面により
-11.91%〜27.38%減少しました。production型TT microは28.40%高速化した一方、key生成単体は
-2.33%低下しています。探索量・候補順・5手/7手詰み・証明DAGは同一です。測定fixtureと方法が
-上表とは異なるため倍率は合算していません。詳細は
-[Phase 3C測定記録](doc/performance_experiments/phase3c_solver_tt_compaction_20260905.md)を参照してください。
-
-Phase 3D-P1では、めくれ候補のスコアをsort比較のたびに再計算せず、一度だけ計算するように
-しました。3C後を基準とする固定探索量のpaired A/Bで、代表deepは1.497倍（独立再測定1.486倍）、
-shallowは1.307倍、warm sessionは1.544倍です。候補順・探索結果を維持し、5手/7手詰み、
-proof/frontier、cache再利用、ASan/UBSanを検証しました。depth7の速度fixtureはnode上限で
-UNKNOWNとなるため、7手詰みの完遂速度を意味しません。小さなproof計測の不確実性を含む詳細は
-[Phase 3D-P1測定記録](doc/performance_experiments/phase3dp1_score_once_20260905.md)を参照してください。
-
-Phase 3D-P2では、再帰呼出しごとに合法手・めくれ候補の一時配列を再利用するようにしました。
-3D-P1後を基準に、代表deepは1.085倍（独立再測定1.082倍）、shallowは1.076倍、
-warm sessionは1.073倍です。同じ100万ノード探索の確保回数は約938万回から330万回へ減少し、
-5手/7手詰み、proof/frontier、cache再利用、ASan/UBSanの検証を通過しました。
-過去Phaseとの倍率は乗算していません。極小proofの単発測定に残る制約を含む詳細は
-[Phase 3D-P2測定記録](doc/performance_experiments/phase3dp2_search_scratch_20260905.md)を参照してください。
-
-Phase 3D-1では、visible-only詰み探索の通常着手を軽量なRAII復元へ変更しました。
-3D-P2比で代表sliceは1.182倍（独立再測定1.172倍）、確保回数は約255万回から81万回へ
-減少しました。めくれ込みsolverへの適用案はproofの回帰基準未達で採用せず、従来方式を維持します。
-5手/7手詰み・全回帰・ASan/UBSanを検証済みです。採用範囲と棄却判断の詳細は
-[Phase 3D-1測定記録](doc/performance_experiments/phase3d1_normal_rollback_20260905.md)を参照してください。
-
-Phase 3D-2/3D-3は採否評価を完了しました。対象山だけを復元する3D-2の試作は代表deepで
-1.012倍（独立再測定1.010倍）にとどまり、採用基準未達で撤去しました。3D-3は代表探索で
-購入ごとの実訪問めくれ数が1枚だったため、prefix共用を導入していません。
-既存の高速化を維持し、PERF専用診断と記録のみ追加しています。追加の高速化は主張しません。
-詳細は[Phase 3D-2/3D-3測定記録](doc/performance_experiments/phase3d23_reveal_transactions_20260905.md)を参照してください。
-
-5B-R/4B-1の採否評価も完了しました。Game scratch再利用（5B-R）は独立再測定で1.017倍に
-とどまったため撤去し、legacy MCTSのnode・aux・LRU管理表統合（4B-1）を採用しました。
-3D-2/3評価後の同じ基準に対し、代表legacy探索は1.088倍（独立再測定1.103倍）、
-確保回数は約11.1%減少しました。これはnative 48-action＋模擬評価器での測定であり、
-実NN・V3・並列共有木や詰め問題生成全体の高速化を表す数値ではありません。
-未展開ノードを大量に保持する場合のメモリ増加を含む詳細とreferenceビルド方法は
-[5B-R/4B-1測定記録](doc/performance_experiments/phase5br4b1_mcts_state_records_20260905.md)を参照してください。
-
-Phase 4C-1〜4C-3は試作と採否評価を完了しました。metrics分散、予約tokenのinline格納、
-state確認と選択のlock統合はいずれも事前の主要並列探索5%改善基準に届かず、撤去しました。
-最後のlock統合案は1.048倍（独立再測定1.043倍）でしたが、採用後の速度としては扱いません。
-既存の探索実装を保持し、PERF専用の深さ別lock・予約占有診断と検証記録を追加しています。
-詳細は[Phase 4C測定記録](doc/performance_experiments/phase4c_concurrency_20260906.md)を参照してください。
-
-Phase 5DのV3 payment静的DPも試作・評価しました。修正版はV3マスク生成で1.127倍
-（独立再測定1.135倍）になりましたが、V3自己対戦の回帰基準を満たさず撤去しました。
-本番codecは従来方式のままです。V3公開経路のベンチマーク、全支払いパターン・byte境界・
-全IDの網羅テストを追加しました。48手MCTSや実NNの高速化を意味しません。
-詳細は[Phase 5D測定記録](doc/performance_experiments/phase5d_v3_payment_20260906.md)を参照してください。
-
-Phase 3E・5E・5Aも採否評価を完了しました。3Eのtake代表化は代表visible-only探索で
-1.106倍（独立再測定1.112倍）、5Eの返却手順位選択はfull-action自己対戦で
-1.088倍（再測定1.079倍）となり採用しました。5Aの48手直接適用は代表処理が遅くなり撤去しました。
-別経路の倍率を掛け合わせたり、実NN・問題保存速度の改善率として扱ったりはしません。
-詳細は[3E・5E・5A測定記録](doc/performance_experiments/phase3e5e5a_action_selection_20260906.md)を参照してください。
-
-Phase 5C-Bでは `StateEncoder.encode_numpy` を追加し、既存`StateFeaturizer`のlist経由変換を
-省きました。Python特徴量取得は12.55倍（独立再測定13.43倍）、特徴量取得＋ランダム着手の
-Python経路は約5.97倍です。native MCTS・実NN全体の倍率ではありません。
-固定特徴量の定数表案はMCTSで改善が再現せず撤去しました。
-詳細は[Phase 5C-B測定記録](doc/performance_experiments/phase5cb_features_20260906.md)を参照してください。
-
-Phase 6ではportable既定を維持し、native実行ファイル向けのRelease LTOをopt-inで追加しました。
-同じ採用コードの厳密めくれ探索で約1.06倍（独立再測定でも約1.06倍）です。
-Python拡張は既にpybind11がLTOを付けており、今回の追加効果とは扱いません。
-Linux nativeとPGOは別経路の回帰が再現したため棄却・撤去しました。
-[Phase 6検証報告](doc/performance_experiments/phase6_build_profiles_20260906.md)と
-[共通要件§19–22の監査](doc/performance_experiments/phase6_common_audit_20260906.md)を参照してください。
-
-### 実験的な並列MCTS
-
-共有tree並列探索はStage Bのexperimental opt-inです。既定の`num_threads=1`はworker queueを
-作らない低overheadなserial pathで、`num_threads>=2`のときだけnative traversal workerと単一の
-inference coordinatorを使います。Python evaluator callbackは常に同期的・非並行に呼ばれます。
+### AI入力とV3行動マスク
 
 ```python
 import numpy as np
 import csplendor as cs
 
 game = cs.Game(seed=42)
-mcts = cs.MCTS(cs.MCTSConfig())
+game.simple_payment_mode = False
+observer = game.current_player
+features = cs.StateFeaturizer().featurize(game, observer=observer)
+mask = cs.ActionEncoderV3.get_action_mask(game)
+assert features.shape == (196,)
+assert mask.shape == (3133,)
 
-options = cs.ParallelSearchOptions()
-options.num_threads = 4
-options.num_simulations = 800
-options.max_tree_nodes = 50_000
-options.tree_backend = cs.ParallelTreeBackend.SHARDED
-options.mode = cs.ParallelSearchMode.THROUGHPUT
-options.search_nonce = 1
-
-def evaluator(requests):
-    results = []
-    for request in requests:
-        policy = request["valid_actions"].astype(np.float32)
-        policy /= policy.sum()
-        results.append({
-            "policy": policy,
-            "value": np.zeros(2, dtype=np.float32),
-        })
-    return results
-
-result = cs.mcts_search_parallel_native(
-    mcts, game, options, evaluator, 1.0
-)
+# ここをモデルのマスク付きpolicy選択に置き換える
+action_id = int(np.flatnonzero(mask)[0])
+action = cs.ActionEncoderV3.decode(action_id, game)
+assert game.apply(action)
 ```
 
-`DETERMINISTIC_EPOCH`は単一coordinatorがtraversal、callback、commitを決定順で実行する
-trace/replay oracleです。このmodeの`num_threads`は結果互換性の入力であり、並列completionの
-reorderを発生させません。root-parallel APIで正の探索budgetを使う場合は、workerのseed範囲を
-固定する明示`search_nonce`が必須です。また`timeout_ms`はcallback境界で観測するsoft timeoutで、
-block中のevaluatorを強制中断しません。
+## 速度ベンチマーク
 
-`max_tree_nodes`の既定値50,000はshared-treeでは単一tree上限、root-parallelでは全active worker
-treeの合計上限です。capacity到達後もrootが展開済みならpartial resultを返し、visitが0の場合は
-legal action上で正規化したprior（設定時はroot noiseを混合）を使います。root未展開なら
-`TreeCapacityReachedError`です。Python root-parallel callbackは直列化され、mutex待機後にも
-timeout/cancelを再検査するため、期限切れのcallback backlogを流しません。
+以下は**保存済みの測定結果**です。今回の文書整理で最新HEADの速度を測り直した値ではありません。「回/秒」は局面1個の合法手生成などを1回と数え、生成した個々の手の数ではありません。
 
-複数threadをstable/defaultへ昇格するには、scheduled sanitizer/soak、可変scheduler seed、
-実NN、fixed-time探索品質に加え、展開済みnodeの二次feature signature照合gateが残っています。
-現在のfeature digest検査は同一pendingへdeduplicateされたowner/waiter間です。問題時はlegacy API
-または`num_threads=1`へ戻せます。
-詳細は[並列探索の実装状況](https://github.com/kuboyoo/csplendor/blob/main/doc/parallel_search_plan/implementation_status.md)を参照してください。
+### 合法手生成・特徴量・詰み探索
 
-## インストールとビルド
+2026-09-06の高速化候補（F1計測コード `b202e6a`）の測定です。Ryzen 9 7900X、Linux x86_64、GCC 15.2.0、Python 3.12.1、portable Release、CPU 1論理コア固定。比較元は当時のmain `f5ec6c5` です。
 
-### 前提条件
-- C++17 対応コンパイラ (例: GCC 9+)
-- CMake 3.13+
-- Python 3.8+
+| 処理 | F1候補の測定値 | 比較元に対する速度比 | 条件 |
+|---|---:|---:|---|
+| C++合法手の件数取得 | 3,112,938 回/秒 | 2.629倍 | `midgame_250`、20万回、正式系列 |
+| C++ packed合法手生成 | 378,400 回/秒 | 2.438倍 | 同上 |
+| C++ Action生成 | 346,226 回/秒 | 2.008倍 | 同上。Python object生成を含まない |
+| Python `StateFeaturizer` | 29.04 ms / 5万回 | 12.808倍 | `reachable_32_seed42`、独立再測定 |
+| Python特徴量＋環境step | 89.37 ms / 5万手 | 6.044倍 | 同上 |
+| 厳密めくれ詰み探索 | 1,051.16 ms / 100万node上限 | 2.373倍 | `hidden_reserve`、depth 7、独立再測定 |
 
-build依存とNumPyはpackage metadataから導入されます。FastAPIはoptionalなので、
-Web service利用時は `pip install "csplendor[web]"` を使ってください。
+詰み探索行はnode上限で `UNKNOWN` になる固定仕事で、7手詰めの証明所要時間ではありません。倍率は対応する測定組の比を集計したもので、表示時間の単純な比とは一致しない場合があります。
 
-### ソースからのビルド
-C++ ソースファイルを変更した場合は、拡張モジュールを再ビルドする必要があります。
+高速化は後にmainへ統合されていますが、F1と最終版は同一バイナリではありません。CI互換版との限定solver比較では明確な退行を検出していない、という範囲の結果です。[測定条件・信頼区間・原記録](doc/performance_benchmarks.md) を参照してください。
 
-**方法 1: pip を使う (開発時の推奨)**
-```bash
-pip install -e .
-```
+### Python操作・自己対戦・MCTSの参考値
 
-**方法 2: 手動で CMake ビルドする**
-```bash
-mkdir -p build
-cd build
-cmake ..
-make -j
-# コンパイル済みライブラリをパッケージディレクトリへコピー
-cp _csplendor.*.so ../csplendor/
-```
+| 処理 | 測定値 | 測定時点・条件 |
+|---|---:|---|
+| Python `game.legal_actions` | 27,084 回/秒 | 2026-08-30、合法手250件の局面 |
+| C++内部適用の自己対戦 | 892,607 moves/sec | 2026-08-30、Pythonからnative適用を呼ぶ測定 |
+| MCTS exact / legacy / 1 thread | 387,132 sim/s | 2026-08-04、待ち時間ゼロのnative evaluator |
+| MCTS exact / root-parallel / 8 workers | 1,418,195 sim/s | 同上 |
+| MCTS determinized / root-parallel / 8 workers | 1,584,560 sim/s | 同上 |
 
-### macOS Apple SiliconのCPUターゲット
+こちらは9月の高速化候補の再測定ではありません。MCTS値はNN推論を含まず、実モデル・GPU・通信を含む対戦サービスのスループットとは区別します。再現コマンドと詳細は [ベンチマーク資料](doc/performance_benchmarks.md) にまとめています。
 
-`CSPLENDOR_CPU_TARGET`で、配布用とローカル最適化用を同じソースから
-分けてビルドできます。
+## ゲームルールと合法手生成モード
 
-Linuxのnative実行ファイルでは、次のようにCPU互換性を保ったRelease LTOを選択できます。
-`CSPLENDOR_ENABLE_LTO`の既定はOFFです。OFFでもPython拡張の既存pybind11 LTOは無効化しません。
-ONではCMakeでcompiler/linkerのIPO対応を検査し、Release構成だけに適用します。
+### 2人用ルール
 
-```bash
-cmake -S . -B build/portable-lto \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCSPLENDOR_CPU_TARGET=portable \
-  -DCSPLENDOR_ENABLE_LTO=ON \
-  -DCSPLENDOR_BUILD_PYTHON_MODULE=OFF \
-  -DCSPLENDOR_BUILD_ENGINE_BENCHMARK=ON
-cmake --build build/portable-lto --parallel 4
-```
+| 項目 | 実装仕様 |
+|---|---|
+| プレイヤー | 0、1の2人。0から開始 |
+| 初期トークン | 白・青・緑・赤・黒が各4、金が5 |
+| 公開カード | レベル1〜3を各4枚。初期山札残数は36・26・16 |
+| 貴族 | 定義済み12種類から3枚を選出 |
+| 所持上限 | トークン合計10、予約カード3枚 |
+| 終了条件 | 手番終了時に15点以上で最終ラウンド。後手の手番終了まで進める |
+| 勝敗 | 得点が高い方。同点なら購入枚数が少ない方。それも同じなら引き分け |
+| `winner` | `-1`: 継続中、`0` / `1`: 勝者、`-2`: 引き分け |
 
-Linux x86_64向け`-march=native`とPGOはPhase 6の比較で棄却したため、正式profileには含めません。
-以下のApple Silicon向けnative profileと配布wheel制限は従来どおりです。
+異色取得は銀行にある色から最大3色を1個ずつ、同色2個取得は銀行にその色が4個以上ある場合に可能です。金は通常取得できず、予約時に銀行にあれば1個得ます。取得・予約で10個を超える場合、超過分の返却までを1個の `Action` に含めます。
 
-- `portable`（既定）: CPU固有フラグを追加しません。汎用arm64 wheelなどの
-  配布物には必ずこちらを使用します。
-- `native`: Apple SiliconのローカルCPUに合わせて`-mcpu=native`を使用します。
-  M4 Pro上ではM4向けコードになります。
+通常行動後に条件を満たす貴族が1枚なら自動取得、複数なら `waiting_noble=True` となり、同じ手番で `VISIT_NOBLE` を選びます。条件判定は購入済みカードのボーナスで行い、トークンは消費しません。通常の合法手がない場合だけ `PASS` を生成し、相手も行動不能なら引き分けにします。詳細は [エンジン仕様](doc/engine_specs.md)。
 
-Pythonビルドのarchitectureは`CSPLENDOR_OSX_ARCHITECTURES`へ`arm64`、
-`x86_64`、`universal2`のいずれかを指定できます。`ARCHFLAGS`などと競合する
-指定はエラーになります。通常wheelでは選択したarchitectureとplatform tagも
-照合するため、クロスビルドには一致するPythonまたは`_PYTHON_HOST_PLATFORM`が
-必要です。
+### カジュアル相当・上級者相当
 
-Python拡張のビルド例:
+BGAでいう支払い方の選択に対応する設定は `Game.simple_payment_mode` です。ここでの呼称は支払い列挙の対応関係を示し、BGA全体との完全なルール互換性を保証するものではありません。
 
-```bash
-# 配布用の汎用arm64 wheel
-MACOSX_DEPLOYMENT_TARGET=11.0 \
-  CSPLENDOR_OSX_ARCHITECTURES=arm64 \
-  CSPLENDOR_CPU_TARGET=portable \
-  python -m pip wheel . --wheel-dir dist/arm64
+| モード | 設定 | 購入時の合法手 |
+|---|---|---|
+| カジュアル相当 | `True` | 色トークンを優先し、不足分だけ金で払う1通り |
+| 上級者相当 | `False` | 色トークンを温存する金払いも含め、有効な全パターン |
 
-# このMac用のローカル最適化版
-CSPLENDOR_OSX_ARCHITECTURES=arm64 \
-  CSPLENDOR_CPU_TARGET=native \
-  python -m pip install -e .
-```
+**Python/C++の `Game` の既定値は `False`、HTTP `POST /game` の既定値は `True` です。** 対局開始時に明示し、両AI・サーバー・棋譜で統一してください。簡易モードでもトークン返却の選択肢は複数残ります。
 
-CMakeを直接使う場合は、異なるbuild directoryを指定します。
+割引後に白2・青1が必要で、白2・青1・金1を持っている場合、簡易モードは白2＋青1の1手です。通常モードは、それに白1＋青1＋金1、白2＋金1を加えた3手です。`gold_as=[1,0,0,0,0]` は「白1個分を金で支払う」を表します。
 
-```bash
-cmake -S . -B build/macos-arm64-portable \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_OSX_ARCHITECTURES=arm64 \
-  -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
-  -DCSPLENDOR_CPU_TARGET=portable
-cmake --build build/macos-arm64-portable --parallel 2
+### Actionのフィールド
 
-cmake -S . -B build/macos-m4-native \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_OSX_ARCHITECTURES=arm64 \
-  -DCSPLENDOR_CPU_TARGET=native
-cmake --build build/macos-m4-native --parallel 2
-```
+| フィールド | 意味 |
+|---|---|
+| `type` | `0`: 異色取得、`1`: 同色取得、`2`: 公開予約、`3`: 山札予約、`4`: 購入、`5`: 貴族選択、`6`: パス |
+| `take`, `return_gems` | 色順に6要素。取得数・返却数 |
+| `card_id`, `from_reserved` | 対象カードID、予約からの購入か |
+| `deck_level` | 山札予約のレベル添字 `0..2`。USIの `L1..L3` とは1ずれる |
+| `gold_as` | 白・青・緑・赤・黒の5要素。各色を金で何個代替するか |
+| `noble_choice` | 貴族ID。場の並び順の添字ではない |
 
-`native`はeditable installまたはCMake直接ビルド専用です。通常wheelと同じ互換性tag
-ではM4専用であることを表現できないため、native wheelの作成はエラーになります。
-また、以前のprofileのバイナリを混入させないため、wheelの`--skip-build`も
-使用できません。PEP 660 editable installが内部で作る一時wheelは配布物ではないため、
-配布wheel向けのarchitecture/tag照合は適用しません。
-例ではApple Siliconの最小OSであるmacOS 11.0をdeployment targetにしています。
-サポート方針に応じて、これより新しい値へ変更できます。環境変数を省略したPython
-ビルドでは、そのPython自身のdeployment targetをCMakeへ引き継ぎます。
-wheelの互換性tagはビルドに使うPython自身の下限にも制約されるため、リリース時は
-Mach-Oのminimum OSとwheel tagの両方を確認してください。
-universal2 Pythonも、arm64プロセスとして実行し、arm64専用拡張を選択したeditable
-installまたはCMake直接ビルドでは`native`を使用できます。生成物はarm64専用なので、
-同じPythonをRosettaでx86_64として実行した場合には読み込めません。Rosetta上のbuild、
-universal2拡張、非Apple環境では`native`を使用できません。
+値の詳細とAPIは [Python API](doc/api_ref.md)、支払いの網羅性は [支払いテスト](tests/test_payment.py) を参照してください。解析用の `blank_refill_mode` は通常対局では `False` のままにします。
 
-## 基本的な使い方 (Python)
+## 色・カード・貴族の仕様
 
-```python
-import csplendor
+### 色IDと配列順
 
-# 1. ゲームを初期化
-game = csplendor.Game(seed=42)
+| ID | 色 | `GemType` | USI記号 |
+|---:|---|---|---|
+| 0 | 白 | `DIAMOND` | `W` |
+| 1 | 青 | `SAPPHIRE` | `U` |
+| 2 | 緑 | `EMERALD` | `G` |
+| 3 | 赤 | `RUBY` | `R` |
+| 4 | 黒 | `ONYX` | `K` |
+| 5 | 金 | `GOLD` | `D` |
 
-# 2. 合法手を取得
-legals = game.legal_actions
-print(f"Legal moves: {len(legals)}")
+`cost`・`requirement`・`bonuses`・`gold_as` は金を含まない5要素、`bank`・`gems`・`take`・`return_gems` は金を含む6要素です。表示用 `GEM_SYMBOLS` とUSI用 `GEM_USI_SYMBOLS` は別の記号体系です。
 
-# 3. 行動を適用
-action = legals[0]
-game.apply(action)
+### カード90枚
 
-# 4. 状態へアクセス
-board = game.board
-print(f"Current Turn: {board.turn}")
-print(f"Scores: {game.scores}")
+カードのIDは静的データのIDで、場のスロットや行動IDではありません。カードの `level` は `1..3`、場の配列は `board.visible[level - 1][slot]` です。空きスロットは `-1`。
 
-# 5. 機械学習向けに特徴量化
-featurizer = csplendor.StateFeaturizer()
-features = featurizer.featurize(game) # numpy array (196,)
-```
+| レベル | 枚数 | ID範囲 | 青ボーナス | 赤 | 黒 | 白 | 緑 | 点数 |
+|---:|---:|---|---|---|---|---|---|---|
+| 1 | 40 | 0–39 | 0–7 | 8–15 | 16–23 | 24–31 | 32–39 | 0–1 |
+| 2 | 30 | 40–69 | 40–45 | 46–51 | 52–57 | 58–63 | 64–69 | 1–3 |
+| 3 | 20 | 70–89 | 70–73 | 74–77 | 78–81 | 82–85 | 86–89 | 3–5 |
 
-## Web API の実行
-GUI と連携する FastAPI サーバーを起動するには、次を実行します。
-```bash
-pip install "csplendor[web]"
-uvicorn csplendor.api:app --reload
-```
-
-game/session/replay endpointは単体で動作します。旧`/ai_move` bridgeは互換用の
-optional integrationで、torchと外部`dlsplendor` packageを遅延loadします。
-modelやNN探索コードはcsplendorへ同梱しません。外部stackがない場合はHTTP 503を返し、
-ルールエンジンと他のWeb endpointには影響しません。
-
-旧`.pkl` replay viewerはpickleを読み込むため、設定済みreplay data directoryへ
-server管理者が配置した信頼済みローカルファイルだけを対象にしてください。
-`/replay/load`はrealpathがdirectory内にある`.pkl`だけを受理し、directory外の
-任意path、path traversal、directory外を指すsymlinkを拒否します。`/replay/files`は
-絶対pathを公開せず、一覧取得のためにunpickleもしません。uploadや外部入力をそのまま
-配置しないでください。
-
-## 詰み探索
-
-`scripts/dfpn_mate_solver.py` は、任意局面から player0 または player1 の強制勝利を探索します。
-
-実用上は、公開カードだけで候補手順を高速探索し、その後に未公開カードのめくれ、相手の全応手、全支払いパターン、局面入力後の山札予約結果を検証する `--reveal-verified` モードを推奨します。めくれ検証では visible-only の最短主手順 prefix を固定して先に厳密検証し、証明できなかった場合は固定範囲を緩め、最後に通常の幅広い検証へ戻ります。
-
-```bash
-python scripts/dfpn_mate_solver.py \
-  --position 'bank:... | visible:... | decks:... | nobles:... | P0:... | P1:... | 0' \
-  --attacker 0 \
-  --reveal-verified \
-  --time-limit 30 \
-  --pretty
-```
-
-完全な詰み応手を確認する場合は、証明に関係する局面だけを DAG 形式で出力できます。同一局面はノード ID で共有されるため、木を単純展開するよりメモリ使用量を抑えられます。
-
-```bash
-python scripts/dfpn_mate_solver.py \
-  --position '...' \
-  --attacker 0 \
-  --reveal-verified \
-  --reveal-proof-dag \
-  --proof-dag-format compact \
-  --proof-dag-node-limit 100000 \
-  --proof-dag-edge-limit 500000 \
-  --time-limit 30
-```
-
-証明 DAG は `proof_tree.verification.proof_dag` に返ります。攻撃側は証明に採用した手、守備側は全合法応手、山札予約は全ドロー結果を保持します。既定の `compact` 形式では、同じ action/child に進む複数の具体めくれカードをカードID bitset の reveal group としてまとめ、edge は action template と reveal group への参照で保存します。具体カード集合は保持するため、全めくれに対する応手情報は失いません。従来の辞書型 DAG が必要な場合は `--proof-dag-format v1`、比較用に両方出す場合は `--proof-dag-format both` を指定します。complete DAG は返却前に全 edge を合法手として再走査し、検査済みなら `validated: true` になります。上限超過時も詰み判定結果は維持し、DAG のみ破棄して理由を返します。
-
-完全DAGが大きすぎる場合は、`csplendor.expand_mate_frontier()` で現在局面の1層だけを検証・展開できます。攻撃側ノードでは証明手1手の全めくれ、守備側ノードでは全合法手の全めくれを返します。各 edge の `child_state` は、SPNに含まれない終局・最終ラウンド・貴族選択待ちも保持する版付きスナップショットです。次の呼び出しでは `load_mate_frontier_game(state=...)` で復元します。
+**全90枚のID・色・得点・5色コスト表**は [カード・貴族カタログ](doc/card_catalog.md) にあります。正本は [src/card_data.h](src/card_data.h) です。
 
 ```python
 import csplendor as cs
 
-game = cs.load_mate_frontier_game(position=position)
-frontier = cs.expand_mate_frontier(game, attacker=1, depth=5)
-edge = frontier["edges"][0]
-child = cs.load_mate_frontier_game(state=edge["child_state"])
-next_frontier = cs.expand_mate_frontier(
-    child,
-    attacker=1,
-    depth=edge["child_depth"],
-)
+card = cs.get_card(0)
+print(card.id, card.level, card.points, card.bonus, list(card.cost))
+# ID 0: レベル1、0点、青ボーナス、コスト [0, 0, 0, 0, 3]
+assert len(cs.get_all_cards()) == 90
+assert len(cs.get_all_nobles()) == 12
 ```
 
-深さを1手ずつ増やして最初の詰みを調べる場合は
-`cs.search_reveal_verified_mate_depths()` を使います。不詰みを確定した深さだけを
-通過し、詰み、`Unknown`、累積予算、または最大深さで停止します。
-終局済みの非勝利局面、または残る全カード・貴族の点を攻撃側が独占しても15点に
-届かない局面では、深さに依存しない `permanent_no_mate` 証明で直ちに停止します。
+### 貴族12種類
+
+このエンジンが採用するカタログは12種類です。すべて3点で、以下のボーナス枚数を要求します。外部サービスのIDと同一とは限らないため、連携時は要求色・枚数で対応を確認してください。
+
+| 貴族ID | 白 | 青 | 緑 | 赤 | 黒 |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 0 | 0 | 4 | 4 | 0 |
+| 1 | 0 | 0 | 0 | 4 | 4 |
+| 2 | 0 | 4 | 4 | 0 | 0 |
+| 3 | 4 | 0 | 0 | 0 | 4 |
+| 4 | 4 | 4 | 0 | 0 | 0 |
+| 5 | 4 | 0 | 0 | 4 | 0 |
+| 6 | 3 | 0 | 0 | 3 | 3 |
+| 7 | 3 | 3 | 3 | 0 | 0 |
+| 8 | 0 | 0 | 3 | 3 | 3 |
+| 9 | 0 | 3 | 3 | 3 | 0 |
+| 10 | 3 | 3 | 0 | 0 | 3 |
+| 11 | 0 | 3 | 3 | 0 | 3 |
+
+`cs.get_noble(id)` の `points` と `requirement` から取得できます。正本は [src/noble_data.h](src/noble_data.h) です。
+
+## AI向けの特徴量・行動空間・探索
+
+### 特徴量と行動エンコーダ
+
+| API | サイズ | 用途・契約 |
+|---|---:|---|
+| `StateFeaturizer` / `StateEncoder` | 196 | 状態特徴量V1。推論時は `observer` を明示 |
+| `ActionEncoder` / `ActionEncoderCpp` | 48 | 基本行動。返却・支払いの全選択肢を区別しない。内蔵MCTSの契約 |
+| `ActionEncoderV2` | 4869 | スロット基準。返却・支払い・パスを含む互換用 |
+| `ActionEncoderV3` | 3133 | 購入をカードID、貴族選択を貴族IDで表す全行動用 |
+
+新しい全行動policyにはV3が使えますが、**内蔵C++ MCTSのpolicyは48枠固定**で、V3をそのまま渡すことはできません。V2/V3のマスクは終局時に全ゼロです。48枠にはパスがないため、MCTSのrootが `requires_forced_pass` なら先に `apply_forced_pass()` を呼びます。
+
+V3の区分は、異色取得 `0..839`、同色取得 `840..979`、公開予約 `980..1063`、山札予約 `1064..1084`、購入 `1085..3119`、貴族 `3120..3131`、パス `3132` です。詳細は [V2](doc/action_space_v2.md) / [V3](doc/action_space_v3.md)。モデルと一緒にschema version・fingerprint・支払いモードを保存してください。
+
+`StateEncoder.encode_canonical(game, player, observer)` はプレイヤー視点を入れ替えます。`observer` の既定値 `-1` は完全情報なので、対戦AIには観測者 `0` / `1` を明示します。未知カード集合や将来の公開確率には `Board.observable_card_pool()` と `StateEncoder.encode_public_card_statistics()` を利用できます。
+
+### MCTS
+
+逐次 `MCTS` に加え、共有tree・root-parallelのnative APIがあります。複数threadのAPIは実験的機能で、Python evaluator callbackは直列に呼ばれます。実モデルの推論時間を含めてthread数・batch sizeを評価してください。[並列MCTSのコード例と制約](doc/parallel_mcts_usage.md)、[実装状況](doc/parallel_search_plan/implementation_status.md) に詳細があります。
+
+### 詰み探索
+
+公開カードだけの探索（visible-only）は候補発見用、めくれ検証（reveal-verified）は未知の補充・山札予約や相手の応手も考慮する証明用です。全支払いに対して保証したい場合は簡易支払いを無効にします。
 
 ```python
-depth_search = cs.search_reveal_verified_mate_depths(
-    game,
-    attacker=1,
-    min_depth=5,
-    max_depth=8,
-    max_nodes=10_000_000,
-    time_limit_seconds=120,
-)
-```
+import csplendor as cs
 
-実戦AIでは、同一対局中に1個の `MateSearchSession` を保持します。`search_anytime()`
-は浅い深さが未確定でも次へ進み、正の詰み証明だけを返すため、持ち時間内の着手
-選択に向いています。anytime探索中も一部のCPU予算で厳密置換表を育て、次の深さ
-では浅い証明手・反例手を合法手順序へ反映します。相手応手後の局面が前手番の表に
-あれば、同じ深さの結果は1ノードの参照で再利用されます。
-
-```python
-session = cs.MateSearchSession(
-    attacker=ai_player,
-    jobs=16,
-    max_cache_states=2_000_000,
-)
-
+game = cs.Game(seed=42)  # 実戦では現在の局面を渡す
+game.simple_payment_mode = False
+session = cs.MateSearchSession(attacker=game.current_player, jobs=1)
 result = session.search_anytime(
-    game,
-    min_depth=1,
-    max_depth=8,
-    time_limit_seconds=2.0,
+    game, min_depth=1, max_depth=3, time_limit_seconds=0.1,
 )
 if result["status"] == "mate":
     action = cs.Action.unpack(result["winning_root_action"])
-    # 通常のAI候補より優先して、この検証済み着手を選択する
-
-# 対局終了・別対局開始時だけ破棄する
-session.clear()
+    assert game.is_legal(action)
+    assert game.apply(action)
+# 同じ対局ではsessionを再利用し、対局終了時にsession.clear()する
 ```
 
-最短手数まで保証する解析用途では `session.search()` または
-`search_reveal_verified_mate_depths()` を使います。こちらは各N手不詰みを全合法手・
-具体的めくれについて確定してからN+1へ進むため、実戦向けより高コストです。
-思考時間を外部から打ち切る場合は `session.cancel()` を別スレッドから呼べます。
+時間・node上限による `Unknown` は不詰みではありません。深さは攻撃側の手数を数え、両者の着手数の合計ではありません。`search_anytime()` は正の証明を探す実戦用で、最短手数を保証しません。最短深さの解析には `session.search()` / `search_reveal_verified_mate_depths()` を使います。証明DAG、逐次展開、CLIは [詰み探索ガイド](doc/mate_usage.md) と [ソルバー仕様](doc/SOLVER.md) を参照してください。
 
-確認用の主手順を `splendorgui` で再生する場合は、`--kifu-output mate.kifu` を追加します。`--kifu-output` は既定で `--reveal-verified` を有効化し、検証済み候補主手順を Splendor KIFU として保存します。通常の DFPN 証明木から主手順を保存する場合は `--kifu-dfpn` も指定します。具体的なめくれカードを持つ DFPN 証明木では、棋譜コメントに `reveal:C<id>` 注釈を出力します。
+## 局面保存・非公開情報・棋譜
 
-`--simple-payment` を指定すると、購入時の支払いをゴールド温存パターンに限定できます。完全検証が必要な場合は指定しないでください。
+| 表現 | 用途 | 保持するもの・制限 |
+|---|---|---|
+| `serialize_snapshot()` | サーバーの完全局面保存・復旧 | 山札順、伏せ予約、終局phase、モードを保存。undo履歴は含まない |
+| `serialize_information_state(observer)` | 定石DB・観測局面の識別 | 観測者が知る情報のみ。完全局面には復元できない |
+| SPN | USIの局面交換・解析入力 | 公開配置・山札枚数など。完全snapshotの代替にはならない |
+| KIFU | 着手履歴・再生 | 初期局面、手順、対局メタデータ。詳細は [棋譜仕様](doc/KIFU.md) |
 
-### 詰め問題集の生成
+完全snapshot・`board.decks`・相手の伏せ予約IDはサーバー内部情報です。外部AI・観戦者へ渡すデータは観測者ごとに作成します。`game.shuffled_clone(observer_player, seed)` は非公開情報を観測者視点でサンプリングした探索用局面です。
 
-`scripts/generate_mate_puzzles.py` は、`dlsplendor.search.genbu_adapter.GenbuAdapter` を使った Genbu AI 同士の対局から終盤局面を生成し、めくれまで検証済みの詰みだけを問題集として保存します。ランダムに選んだ終盤開始手数に到達した後は、詰みが初めて見つかるまで1手番ごとに候補局面を検証します。AI 対局中だけ簡易支払いモードを有効にします。詰み検証では通常支払いモードに戻し、購入時の全支払いパターン、局面入力後の山札予約、めくれを検証します。
+現行 `game_to_spn(game)` は両者の伏せ予約を `?L<level>` にし、手番プレイヤー自身の伏せ予約IDも隠します。個別観測者向けの完全な入力ではないため、外部AI連携では自分の既知カードを渡す方法もプロトコル側で合意してください。`reveal_hidden_reserved_ids=True` は両者の実IDを `?C<id>` で出す再現用拡張で、対戦相手への送信用には使いません。
 
-```bash
-python scripts/generate_mate_puzzles.py \
-  --output-dir generated/mate_puzzles \
-  --count 100 \
-  --max-attempts 10000 \
-  --genbu-weights scripts/weights/genbu.pt \
-  --genbu-simulations 100 \
-  --min-depth 5 \
-  --max-depth 7 \
-  --no-strategy-dag \
-  --mate-jobs 16 \
-  --uniqueness-jobs 16 \
-  --time-limit 30
+SPNの復元は未知カードを補完するため、元の山札順や終局phaseの厳密な復元にはsnapshotを使います。永続DBの `information_state_hash()` は64bit索引として使い、同一性はbytesも比較します。詳しくは [snapshot](doc/game_snapshot.md) / [情報集合](doc/information_state.md)。
+
+## USIプロトコル
+
+仕様の正本は [usi/docs/USI.md](https://github.com/kuboyoo/usi/blob/main/docs/USI.md) です。`csplendor` は着手のparse・serialize・合法手照合とSPN/KIFU変換を提供します。stdin/stdoutのUSIエンジン実行プロセスはAI側で実装します。仕様側に3〜4人対戦の記述があっても、このエンジンの対応は2人です。
+
+接続の基本順序は、`usi` → `id` / `option` / `usiok`、`isready` → `readyok`、`usinewgame`、`position ...`、`go time <ms>` → `info ...` / `bestmove ...`、終了時に `gameover` / `quit` です。サーバーが着手を合法性検査して適用し、更新した局面を次のAIへ渡します。
+
+| 行動 | 表記例 |
+|---|---|
+| 異色・同色取得 | `take:WUG`、`take:RR` |
+| 取得と返却 | `take:WUG/return:KK` |
+| 公開予約・山札予約 | `reserve:C42`、`reserve:L2` |
+| 購入 | `buy:C3`、`buy:C71/gold:W2U1` |
+| 貴族選択・パス | `noble:N7`、`pass` |
+
+購入の `/gold:` 省略時は金を最小使用します。購入後の貴族選択はエンジン上では別の `Action` です。複数着手を返すAIとの接続では、1手ずつ適用・再検証してください。
+
+```python
+import csplendor as cs
+from csplendor.api.usi_serializer import action_to_usi
+from csplendor.api.usi_resolver import find_legal_action_index_by_usi
+from csplendor.api.spn_codec import game_to_spn
+
+game = cs.Game(seed=42)
+wire_move = action_to_usi(game.legal_actions[0])
+index = find_legal_action_index_by_usi(game, wire_move)
+assert game.apply(game.legal_actions[index])
+print(game_to_spn(game))
 ```
 
-旧Genbuモデルの実行に必要な `alphazero-general-ori` は、`dlsplendor` 直下、
-同階層、および標準workspaceの `workspace/src/alphazero-general-ori` から自動検出します。
-別の場所に置く場合は `ALPHAZERO_ORI_PATH=/path/to/alphazero-general-ori` を指定してください。
-Numbaキャッシュは既定で一時ディレクトリへ保存するため、旧ソースツリーが読み取り専用でも
-実行できます。
+`action_to_usi(action, game=game)` は購入の支払枚数を `/pay:...` で出力します。これはcsplendorの互換拡張で、上記USI正本の `/gold:` 表記とは区別します。相手が拡張を扱わない場合は `game` 引数なしで出力してください。SPNの `?C<id>` や追加棋譜メタデータも含め、[互換性テスト](tests/test_usi_protocol_compatibility.py) と相手実装を照合して接続します。[ローカルUSI資料](doc/USI.md) は実装側の参照資料です。
 
-進捗は attempt 開始と詰み探索開始時に表示されます。`--min-losing-alternatives` を1以上にした場合は誤答側詰み探索も表示されます。棄却時は `stage=rejected`、棄却理由、完全な SPN `position` を表示します。Genbu 対局中の定期表示間隔は `--progress-seconds` で変更できます。
+## Web APIと対戦サービスへの組み込み
 
-高コストなめくれ検証の前に、点差、合法手数、両者の楽観的な近未来得点、visible-only 探索で候補を絞ります。既定では両者が3手以内に15点へ到達しうる合法手12個以上の局面を対象とし、depth 3以上の詰みだけを採用します。詰み証明後は全合法初手を固定して再検証し、別解がない問題だけを保存します。条件は `--threat-turns`、`--min-legal-actions`、`--min-optimistic-score`、`--min-depth`、`--visible-prefilter-time-limit`、`--uniqueness-time-limit` で調整できます。`--uniqueness-max-depth 8` のように指定すると、各初手を問題の詰み深さから指定深さまで反復深化し、より長い別解も除外します。各初手では最初の `--uniqueness-positive-time-limit` 秒（既定2秒）で別解の正証明を高速に探し、残りの累積予算で全合法手・具体的めくれの不詰みを厳密検証します。各初手の累積予算は `--uniqueness-node-limit` と `--uniqueness-time-limit`、候補局面・誤答側の詰み探索は `--mate-jobs 16`、初手間のCPU並列数は `--uniqueness-jobs 16`（いずれも `0` は論理CPU数）で指定します。誤答時に相手の詰みまで成立することは既定の採用条件ではありません。必要なら `--min-losing-alternatives 1` 以上を指定します。
+### APIを起動する
 
-生成物は `depth_XX/<問題ID>/` に分類されます。`XX` はソルバー上の攻撃側手数深さです。各問題には局面情報 `problem.json`、検証済み代表手順 `answer.kifu`、代表手順とDAG状態を収める `strategy.json` が含まれます。DAG作成を有効にした場合は、攻撃側の証明手、守備側の全合法応手、公開カード補充と山札予約を含む全めくれ結果を保持し、同一局面をノードIDで共有します。既定ではDAG作成を試みますが、ノード・辺上限を超えても詰み判定と代表手順が検証済みなら保存します。完全DAGを必須にする場合は `--require-complete-dag`、DAG作成を省いて生成を優先する場合は `--no-strategy-dag` を指定します。DAGの有無と省略理由は `problem.json` の `strategy_dag` および `quality` に保存されます。`strategy.json` は既定で compact DAG を保存し、めくれカード集合は reveal group の bitset として厳密に残します。従来形式が必要な場合は生成時に `--strategy-dag-format v1`、比較用に両方残す場合は `--strategy-dag-format both` を指定します。めくれ候補は現在の山札だけから取り、同じレベル・点数・ボーナス・コストのカードは同型として代表だけを検証します。公開カード補充は一度 blank として進めた局面から反例になりやすい reveal を推定し、危険度の高い候補から検証します。非公開カードを即購入・即予約する oracle 手は合法手順DAGには出力されません。再現性を保つため、生成物内の SPN は伏せ予約カードを `?C<id>` 形式で保存します。通常の公開用 SPN における `?L<level>` と異なり、伏せ予約であることと実カードIDの両方を保持します。購入済みカードは `bought:[<id>,...]`、取得済み貴族は player section の `nobles:[<id>,...]` に保存します。
-
-## ドキュメント
-詳細な仕様は `doc/` ディレクトリを参照してください。
-- [技術概要](https://github.com/kuboyoo/csplendor/blob/main/doc/overview.md)
-- [エンジン仕様](https://github.com/kuboyoo/csplendor/blob/main/doc/engine_specs.md)
-- [Python API リファレンス](https://github.com/kuboyoo/csplendor/blob/main/doc/api_ref.md)
-- [ML 連携ガイド](https://github.com/kuboyoo/csplendor/blob/main/doc/ml_integration.md)
-- [Web API リファレンス](https://github.com/kuboyoo/csplendor/blob/main/doc/web_api.md)
-- [リリース検証記録](https://github.com/kuboyoo/csplendor/blob/main/doc/release_validation.md)
-
-## テスト
-通常のテストは次で実行します。
 ```bash
-pip install -e ".[dev,web]"
+python -m pip install -e '.[web]'
+python -m uvicorn csplendor.api:app --host 127.0.0.1 --port 8000
+```
+
+OpenAPIは `http://127.0.0.1:8000/docs` です。
+
+| 操作 | エンドポイント |
+|---|---|
+| 対局作成 | `POST /game?seed=42&simple_payment_mode=false` |
+| 状態取得 | `GET /game/{session_id}` |
+| 添字で着手 | `POST /game/{session_id}/action?action_idx=0` |
+| USIで着手 | `POST /game/{session_id}/action_usi`、JSON `{"usi_move":"take:WUG"}` |
+| 戻す | `POST /game/{session_id}/undo` |
+| 外部AI互換bridge | `POST /game/{session_id}/ai_move` |
+
+`action_idx` は直前の状態の `legal_actions` 内の添字です。保存用IDやV3のIDとして使わないでください。`/ai_move` は外部 `dlsplendor` とモデルが必要で、未導入なら503です。詳細は [Web API](doc/web_api.md)。
+
+### 対戦サービス側で担当すること
+
+現在のAPIはローカル開発・組み込み用です。セッションはプロセス内メモリに保存され、再起動時の復元や複数worker間の共有は実装していません。さらに状態レスポンスは伏せ予約の実カードIDを含み、観測者別の秘匿処理をしていません。
+
+対戦サービスでは次の境界を設けます。
+
+1. **対局管理**: サーバーが唯一の正規局面を保持。ルール・支払いモード・engine/schema版を対局単位で固定する。
+2. **観測データ**: プレイヤー・観戦者別に伏せ予約と山札を隠す。各AIにはその視点の局面だけを送る。
+3. **着手受付**: 参加者・手番・局面versionを照合し、対局単位の排他処理で二重送信や古い `action_idx` を防ぐ。`Game.apply()` で合法性を再検証する。
+4. **AI実行**: 別worker/processで時間・CPU・メモリを管理。USIの `stop`、応答不能・不正手・切断時の勝敗規定を対局サーバー側で定める。
+5. **保存・配信**: snapshotと着手ログを永続化し、観測者別イベントを配信。認証、対戦組み合わせ、レーティング、持ち時間、再接続はサービス側で実装する。
+
+内蔵探索のtimeoutは協調的で、ブロックしたPython evaluatorを強制停止しません。サービスの締切はプロセス境界でも管理してください。旧pickle replay APIは管理者が配置した信頼済みデータ向けで、ユーザーの棋譜アップロードには使いません。
+
+## テスト・詳細資料
+
+```bash
+python -m pip install -e '.[dev,web]'
 python -m pytest
-python -m compileall -q csplendor
-```
-
-性能確認は明示的に指定して実行します。
-```bash
+python -m py_compile csplendor/*.py
+# 性能テストは明示指定（通常のpytestでは除外）
 python -m pytest -m performance
 ```
 
----
+通常の回帰テストと速度評価は目的が異なります。測定時はコミット、compiler、CPU target、seed、局面、支払いモード、thread数を記録してください。
 
-## 行動空間リファレンス
+| 資料 | 内容 |
+|---|---|
+| [ドキュメント索引](doc/index.md) | 利用目的別の入口 |
+| [Python API](doc/api_ref.md) / [エンジン仕様](doc/engine_specs.md) | API・局面更新・所有権 |
+| [カード・貴族カタログ](doc/card_catalog.md) | 全IDの色・点数・コスト |
+| [速度ベンチマーク](doc/performance_benchmarks.md) | 測定条件・対象版・原記録 |
+| [機械学習連携](doc/ml_integration.md) | 特徴量・行動マスク |
+| [詰み探索](doc/mate_usage.md) / [並列MCTS](doc/parallel_mcts_usage.md) | コード例と探索の制約 |
+| [開発アーキテクチャ](doc/architecture.md) | C++・Pythonの責務と依存関係 |
+| [検証履歴](doc/release_validation.md) | 過去のリリース・リファクタリング記録 |
 
-現行の推奨エンコーダは `ActionEncoderV3` です。購入行動をカードIDベースで表すため、スロット位置に依存する重複を減らしています。
-
-### ActionEncoderV3 (3133 actions)
-
-| カテゴリ | オフセット | サイズ | 内容 |
-|----------|------------|--------|------|
-| TAKE_DIFFERENT | 0 | 840 | 10 combos x 84 return patterns |
-| TAKE_SAME | 840 | 140 | 5 colors x 28 return patterns |
-| RESERVE_VISIBLE | 980 | 84 | 12 slots x 7 return patterns |
-| RESERVE_DECK | 1064 | 21 | 3 levels x 7 return patterns |
-| PURCHASE | 1085 | 2035 | 90 cards x card-specific payment patterns |
-| VISIT_NOBLE | 3120 | 12 | noble ID 0-11 |
-| PASS | 3132 | 1 | なし |
-| **合計** | なし | **3133** | なし |
-
-### ActionEncoderV2 (4869 actions)
-
-`ActionEncoderV2` は互換用のフル行動空間エンコーダです。購入行動を表示スロット/予約スロット別に表します。
-
-| カテゴリ | オフセット | サイズ | 内容 |
-|----------|------------|--------|------|
-| TAKE_DIFFERENT | 0 | 840 | 10 combos x 84 return patterns |
-| TAKE_SAME | 840 | 140 | 5 colors x 28 return patterns |
-| RESERVE_VISIBLE | 980 | 84 | 12 slots x 7 return patterns |
-| RESERVE_DECK | 1064 | 21 | 3 levels x 7 return patterns |
-| PURCHASE_VISIBLE | 1085 | 3024 | 12 slots x 252 payment patterns |
-| PURCHASE_RESERVED | 4109 | 756 | 3 slots x 252 payment patterns |
-| VISIT_NOBLE | 4865 | 3 | visible noble slots |
-| PASS | 4868 | 1 | なし |
-| **合計** | なし | **4869** | なし |
-
-### 互換性メモ
-
-- **ActionEncoderCpp**: 48 actions, return/payment variants なしの圧縮表現。
-- **ActionEncoderV2**: 4869 actions, return/payment variants をすべて含むスロットベース表現。
-- **ActionEncoderV3**: 3133 actions, 現行推奨のカードIDベース表現。
-- **強制パス**: 通常手がない場合だけ `Game.legal_actions` は
-  `ActionType.PASS` を1件返します。48枠MCTS policyには強制手の枠を増やさず、
-  その局面をroot探索する前に `Game.apply_forced_pass()` を呼びます。
-- **seedの移植性**: `Game(seed)` の初期配置/deck shuffleはrepository管理の
-  portable shuffleを使い、libstdc++・libc++・MSVC間で同じ結果になります。
-  native並列MCTSも別途version管理されたportable RNG契約を使います。
+ライセンスは [GPL-3.0](LICENSE) です。

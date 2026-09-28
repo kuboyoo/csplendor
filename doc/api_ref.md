@@ -10,7 +10,13 @@ The main class for controlling game state.
 
 ### Properties
 - `board`: Returns the `Board` object.
+- `simple_payment_mode`: `False` (Game default) enumerates all valid payments;
+  `True` selects the minimum-gold payment per purchase. The HTTP creation API
+  defaults to `True`, so set the mode explicitly when integrating clients.
+- `blank_refill_mode`: Analysis-only blank refill; leave `False` for normal play.
 - `legal_actions`: Returns a list of all currently legal `Action` objects.
+- `legal_action_codes`: Compact `Action.pack()` values in legal-action order.
+- `legal_action_count`: Number of legal actions without constructing Python Actions.
 - `requires_forced_pass`: True only when the sole legal action is `PASS`.
 - `base_actions`: Returns a filtered list of "base" actions (ignoring return/noble combinations).
 - `scores`: Returns a tuple of scores `(player0_score, player1_score)`.
@@ -20,6 +26,8 @@ The main class for controlling game state.
 
 ### Methods
 - `apply(action: Action) -> bool`: Applies an action to the current state.
+- `apply_action_code(code: int, record_history: bool = True) -> bool`: Validates
+  and applies a packed action. Policy IDs and legal-list indices are not codes.
 - `apply_forced_pass(record_history: bool = True) -> bool`: Applies the forced
   pass when no ordinary action exists. If the opponent also cannot act, the
   game ends as a draw.
@@ -49,6 +57,12 @@ search must determinize the restored game for its root observer before use.
 See [Versioned Game Snapshot](game_snapshot.md).
 See [Versioned information-state identity](information_state.md) for opening
 analysis and book keys.
+
+Seed 0 is deterministic, like any other seed. The current implementation uses
+the low 32 bits to seed `mt19937`. Store the engine revision alongside seeds.
+`Board.players` and `get_player()` return copies; editor changes must be written
+back with `board.set_player(index, player)`. Prefer `Game.apply()` for game play.
+Trusted apply methods bypass legality checks and must not receive network input.
 
 ### Public card probability API
 

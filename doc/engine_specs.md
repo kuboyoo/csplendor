@@ -1,6 +1,6 @@
 # エンジン内部仕様
 
-最終更新: 2026-08-05
+最終更新: 2026-09-28
 
 この文書は現在実装の主要なゲーム・探索契約を要約する。数値契約の機械可読な正本は
 `src/encoding_schema.h`と[`refactoring_contracts.json`](refactoring_contracts.json)である。
@@ -21,6 +21,8 @@
 5要素のcost/requirement/bonus配列はGoldを含まずID 0--4、6要素のgem/bank配列は
 ID 0--5を使う。カードはID 0--89、貴族はID 0--11を静的データとして持つ。通常の2人用
 初期局面では、この12枚から3枚を場へ選ぶ。
+
+全IDの色・点数・コストは [カード・貴族カタログ](card_catalog.md) を参照。
 
 ## 局面と所有権
 
@@ -50,7 +52,7 @@ cacheを含めない。
 
 ## 合法手
 
-- 異なる3色から各1個取得する。
+- 銀行にある色から最大3色を選んで各1個取得する。銀行に2色以下しかなければその色数だけ取得する。
 - bankに4個以上ある同色を2個取得する。
 - visible cardまたはdeck先頭を予約し、可能ならGoldを1個得る。
 - visible/reserved cardを購入する。
@@ -60,6 +62,11 @@ cacheを含めない。
 token上限を超える取得・予約では必要な返却組合せを、購入では色tokenとGoldの有効な
 支払組合せをすべて別actionとして列挙する。合法手の集合、生成順、packed code、
 editor状態で2048件を超えた場合に先頭2048件を保持する挙動まで互換契約である。
+
+`Game.simple_payment_mode=True` は購入時だけGold最小使用の1通りに限定する。
+`False` は全支払いを生成する。Gameの既定値はFalse、HTTP `POST /game` の既定値はTrue。
+返却パターンは簡易支払いでも複数残る。通常対局では `blank_refill_mode=False` を使う。
+`Game(seed=0)` も固定seedであり、ランダム初期化を要求する特別値ではない。
 
 `Game.apply()`は入力を検査する公開入口である。`apply_*_trusted()`は生成済み合法手向けの
 hot pathであり、不正入力の結果を保証しない。solver向け低レベルtransitionには失敗時の

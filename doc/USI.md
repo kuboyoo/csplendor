@@ -1,5 +1,10 @@
 # USI Protocol Specification
 
+> 仕様の正本は [usi/docs/USI.md](https://github.com/kuboyoo/usi/blob/main/docs/USI.md) です。
+> この文書はcsplendor側の参照資料で、独立した仕様の正本ではありません。
+> `/pay:`・`?C<id>` などの実装拡張と接続例は [README](../README.md#usiプロトコル) を参照してください。
+> csplendorの対応人数は2人です。以下の一般的なプロトコル説明の対応人数とは区別してください。
+
 **Version:** 1.0 Draft<br>
 **Date:** 2026-02-11<br>
 **Inspired by:** Universal Shogi Interface (USI) / Universal Chess Interface (UCI)
