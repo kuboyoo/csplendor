@@ -32,6 +32,12 @@ def _effective_jobs(jobs: int) -> int:
 def _empty_native_stats() -> dict[str, int | float]:
     return {
         "nodes": 0,
+        "hint_lookups": 0,
+        "hint_hits": 0,
+        "hint_restricted_nodes": 0,
+        "line_order_hits": 0,
+        "probe_dropped_actions": 0,
+        "memo_flushes": 0,
         "memo_hits": 0,
         "persistent_memo_hits": 0,
         "iterative_order_hits": 0,
@@ -80,6 +86,10 @@ def _solve_parallel_branch(
     preferred_attacker_actions: list[int],
     cancellation_token: MateSearchCancellationToken,
     exhaustive_attacker_actions: bool,
+    order_hints: Any = None,
+    line_transplant: bool = True,
+    no_take_probe: bool = False,
+    max_memo_states: int = 0,
 ) -> dict[str, Any]:
     if cancellation_token.is_cancelled:
         return _unknown_native(int(edge["child_depth"]), "search cancelled")
@@ -102,6 +112,10 @@ def _solve_parallel_branch(
             exhaustive_attacker_actions=exhaustive_attacker_actions,
             exact_reveal_search=True,
             cancellation_token=cancellation_token,
+            order_hints=order_hints,
+            line_transplant=line_transplant,
+            no_take_probe=no_take_probe,
+            max_memo_states=max_memo_states,
         )
     )
 
@@ -116,6 +130,10 @@ def _solve_positive_portfolio(
     required_root_action: Optional[int],
     preferred_attacker_actions: list[int],
     cancellation_token: MateSearchCancellationToken,
+    order_hints: Any = None,
+    line_transplant: bool = True,
+    no_take_probe: bool = False,
+    max_memo_states: int = 0,
 ) -> dict[str, Any]:
     if cancellation_token.is_cancelled:
         return _unknown_native(depth, "search cancelled")
@@ -140,6 +158,10 @@ def _solve_positive_portfolio(
             exhaustive_attacker_actions=False,
             exact_reveal_search=False,
             cancellation_token=cancellation_token,
+            order_hints=order_hints,
+            line_transplant=line_transplant,
+            no_take_probe=no_take_probe,
+            max_memo_states=max_memo_states,
         )
     )
 
@@ -210,6 +232,10 @@ def _solve_depth_parallel(
     cancellation_token: Optional[MateSearchCancellationToken],
     exhaustive_attacker_actions: bool = True,
     conclusive_refutations: bool = True,
+    order_hints: Any = None,
+    line_transplant: bool = True,
+    no_take_probe: bool = False,
+    max_memo_states: int = 0,
 ) -> Optional[dict[str, Any]]:
     """Solve one exact depth by splitting root actions/reveals across threads."""
     split_started = time.monotonic()
@@ -225,6 +251,10 @@ def _solve_depth_parallel(
             ),
             exhaustive_attacker_actions=exhaustive_attacker_actions,
             cancellation_token=cancellation_token,
+            order_hints=order_hints,
+            line_transplant=line_transplant,
+            no_take_probe=no_take_probe,
+            max_memo_states=max_memo_states,
         )
     )
     edges = [dict(edge) for edge in split["edges"]]
@@ -249,6 +279,10 @@ def _solve_depth_parallel(
                 depth=int(prefix_edge["child_depth"]),
                 exhaustive_attacker_actions=exhaustive_attacker_actions,
                 cancellation_token=cancellation_token,
+                order_hints=order_hints,
+            line_transplant=line_transplant,
+            no_take_probe=no_take_probe,
+            max_memo_states=max_memo_states,
             )
         )
         child_edges = [dict(edge) for edge in child_split["edges"]]
@@ -346,6 +380,10 @@ def _solve_depth_parallel(
                     required_root_action=required_root_action,
                     preferred_attacker_actions=preferred_attacker_actions,
                     cancellation_token=portfolio_token,
+                    order_hints=order_hints,
+            line_transplant=line_transplant,
+            no_take_probe=no_take_probe,
+            max_memo_states=max_memo_states,
                 )
             futures[portfolio_future] = ("portfolio", None, None)
         for index, edge in enumerate(edges):
@@ -363,6 +401,10 @@ def _solve_depth_parallel(
                     preferred_attacker_actions=child_preferred,
                     cancellation_token=group_tokens[action_code],
                     exhaustive_attacker_actions=exhaustive_attacker_actions,
+                    order_hints=order_hints,
+            line_transplant=line_transplant,
+            no_take_probe=no_take_probe,
+            max_memo_states=max_memo_states,
                 )
             futures[future] = ("branch", edge, action_code)
 
@@ -591,8 +633,18 @@ def search_reveal_verified_mate_depths(
     proof_dag_node_limit: int = 100_000,
     proof_dag_edge_limit: int = 500_000,
     proof_dag_format: str = "compact",
+    order_hints: Any = None,
+    line_transplant: bool = True,
+    no_take_probe: bool = False,
+    max_memo_states: int = 0,
 ) -> dict[str, Any]:
     """Search consecutive mate depths until a sound stopping condition.
+
+    ``order_hints`` (a ``MateOrderHints``) orders moves at known positions.
+    With ``attacker_restrict_top_k > 0`` on the hints, attacker nodes at known
+    positions try only their first k hinted actions: a proof found this way
+    is still sound, but a failed depth is reported as ``inconclusive`` and
+    the sweep continues to the next depth (``exact`` is then False).
 
     ``max_nodes`` and ``time_limit_seconds`` are cumulative budgets for the
     complete depth range, not fresh budgets for each depth.  A conclusive
@@ -639,6 +691,12 @@ def search_reveal_verified_mate_depths(
     preferred_codes = [
         int(action_code) for action_code in (preferred_attacker_actions or [])
     ]
+    restricted_probe = bool(
+        order_hints is not None
+        and int(getattr(order_hints, "attacker_restrict_top_k", 0)) > 0
+    ) or bool(no_take_probe)
+    if restricted_probe and include_proof_dag:
+        raise ValueError("a restricted probe cannot build a proof DAG")
     started = time.monotonic()
     deadline = (
         started + time_limit_seconds if time_limit_seconds > 0.0 else None
@@ -704,6 +762,12 @@ def search_reveal_verified_mate_depths(
                 jobs=jobs,
                 parallel_min_branches=parallel_min_branches,
                 cancellation_token=cancellation_token,
+                exhaustive_attacker_actions=not restricted_probe,
+                conclusive_refutations=not restricted_probe,
+                order_hints=order_hints,
+            line_transplant=line_transplant,
+            no_take_probe=no_take_probe,
+            max_memo_states=max_memo_states,
             )
         if native is None:
             native = solve_reveal_verified_mate_cpp(
@@ -720,9 +784,13 @@ def search_reveal_verified_mate_depths(
                     _NO_REQUIRED_ACTION if required_code is None else required_code
                 ),
                 proof_dag_format=proof_dag_format,
-                exhaustive_attacker_actions=True,
+                exhaustive_attacker_actions=not restricted_probe,
                 exact_reveal_search=True,
                 cancellation_token=cancellation_token,
+                order_hints=order_hints,
+            line_transplant=line_transplant,
+            no_take_probe=no_take_probe,
+            max_memo_states=max_memo_states,
             )
         native_stats = dict(native["stats"])
         nodes = int(native_stats.get("nodes", 0))
@@ -759,6 +827,17 @@ def search_reveal_verified_mate_depths(
             status = "mate"
             stop_reason = "mate_proven"
             break
+        if restricted_probe:
+            # Only the hinted attacker moves were tried: nothing is refuted.
+            attempt["status"] = "inconclusive"
+            status = "unknown"
+            stop_reason = "restricted_probe_exhausted"
+            if unknown_reason is not None and (
+                "limit" in str(unknown_reason) or "cancel" in str(unknown_reason)
+            ):
+                stop_reason = str(unknown_reason)
+                break
+            continue
         if unknown_reason is not None:
             status = "unknown"
             stop_reason = str(unknown_reason)
@@ -797,7 +876,8 @@ def search_reveal_verified_mate_depths(
         "permanent_no_mate_proven": False,
         "permanent_no_mate_certificate": None,
         "jobs": _effective_jobs(jobs),
-        "exact": True,
+        "exact": not restricted_probe,
+        "restricted_probe": restricted_probe,
         "required_root_action": required_code,
         "required_root_action_usi": required_usi,
         "attempts": attempts,
@@ -818,6 +898,10 @@ def search_reveal_verified_mate_anytime(
     jobs: int = 1,
     parallel_min_branches: int = 2,
     cancellation_token: Optional[MateSearchCancellationToken] = None,
+    order_hints: Any = None,
+    line_transplant: bool = True,
+    no_take_probe: bool = False,
+    max_memo_states: int = 0,
 ) -> dict[str, Any]:
     """Search progressively deeper for a sound mate without proving minimality.
 
@@ -917,6 +1001,10 @@ def search_reveal_verified_mate_anytime(
                 cancellation_token=cancellation_token,
                 exhaustive_attacker_actions=False,
                 conclusive_refutations=False,
+                order_hints=order_hints,
+            line_transplant=line_transplant,
+            no_take_probe=no_take_probe,
+            max_memo_states=max_memo_states,
             )
         if raw is None:
             raw = dict(
@@ -935,6 +1023,10 @@ def search_reveal_verified_mate_anytime(
                     exhaustive_attacker_actions=False,
                     exact_reveal_search=False,
                     cancellation_token=cancellation_token,
+                    order_hints=order_hints,
+            line_transplant=line_transplant,
+            no_take_probe=no_take_probe,
+            max_memo_states=max_memo_states,
                 )
             )
         native_status = _native_status(raw)

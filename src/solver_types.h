@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 struct VisibleOnlySearchStats {
@@ -37,8 +38,20 @@ struct VisibleOnlySearchResult {
   std::vector<VisibleOnlyLineEntry> line;
 };
 
+// Move ordering supplied by an external evaluator (e.g. a policy network):
+// set-deck board hash (Board::compute_set_deck_search_hash) of a position to
+// the packed action codes of the side to move, best first. Ordering only;
+// unknown positions and actions absent from a list keep the solver's order.
+using PositionOrderHints = std::unordered_map<uint64_t, std::vector<uint64_t>>;
+
 struct RevealVerifiedSearchStats {
   uint64_t nodes = 0;
+  uint64_t hint_lookups = 0;
+  uint64_t hint_hits = 0;
+  uint64_t hint_restricted_nodes = 0;
+  uint64_t line_order_hits = 0;
+  uint64_t probe_dropped_actions = 0;
+  uint64_t memo_flushes = 0;
   uint64_t memo_hits = 0;
   uint64_t persistent_memo_hits = 0;
   uint64_t iterative_order_hits = 0;

@@ -88,6 +88,8 @@ void bind_rules(py::module_ &m) {
            })
       .def("set_player", &state::editor::set_player)
       .def("hash", &Board::hash)
+      .def("set_deck_search_hash", &Board::compute_set_deck_search_hash,
+           "Rule-state hash with hidden decks modelled as sets (mate solver key)")
       .def("observable_hash", &Board::observable_hash, py::arg("observer"),
            "Hash based only on information visible to observer player")
       .def("observable_repetition_hash", &Board::observable_repetition_hash,

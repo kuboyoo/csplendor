@@ -922,3 +922,130 @@ def test_lazy_frontier_reaches_terminal_for_five_and_seven_move_mates():
             remaining = int(edge["child_depth"])
         assert game.is_game_over()
         assert game.winner == 0
+
+
+def _bench_game():
+    # Forced five-move mate: exact exhaustive proofs take milliseconds.
+    return _five_move_mate_fixture()
+
+
+def _root_hints(game, codes, restrict=0):
+    import numpy as np
+
+    return cs.MateOrderHints(
+        np.asarray([game.board.set_deck_search_hash()], dtype=np.uint64),
+        np.asarray([0, len(codes)], dtype=np.int64),
+        np.asarray(codes, dtype=np.uint64),
+        restrict,
+    )
+
+
+def test_order_hints_are_looked_up_by_set_deck_hash_and_keep_proofs_exact():
+    game = _bench_game()
+    baseline = cs.solve_reveal_verified_mate_cpp(
+        game, attacker=0, depth=5, max_nodes=0, time_limit_seconds=30.0,
+        exhaustive_attacker_actions=True, exact_reveal_search=True,
+    )
+    assert baseline["proven"] and baseline["stats"]["hint_lookups"] == 0
+    winning = int(baseline["line"][0]["action_code"])
+    legal = [int(a.pack()) for a in game.legal_actions]
+    assert winning in legal
+    # Worst-case order: the winning move last. Still proven, with the root hit.
+    hinted = cs.solve_reveal_verified_mate_cpp(
+        game, attacker=0, depth=5, max_nodes=0, time_limit_seconds=30.0,
+        exhaustive_attacker_actions=True, exact_reveal_search=True,
+        order_hints=_root_hints(game, [c for c in legal if c != winning] + [winning]),
+    )
+    assert hinted["proven"] and hinted["stats"]["hint_hits"] >= 1
+    assert int(hinted["line"][0]["action_code"]) in legal
+    # Best-first order shrinks the search of the root node.
+    best_first = cs.solve_reveal_verified_mate_cpp(
+        game, attacker=0, depth=5, max_nodes=0, time_limit_seconds=30.0,
+        exhaustive_attacker_actions=True, exact_reveal_search=True,
+        order_hints=_root_hints(game, [winning]),
+    )
+    assert best_first["proven"] and int(best_first["line"][0]["action_code"]) == winning
+    assert best_first["stats"]["nodes"] <= hinted["stats"]["nodes"]
+
+
+def test_restricted_attacker_hints_prove_with_the_right_move_and_never_refute():
+    game = _bench_game()
+    exact = cs.solve_reveal_verified_mate_cpp(
+        game, attacker=0, depth=5, max_nodes=0, time_limit_seconds=30.0,
+        exhaustive_attacker_actions=True, exact_reveal_search=True,
+    )
+    winning = int(exact["line"][0]["action_code"])
+    legal = [int(a.pack()) for a in game.legal_actions]
+    losing = [c for c in legal if c != winning][:2]
+    with pytest.raises(ValueError):
+        cs.solve_reveal_verified_mate_cpp(
+            game, attacker=0, depth=5, exhaustive_attacker_actions=True,
+            exact_reveal_search=True, order_hints=_root_hints(game, [winning], restrict=1),
+        )
+    probe = cs.search_reveal_verified_mate_depths(
+        game, attacker=0, min_depth=5, max_depth=5, time_limit_seconds=30.0,
+        order_hints=_root_hints(game, [winning] + losing, restrict=1),
+    )
+    assert probe["status"] == "mate" and probe["mate_depth"] == 5
+    assert probe["exact"] is False and probe["restricted_probe"] is True
+    assert probe["stats"]["hint_restricted_nodes"] >= 1
+    # Only losing moves allowed at the root: inconclusive, not "no mate".
+    missed = cs.search_reveal_verified_mate_depths(
+        game, attacker=0, min_depth=5, max_depth=5, time_limit_seconds=30.0,
+        order_hints=_root_hints(game, losing, restrict=2),
+    )
+    assert missed["status"] == "unknown"
+    assert missed["stop_reason"] == "restricted_probe_exhausted"
+    assert missed["verified_no_mate_through_depth"] is None
+    assert missed["attempts"][0]["status"] == "inconclusive"
+
+
+def test_parallel_sweep_passes_hints_to_every_branch():
+    game = _bench_game()
+    exact = cs.solve_reveal_verified_mate_cpp(
+        game, attacker=0, depth=5, max_nodes=0, time_limit_seconds=30.0,
+        exhaustive_attacker_actions=True, exact_reveal_search=True,
+    )
+    winning = int(exact["line"][0]["action_code"])
+    result = cs.search_reveal_verified_mate_depths(
+        game, attacker=0, min_depth=5, max_depth=5, time_limit_seconds=60.0, jobs=4,
+        order_hints=_root_hints(game, [winning]),
+    )
+    assert result["status"] == "mate" and result["exact"] is True
+    assert result["stats"]["hint_lookups"] >= 1
+
+
+def test_line_transplant_keeps_results_exact_and_can_be_disabled():
+    game = _bench_game()
+    with_transplant = cs.search_reveal_verified_mate_depths(
+        game, attacker=0, min_depth=5, max_depth=5, time_limit_seconds=30.0,
+    )
+    without = cs.search_reveal_verified_mate_depths(
+        game, attacker=0, min_depth=5, max_depth=5, time_limit_seconds=30.0, line_transplant=False,
+    )
+    assert with_transplant["status"] == without["status"] == "mate"
+    assert with_transplant["winning_root_action"] == without["winning_root_action"]
+    assert without["stats"]["line_order_hits"] == 0
+    assert with_transplant["exact"] is True
+
+
+def test_no_take_probe_is_sound_and_never_refutes():
+    game = _bench_game()
+    with pytest.raises(ValueError):
+        cs.solve_reveal_verified_mate_cpp(
+            game, attacker=0, depth=5, exhaustive_attacker_actions=True,
+            exact_reveal_search=True, no_take_probe=True,
+        )
+    probe = cs.search_reveal_verified_mate_depths(
+        game, attacker=0, min_depth=5, max_depth=5, time_limit_seconds=30.0, no_take_probe=True,
+    )
+    assert probe["restricted_probe"] is True and probe["exact"] is False
+    assert probe["status"] in ("mate", "unknown")
+    assert probe["verified_no_mate_through_depth"] is None
+    if probe["status"] == "mate":
+        # A probe proof must replay as an exact proof of the full game.
+        exact = cs.search_reveal_verified_mate_depths(
+            game, attacker=0, min_depth=5, max_depth=5, time_limit_seconds=30.0,
+            required_root_action=probe["winning_root_action"],
+        )
+        assert exact["status"] == "mate"

@@ -56,6 +56,25 @@ public:
   RevealVerifiedSolver(RevealVerifiedSolver &&other) noexcept;
   RevealVerifiedSolver &operator=(RevealVerifiedSolver &&other) noexcept;
 
+  // External move ordering (see PositionOrderHints). With
+  // attacker_restrict_top_k > 0 an attacker node whose position is in the
+  // hints tries only its first k hinted legal actions: proofs stay sound,
+  // refutations are no longer conclusive (the caller must treat them as
+  // unknown).
+  // Proof transplantation across sibling reveals/defender replies (ordering
+  // only, on by default); off reproduces the plain depth-first order.
+  void set_line_transplant(bool enabled);
+  // Stop memoising new states beyond this many entries (0 = unbounded); the
+  // search remains exact. Bounds memory at roughly 35 bytes per entry.
+  void set_max_memo_states(size_t limit);
+  // Probe: attacker never takes tokens, defender purchases collapse to the
+  // fewest-gold payment (dominance). Proofs stay sound, refutations do not.
+  void set_no_take_probe(bool enabled);
+
+  void set_order_hints(
+      std::shared_ptr<const PositionOrderHints> hints,
+                       int attacker_restrict_top_k = 0);
+
   RevealVerifiedSearchResult solve(const Game &input);
   RevealVerifiedSearchResult solve_reusing_exact_cache(
       const Game &input, int depth, uint64_t max_nodes,

@@ -130,6 +130,16 @@ public:
     return result;
   }
 
+  void set_line_transplant(bool enabled) { line_transplant_ = enabled; }
+  void set_max_memo_states(size_t limit) { max_memo_states_ = limit; }
+  void set_no_take_probe(bool enabled) { no_take_probe_ = enabled; }
+
+  void set_order_hints(std::shared_ptr<const PositionOrderHints> hints,
+                       int attacker_restrict_top_k) {
+    order_hints_ = std::move(hints);
+    hint_restrict_top_k_ = std::max(0, attacker_restrict_top_k);
+  }
+
   void clear_exact_cache() { exact_memo_.clear(); }
 
   void trim_exact_cache(size_t max_cache_states) {
@@ -231,6 +241,9 @@ public:
     } else {
       try {
         std::vector<OrderedAction> actions = proof_ordered_actions(game);
+        filter_probe_actions(game.current_player() == attacker_, actions);
+        apply_order_hints(state_key(game, true).board_hash(),
+                          game.current_player() == attacker_, actions);
         if (game.current_player() == attacker_)
           actions = forced_attacker_actions(game, actions, depth_, true);
         stats_.legal_moves += actions.size();
@@ -285,6 +298,9 @@ private:
       memo_.clear();
       exact_memo_.clear();
     }
+    line_proofs_.clear();
+    line_refutations_.clear();
+    line_hash_ = 0x9E3779B97F4A7C15ull;
     stats_ = RevealVerifiedSearchStats();
     limits_.reset();
     reserve_active_memo();
@@ -515,6 +531,7 @@ private:
   int depth_ = 0;
   uint64_t max_nodes_ = 0;
   size_t max_cache_states_ = 0;
+  size_t max_memo_states_ = 0;
   SearchLimit limits_;
   RevealVerifiedSearchStats stats_;
   using Memo = std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash>;
@@ -529,6 +546,79 @@ private:
   RevealSearchState reveal_state_;
   RevealSearchState root_reveal_state_;
   std::vector<uint64_t> preferred_attacker_actions_;
+  std::shared_ptr<const PositionOrderHints> order_hints_;
+  int hint_restrict_top_k_ = 0;
+  // Proof transplantation across AND siblings (the reveals of one action, the
+  // defender's replies): the attacker move that proved an OR node is kept
+  // under the hash of the attacker's own move sequence leading there (reveals
+  // and defender moves excluded) and tried first at every OR node reached by
+  // the same attacker line; the defender move that refuted an AND node is
+  // kept the same way. Ordering only: proofs and refutations stay exact.
+  bool line_transplant_ = true;
+  // No-take probe: the attacker never takes tokens, so the bank never matters
+  // to the attacker; then a defender purchase paid with as few gold as
+  // possible dominates the other payment patterns of the same card (gold kept
+  // in hand substitutes any colour, colours returned to the bank are at least
+  // as available to the defender as gold would be). Proofs found this way are
+  // sound; a failure proves nothing.
+  bool no_take_probe_ = false;
+  // Open-addressing tables (linear probing, power-of-two capacity): the
+  // lookup runs at every expanded node, so it must cost a few cache lines.
+  struct LineTable {
+    struct Slot { uint64_t key = 0; uint64_t code = 0; };
+    std::vector<Slot> slots;
+    size_t count = 0;
+    void clear() { slots.clear(); count = 0; }
+    static size_t index_of(uint64_t key, size_t mask) noexcept {
+      return static_cast<size_t>(key * 0x9E3779B97F4A7C15ull >> 20) & mask;
+    }
+    const Slot *find(uint64_t key) const noexcept {
+      if (slots.empty())
+        return nullptr;
+      const size_t mask = slots.size() - 1;
+      for (size_t i = index_of(key, mask);; i = (i + 1) & mask) {
+        const Slot &slot = slots[i];
+        if (slot.key == key)
+          return &slot;
+        if (slot.key == 0)
+          return nullptr;
+      }
+    }
+    void put(uint64_t key, uint64_t code) {
+      if (key == 0)
+        key = 1; // zero marks an empty slot
+      if (slots.empty())
+        slots.assign(1u << 16, Slot{});
+      else if ((count + 1) * 2 > slots.size())
+        grow();
+      const size_t mask = slots.size() - 1;
+      for (size_t i = index_of(key, mask);; i = (i + 1) & mask) {
+        Slot &slot = slots[i];
+        if (slot.key == key) {
+          slot.code = code;
+          return;
+        }
+        if (slot.key == 0) {
+          slot.key = key;
+          slot.code = code;
+          ++count;
+          return;
+        }
+      }
+    }
+    void grow() {
+      std::vector<Slot> old;
+      old.swap(slots);
+      slots.assign(old.size() * 2, Slot{});
+      count = 0;
+      for (const Slot &slot : old)
+        if (slot.key != 0)
+          put(slot.key, slot.code);
+    }
+  };
+  LineTable line_proofs_;
+  LineTable line_refutations_;
+  uint64_t line_hash_ = 0x9E3779B97F4A7C15ull;
   bool include_proof_dag_ = false;
   RevealProofDagBuilder proof_builder_;
   uint64_t required_root_action_ = UINT64_MAX;
@@ -609,8 +699,12 @@ private:
         exact_refinement ? proof_ordered_actions(game) : ordered_actions(game);
 #endif
     CSPLENDOR_PERF_INC(SolverTemporaryVectorAllocations);
+    filter_probe_actions(game.current_player() == attacker_, actions);
+    apply_order_hints(state.board_hash(), game.current_player() == attacker_,
+                      actions);
     if (exact_refinement)
       prefer_iterative_action(state, depth, game.current_player(), actions);
+    prefer_line_move(game.current_player() == attacker_, actions);
     if (game.current_player() == attacker_) {
 #ifdef CSPLENDOR_REUSE_SEARCH_SCRATCH
       // The exhaustive path only reordered a copy. Keep this frame's capacity;
@@ -658,10 +752,14 @@ private:
         action_unknown = action_unknown || child == ForceStatus::UNKNOWN;
         return true;
       };
+      const uint64_t line_before = line_hash_;
+      if (current_player == attacker_)
+        line_hash_ = mix_line_hash(line_before, ordered.code);
       const bool completed =
           exact_refinement
               ? for_each_proof_outcome(game, ordered, visit_outcome)
               : for_each_search_outcome(game, ordered, visit_outcome);
+      line_hash_ = line_before;
       if (!completed && !action_refuted)
         action_unknown = true;
 
@@ -672,6 +770,8 @@ private:
                       actions.size(),        is_replayable(ordered)};
       }
       if (current_player == attacker_ && !action_refuted && !action_unknown) {
+        if (line_transplant_)
+          line_proofs_.put(line_hash_, ordered.code);
         store_entry(memo, key,
                     MemoEntry{ForceStatus::PROVEN, ordered.code,
                               representative_reveal, true, actions.size(),
@@ -679,6 +779,8 @@ private:
         return ForceStatus::PROVEN;
       }
       if (current_player != attacker_ && action_refuted) {
+        if (line_transplant_)
+          line_refutations_.put(line_hash_, ordered.code);
         store_entry(memo, key,
                     MemoEntry{ForceStatus::REFUTED, ordered.code,
                               representative_reveal, true, actions.size(),
@@ -701,6 +803,15 @@ private:
   template <typename MemoType>
   void store_entry(MemoType &memo, const typename MemoType::key_type &key,
                    typename MemoType::mapped_type entry) {
+    // Memory governor: when the table reaches the cap it is flushed and
+    // refilled (the search stays exact; recent states are re-searched once).
+    // Flushing keeps the hit rate high between flushes, unlike refusing new
+    // entries, which starves the search of memoisation. ~90 bytes per entry.
+    if (max_memo_states_ > 0 && memo.size() >= max_memo_states_ &&
+        memo.find(key) == memo.end()) {
+      ++stats_.memo_flushes;
+      memo.clear();
+    }
     CSPLENDOR_PERF_INC(SolverTtStores);
     using MemoEntry = typename MemoType::mapped_type;
     if constexpr (MemoEntry::tracks_persistence) {
@@ -1651,6 +1762,129 @@ private:
     return filtered;
   }
 
+  // Stable reorder of `actions` by the hint list of this position (hinted
+  // actions first, in hint order; the rest keep their order). At attacker
+  // nodes with a restriction, only the first k hinted legal actions remain.
+  void apply_order_hints(uint64_t board_hash, bool attacker_node,
+                         std::vector<OrderedAction> &actions) {
+    if (!order_hints_ || actions.size() < 2)
+      return;
+    ++stats_.hint_lookups;
+    const auto it = order_hints_->find(board_hash);
+    if (it == order_hints_->end())
+      return;
+    const std::vector<uint64_t> &hinted = it->second;
+    if (hinted.empty())
+      return;
+    ++stats_.hint_hits;
+    const auto rank_of = [&](uint64_t code) {
+      for (size_t index = 0; index < hinted.size(); ++index)
+        if (hinted[index] == code)
+          return index;
+      return hinted.size();
+    };
+    std::vector<std::pair<size_t, size_t>> order; // (rank, original index)
+    order.reserve(actions.size());
+    for (size_t index = 0; index < actions.size(); ++index)
+      order.emplace_back(rank_of(actions[index].code), index);
+    std::stable_sort(order.begin(), order.end(),
+                     [](const auto &left, const auto &right) {
+                       return left.first < right.first;
+                     });
+    std::vector<OrderedAction> reordered;
+    reordered.reserve(actions.size());
+    size_t hinted_legal = 0;
+    for (const auto &entry : order) {
+      if (entry.first < hinted.size())
+        ++hinted_legal;
+      reordered.push_back(actions[entry.second]);
+    }
+    if (attacker_node && hint_restrict_top_k_ > 0 && hinted_legal > 0) {
+      const size_t keep =
+          std::min<size_t>(hinted_legal, static_cast<size_t>(hint_restrict_top_k_));
+      if (keep < reordered.size()) {
+        reordered.resize(keep);
+        ++stats_.hint_restricted_nodes;
+      }
+    }
+    actions.swap(reordered);
+  }
+
+  // Try the move remembered for this attacker line first (see line_proofs_).
+  void prefer_line_move(bool attacker_node, std::vector<OrderedAction> &actions) {
+    if (!line_transplant_ || actions.size() < 2)
+      return;
+    const auto &table = attacker_node ? line_proofs_ : line_refutations_;
+    const auto *slot = table.find(line_hash_ == 0 ? 1 : line_hash_);
+    if (slot == nullptr)
+      return;
+    const uint64_t code = slot->code;
+    const auto found = std::find_if(actions.begin(), actions.end(),
+                                    [&](const OrderedAction &a) { return a.code == code; });
+    if (found == actions.end() || found == actions.begin())
+      return;
+    std::rotate(actions.begin(), found, found + 1);
+    ++stats_.line_order_hits;
+  }
+
+  // Attacker: drop token takes. Defender: keep one payment pattern per card
+  // (fewest gold; ties by the first generated), everything else untouched.
+  void filter_probe_actions(bool attacker_node, std::vector<OrderedAction> &actions) {
+    if (!no_take_probe_)
+      return;
+    std::vector<OrderedAction> kept;
+    kept.reserve(actions.size());
+    if (attacker_node) {
+      for (const OrderedAction &ordered : actions) {
+        const Action action = Action::unpack(ordered.code);
+        if (action.type != TAKE_DIFFERENT && action.type != TAKE_SAME)
+          kept.push_back(ordered);
+      }
+      stats_.probe_dropped_actions += actions.size() - kept.size();
+      actions.swap(kept);
+      return;
+    }
+    // (card, from_reserved) -> index into kept, gold used
+    std::vector<std::pair<int, int>> best;  // code slot in kept, gold count
+    std::vector<int> best_key;
+    for (const OrderedAction &ordered : actions) {
+      const Action action = Action::unpack(ordered.code);
+      if (action.type != PURCHASE || ordered.oracle_card >= 0) {
+        kept.push_back(ordered);
+        continue;
+      }
+      int gold = 0;
+      for (int color = 0; color < 5; ++color)
+        gold += action.gold_as[color];
+      const int key = static_cast<int>(action.card_id) * 2 + (action.from_reserved ? 1 : 0);
+      size_t found = best_key.size();
+      for (size_t i = 0; i < best_key.size(); ++i)
+        if (best_key[i] == key) {
+          found = i;
+          break;
+        }
+      if (found == best_key.size()) {
+        best_key.push_back(key);
+        best.emplace_back(static_cast<int>(kept.size()), gold);
+        kept.push_back(ordered);
+      } else if (gold < best[found].second) {
+        kept[static_cast<size_t>(best[found].first)] = ordered;
+        best[found].second = gold;
+      }
+    }
+    stats_.probe_dropped_actions += actions.size() - kept.size();
+    actions.swap(kept);
+  }
+
+  static uint64_t mix_line_hash(uint64_t hash, uint64_t code) noexcept {
+    uint64_t z = hash ^ (code + 0x9E3779B97F4A7C15ull + (hash << 6) + (hash >> 2));
+    z ^= z >> 30;
+    z *= 0xBF58476D1CE4E5B9ull;
+    z ^= z >> 27;
+    z *= 0x94D049BB133111EBull;
+    return z ^ (z >> 31);
+  }
+
   template <typename Candidate, typename CodeAccessor>
   void prefer_candidate_action_by(std::vector<Candidate> &actions, int depth,
                                   CodeAccessor code) const {
@@ -2310,6 +2544,24 @@ RevealVerifiedSearchResult RevealVerifiedSolver::solve_reusing_exact_cache(
       input, depth, max_nodes, time_limit_seconds,
       std::move(preferred_attacker_actions), std::move(cancellation_token),
       max_cache_states);
+}
+
+void RevealVerifiedSolver::set_line_transplant(bool enabled) {
+  impl_->set_line_transplant(enabled);
+}
+
+void RevealVerifiedSolver::set_max_memo_states(size_t limit) {
+  impl_->set_max_memo_states(limit);
+}
+
+void RevealVerifiedSolver::set_no_take_probe(bool enabled) {
+  impl_->set_no_take_probe(enabled);
+}
+
+void RevealVerifiedSolver::set_order_hints(
+    std::shared_ptr<const PositionOrderHints> hints,
+    int attacker_restrict_top_k) {
+  impl_->set_order_hints(std::move(hints), attacker_restrict_top_k);
 }
 
 void RevealVerifiedSolver::clear_exact_cache() { impl_->clear_exact_cache(); }

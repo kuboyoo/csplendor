@@ -98,6 +98,62 @@ session.clear()
 具体的めくれについて確定してからN+1へ進むため、実戦向けより高コストです。
 思考時間を外部から打ち切る場合は `session.cancel()` を別スレッドから呼べます。
 
+### 外部評価による手の順序表と探り（2026-10-02 追加）
+
+`MateOrderHints` は「局面ハッシュ → 手番側の手（pack code、良い順）」の表です。局面の
+キーは `Board.set_deck_search_hash()`（山札を集合として扱う規則ハッシュ）で、解決器が置換表に
+使う値と同じです。表にある局面では手をその順で試し（表にない手は従来の順序で後ろに続く）、
+ない局面は従来どおりです。`solve_reveal_verified_mate_cpp`、`search_reveal_verified_mate_depths`、
+`search_reveal_verified_mate_anytime`、`NativeMateSearchSession.search` の `order_hints=` に渡し、
+並列分割の各枝にも同じ表が渡ります。統計には `hint_lookups` / `hint_hits` が加わります。
+
+```python
+import numpy as np
+hints = cs.MateOrderHints(
+    np.asarray(keys, dtype=np.uint64),      # 局面ハッシュ
+    np.asarray(offsets, dtype=np.int64),    # len(keys) + 1
+    np.asarray(codes, dtype=np.uint64),     # 連結した pack code
+    attacker_restrict_top_k=0,
+)
+result = cs.search_reveal_verified_mate_depths(game, attacker=1, min_depth=1, max_depth=6,
+                                               time_limit_seconds=60, jobs=8, order_hints=hints)
+```
+
+順序だけの表は結果の厳密性を変えません（攻め側は最初の勝ち手で、守り側は最初の反例で枝を
+閉じるため、良い順序は証明を速くし、不詰みの証明は速くなりません）。
+
+`attacker_restrict_top_k = k`（k > 0）にすると、表にある攻め側の局面では表の先頭 k 手だけを
+試します（**探り**）。見つかった詰みは守り手とめくれを全て検証した正しい証明ですが、見つからない
+ことは不詰みの証明になりません。`search_reveal_verified_mate_depths` はこのとき各深さを
+`inconclusive` として次の深さへ進み、結果の `exact` は False、`restricted_probe` は True、
+`verified_no_mate_through_depth` は進みません。`solve_reveal_verified_mate_cpp` に
+`exhaustive_attacker_actions=True` とともに渡すと拒否されます。
+表は dlsplendor の方策網から `dlsplendor.evaluation.mate_hints.build_mate_order_hints` で作れます
+（根から数手ぶんの局面をめくれごとに展開して一括評価）。
+
+計測（dlsplendor `doc/native_v3_search_20260929.md`、2026-10-02）では、順序だけの表に効果はなく、探りは
+3 手詰めの局面でノード数を半減させた程度でした。解決器の律速は守り側の応手×めくれの分岐で、攻め側の
+順序付けでは到達深さは伸びません。既定では無効（`order_hints` を渡したときだけ有効）です。
+
+### 証明の移植、no-take 探り、置換表の上限（2026-10-02 追加）
+
+- **証明の移植（`line_transplant=True`、既定で有効）**: 攻め側の節点を証明した手を「そこまでの攻め側の
+  手順のハッシュ」で記憶し、同じ攻め手順で到達した節点（めくれ違い・守り手違いの兄弟）で最初に試します。
+  守り側の反例手も同様に記憶します。順序付けだけなので結果は厳密なままです。統計 `line_order_hits`。
+  `line_transplant=False` で従来の順序に戻せます。
+- **no-take 探り（`no_take_probe=True`）**: 攻め側はトークンを取らず、守り側の購入は同じカードについて
+  最も金を使わない支払いだけを試します（攻め側が銀行を使わない前提では、金を手元に残す支払いが他の
+  支払いを支配するため）。見つかった詰みは正しい証明、失敗は不詰みの証明になりません
+  （`exhaustive_attacker_actions=True` と併用すると拒否、深さ掃引では `restricted_probe` 扱い）。
+- **置換表の上限（`max_memo_states=N`）**: 表が N 件に達すると空にして詰め直します（結果は厳密のまま、
+  直近の局面を再探索する分だけ遅くなる）。1 件あたり約 90 バイトで、6 スレッドの並列分割では枝ごとに
+  表を持つので合計は N×スレッド数になります。無制限（既定 0）の長い探索は数分で 10 GB を超えます。
+
+計測（dlsplendor `doc/native_v3_search_20260929.md` 参照）: 3 手詰めの局面で証明の移植はノード数を
+1,989 万 → 424 万（4.7 分の 1）、時間を 4.8 秒 → 2.8 秒にした。実対局の終盤 81 局面（深さ 1〜4 の掃引、
+20 秒）では合計ノード 22.7 億 → 18.9 億（−17%）、詰み発見 36 → 37 局面。no-take 探りの追加効果はわずか
+（守り側の分岐の大半はトークンの取り・返却で、支払い方の統合では減らない）。
+
 確認用の主手順を `splendorgui` で再生する場合は、`--kifu-output mate.kifu` を追加します。`--kifu-output` は既定で `--reveal-verified` を有効化し、検証済み候補主手順を Splendor KIFU として保存します。通常の DFPN 証明木から主手順を保存する場合は `--kifu-dfpn` も指定します。具体的なめくれカードを持つ DFPN 証明木では、棋譜コメントに `reveal:C<id>` 注釈を出力します。
 
 `--simple-payment` を指定すると、購入時の支払いをゴールド温存パターンに限定できます。完全検証が必要な場合は指定しないでください。

@@ -3,13 +3,22 @@
 #include "game.h"
 #include "reveal_verified_solver.h"
 #include "visible_only_solver.h"
+#include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <iomanip>
 #include <map>
+#include <optional>
 #include <sstream>
+
+namespace {
+struct MateOrderHintsHandle {
+  std::shared_ptr<const PositionOrderHints> table;
+  int attacker_restrict_top_k = 0;
+};
+} // namespace
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -266,6 +275,43 @@ void bind_solvers(py::module_ &m) {
       .def_property_readonly("is_cancelled",
                              &RevealSearchCancellationToken::is_cancelled);
 
+  // Opaque move-ordering table built once in Python (numpy arrays) and shared
+  // by every solver call of a search, including the parallel root branches.
+  py::class_<MateOrderHintsHandle>(m, "MateOrderHints")
+      .def(py::init([](py::array_t<uint64_t, py::array::c_style | py::array::forcecast> keys,
+                       py::array_t<int64_t, py::array::c_style | py::array::forcecast> offsets,
+                       py::array_t<uint64_t, py::array::c_style | py::array::forcecast> codes,
+                       int attacker_restrict_top_k) {
+             if (keys.ndim() != 1 || offsets.ndim() != 1 || codes.ndim() != 1)
+               throw std::invalid_argument("keys, offsets and codes must be 1-D");
+             const auto n = static_cast<size_t>(keys.shape(0));
+             if (static_cast<size_t>(offsets.shape(0)) != n + 1)
+               throw std::invalid_argument("offsets must have len(keys) + 1 entries");
+             if (attacker_restrict_top_k < 0)
+               throw std::invalid_argument("attacker_restrict_top_k must be non-negative");
+             auto table = std::make_shared<PositionOrderHints>();
+             table->reserve(n);
+             const auto *key = keys.data();
+             const auto *offset = offsets.data();
+             const auto *code = codes.data();
+             const auto total = static_cast<int64_t>(codes.shape(0));
+             for (size_t index = 0; index < n; ++index) {
+               const int64_t start = offset[index], stop = offset[index + 1];
+               if (start < 0 || stop < start || stop > total)
+                 throw std::invalid_argument("offsets must be non-decreasing within codes");
+               (*table)[key[index]].assign(code + start, code + stop);
+             }
+             MateOrderHintsHandle handle;
+             handle.table = std::move(table);
+             handle.attacker_restrict_top_k = attacker_restrict_top_k;
+             return handle;
+           }),
+           py::arg("keys"), py::arg("offsets"), py::arg("codes"),
+           py::arg("attacker_restrict_top_k") = 0)
+      .def("__len__", [](const MateOrderHintsHandle &h) { return h.table ? h.table->size() : 0; })
+      .def_property_readonly("attacker_restrict_top_k",
+                             [](const MateOrderHintsHandle &h) { return h.attacker_restrict_top_k; });
+
   py::class_<RevealVerifiedSolver>(m, "NativeMateSearchSession")
       .def(
           py::init([](int attacker) {
@@ -282,13 +328,23 @@ void bind_solvers(py::module_ &m) {
              const std::vector<uint64_t> &preferred_attacker_actions,
              const std::shared_ptr<RevealSearchCancellationToken>
                  &cancellation_token,
-             size_t max_cache_states) {
+             size_t max_cache_states,
+             const std::optional<MateOrderHintsHandle> &order_hints,
+             bool line_transplant, bool no_take_probe, size_t max_memo_states) {
             if (depth < 0)
               throw std::invalid_argument("depth must be non-negative");
             Game input_snapshot = game.clone_light();
             RevealVerifiedSearchResult result;
             {
               py::gil_scoped_release release;
+              session.set_line_transplant(line_transplant);
+              session.set_no_take_probe(no_take_probe);
+              session.set_max_memo_states(max_memo_states);
+              if (order_hints)
+                session.set_order_hints(order_hints->table,
+                                        order_hints->attacker_restrict_top_k);
+              else
+                session.set_order_hints(nullptr, 0);
               result = session.solve_reusing_exact_cache(
                   input_snapshot, depth, max_nodes, time_limit_seconds,
                   preferred_attacker_actions, cancellation_token,
@@ -297,6 +353,12 @@ void bind_solvers(py::module_ &m) {
 
             py::dict stats;
             stats["nodes"] = result.stats.nodes;
+        stats["hint_lookups"] = result.stats.hint_lookups;
+        stats["hint_hits"] = result.stats.hint_hits;
+        stats["hint_restricted_nodes"] = result.stats.hint_restricted_nodes;
+        stats["line_order_hits"] = result.stats.line_order_hits;
+        stats["probe_dropped_actions"] = result.stats.probe_dropped_actions;
+        stats["memo_flushes"] = result.stats.memo_flushes;
             stats["memo_hits"] = result.stats.memo_hits;
             stats["persistent_memo_hits"] =
                 result.stats.persistent_memo_hits;
@@ -350,7 +412,11 @@ void bind_solvers(py::module_ &m) {
           py::arg("preferred_attacker_actions") =
               std::vector<uint64_t>{},
           py::arg("cancellation_token") = nullptr,
-          py::arg("max_cache_states") = 0)
+          py::arg("max_cache_states") = 0,
+          py::arg("order_hints") = py::none(),
+          py::arg("line_transplant") = true,
+          py::arg("no_take_probe") = false,
+      py::arg("max_memo_states") = 0)
       .def("clear", &RevealVerifiedSolver::clear_exact_cache)
       .def("trim", &RevealVerifiedSolver::trim_exact_cache,
            py::arg("max_cache_states"))
@@ -427,6 +493,12 @@ void bind_solvers(py::module_ &m) {
 
         py::dict stats;
         stats["nodes"] = result.stats.nodes;
+        stats["hint_lookups"] = result.stats.hint_lookups;
+        stats["hint_hits"] = result.stats.hint_hits;
+        stats["hint_restricted_nodes"] = result.stats.hint_restricted_nodes;
+        stats["line_order_hits"] = result.stats.line_order_hits;
+        stats["probe_dropped_actions"] = result.stats.probe_dropped_actions;
+        stats["memo_flushes"] = result.stats.memo_flushes;
         stats["memo_hits"] = result.stats.memo_hits;
         stats["terminal_nodes"] = result.stats.terminal_nodes;
         stats["legal_moves"] = result.stats.legal_moves;
@@ -487,7 +559,9 @@ void bind_solvers(py::module_ &m) {
          uint64_t required_root_action, bool exhaustive_attacker_actions,
          size_t edge_limit,
          const std::shared_ptr<RevealSearchCancellationToken>
-             &cancellation_token) {
+             &cancellation_token,
+         const std::optional<MateOrderHintsHandle> &order_hints,
+         bool line_transplant, bool no_take_probe, size_t max_memo_states) {
         if (attacker < 0 || attacker >= Board::NUM_PLAYERS)
           throw std::invalid_argument("attacker must be 0 or 1");
         if (depth < 0)
@@ -496,16 +570,27 @@ void bind_solvers(py::module_ &m) {
         RevealVerifiedFrontierResult result;
         {
           py::gil_scoped_release release;
-          result =
-              RevealVerifiedSolver(
-                  attacker, depth, 0, 0.0, {}, false, 0, 0,
-                  required_root_action, false, 0,
-                  exhaustive_attacker_actions, true, cancellation_token)
-                  .split_root(input_snapshot, edge_limit);
+          RevealVerifiedSolver solver(
+              attacker, depth, 0, 0.0, {}, false, 0, 0,
+              required_root_action, false, 0,
+              exhaustive_attacker_actions, true, cancellation_token);
+          solver.set_line_transplant(line_transplant);
+          solver.set_no_take_probe(no_take_probe);
+          solver.set_max_memo_states(max_memo_states);
+          if (order_hints)
+            solver.set_order_hints(order_hints->table,
+                                   order_hints->attacker_restrict_top_k);
+          result = solver.split_root(input_snapshot, edge_limit);
         }
 
         py::dict stats;
         stats["nodes"] = result.stats.nodes;
+        stats["hint_lookups"] = result.stats.hint_lookups;
+        stats["hint_hits"] = result.stats.hint_hits;
+        stats["hint_restricted_nodes"] = result.stats.hint_restricted_nodes;
+        stats["line_order_hits"] = result.stats.line_order_hits;
+        stats["probe_dropped_actions"] = result.stats.probe_dropped_actions;
+        stats["memo_flushes"] = result.stats.memo_flushes;
         stats["memo_hits"] = result.stats.memo_hits;
         stats["terminal_nodes"] = result.stats.terminal_nodes;
         stats["legal_moves"] = result.stats.legal_moves;
@@ -558,7 +643,11 @@ void bind_solvers(py::module_ &m) {
       py::arg("required_root_action") = UINT64_MAX,
       py::arg("exhaustive_attacker_actions") = true,
       py::arg("edge_limit") = 250000,
-      py::arg("cancellation_token") = nullptr);
+      py::arg("cancellation_token") = nullptr,
+      py::arg("order_hints") = py::none(),
+      py::arg("line_transplant") = true,
+      py::arg("no_take_probe") = false,
+      py::arg("max_memo_states") = 0);
 
   m.def(
       "solve_reveal_verified_mate_cpp",
@@ -572,10 +661,23 @@ void bind_solvers(py::module_ &m) {
          const std::string &proof_dag_format,
          bool exhaustive_attacker_actions, bool exact_reveal_search,
          const std::shared_ptr<RevealSearchCancellationToken>
-             &cancellation_token) {
+             &cancellation_token,
+         const std::optional<MateOrderHintsHandle> &order_hints,
+         bool line_transplant, bool no_take_probe, size_t max_memo_states) {
         if (proof_dag_format != "v1" && proof_dag_format != "compact") {
           throw std::invalid_argument(
               "proof_dag_format must be 'v1' or 'compact'");
+        }
+        if (no_take_probe && exhaustive_attacker_actions) {
+          throw std::invalid_argument(
+              "no_take_probe requires exhaustive_attacker_actions=False");
+        }
+        if (order_hints && order_hints->attacker_restrict_top_k > 0 &&
+            exhaustive_attacker_actions) {
+          // A restricted attacker set cannot refute conclusively; callers of
+          // the exhaustive mode must not silently lose that guarantee.
+          throw std::invalid_argument(
+              "attacker_restrict_top_k requires exhaustive_attacker_actions=False");
         }
         // As above, detach all solver input before releasing the GIL.  The
         // reveal solver reads deck and provenance vectors during its initial
@@ -584,23 +686,35 @@ void bind_solvers(py::module_ &m) {
         RevealVerifiedSearchResult result;
         {
           py::gil_scoped_release release;
-          result = RevealVerifiedSolver(attacker, depth, max_nodes,
-                                        time_limit_seconds,
-                                        preferred_attacker_actions,
-                                        include_proof_dag,
-                                        proof_dag_node_limit,
-                                        proof_dag_edge_limit,
-                                        required_root_action,
-                                        strict_preferred_attacker_actions,
-                                        strict_preferred_attacker_prefix,
-                                        exhaustive_attacker_actions,
-                                        exact_reveal_search,
-                                        cancellation_token)
-                       .solve(input_snapshot);
+          RevealVerifiedSolver solver(attacker, depth, max_nodes,
+                                      time_limit_seconds,
+                                      preferred_attacker_actions,
+                                      include_proof_dag,
+                                      proof_dag_node_limit,
+                                      proof_dag_edge_limit,
+                                      required_root_action,
+                                      strict_preferred_attacker_actions,
+                                      strict_preferred_attacker_prefix,
+                                      exhaustive_attacker_actions,
+                                      exact_reveal_search,
+                                      cancellation_token);
+          solver.set_line_transplant(line_transplant);
+          solver.set_no_take_probe(no_take_probe);
+          solver.set_max_memo_states(max_memo_states);
+          if (order_hints)
+            solver.set_order_hints(order_hints->table,
+                                   order_hints->attacker_restrict_top_k);
+          result = solver.solve(input_snapshot);
         }
 
         py::dict stats;
         stats["nodes"] = result.stats.nodes;
+        stats["hint_lookups"] = result.stats.hint_lookups;
+        stats["hint_hits"] = result.stats.hint_hits;
+        stats["hint_restricted_nodes"] = result.stats.hint_restricted_nodes;
+        stats["line_order_hits"] = result.stats.line_order_hits;
+        stats["probe_dropped_actions"] = result.stats.probe_dropped_actions;
+        stats["memo_flushes"] = result.stats.memo_flushes;
         stats["memo_hits"] = result.stats.memo_hits;
         stats["terminal_nodes"] = result.stats.terminal_nodes;
         stats["legal_moves"] = result.stats.legal_moves;
@@ -659,7 +773,11 @@ void bind_solvers(py::module_ &m) {
       py::arg("proof_dag_format") = "v1",
       py::arg("exhaustive_attacker_actions") = false,
       py::arg("exact_reveal_search") = false,
-      py::arg("cancellation_token") = nullptr);
+      py::arg("cancellation_token") = nullptr,
+      py::arg("order_hints") = py::none(),
+      py::arg("line_transplant") = true,
+      py::arg("no_take_probe") = false,
+      py::arg("max_memo_states") = 0);
 }
 
 } // namespace csplendor::python
