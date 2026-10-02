@@ -302,7 +302,8 @@ if(CSPLENDOR_BUILD_PYTHON_MODULE)
       src/bindings_rules.cpp
       src/bindings_encoding.cpp
       src/bindings_mcts.cpp
-      src/bindings_solvers.cpp)
+      src/bindings_solvers.cpp
+      src/bindings_mcts_v3.cpp)
   target_link_libraries(
       _csplendor PRIVATE csplendor_core_config Threads::Threads)
 endif()

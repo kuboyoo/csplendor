@@ -49,8 +49,11 @@
       "ParallelSearchStopReason",
       "ParallelTreeBackend",
       "RootParallelSearchResult",
+      "V3SearchConfig",
+      "V3SearchSession",
       "mcts_search_parallel_native",
-      "mcts_search_root_parallel_native"
+      "mcts_search_root_parallel_native",
+      "v3_semantic_group_id"
     ],
     "internal_native": [
       "mcts_search"
@@ -102,6 +105,7 @@
       "mcts_tree.h",
       "mcts_tree_key.h",
       "mcts_types.h",
+      "mcts_v3.h",
       "perf_counters.h",
       "portable_rng.h",
       "resource_bundle.h",

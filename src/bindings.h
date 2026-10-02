@@ -10,6 +10,7 @@ void bind_rules(pybind11::module_ &module);
 void bind_encoding(pybind11::module_ &module);
 void bind_mcts(pybind11::module_ &module);
 void bind_solvers(pybind11::module_ &module);
+void bind_mcts_v3(pybind11::module_ &module);
 
 } // namespace csplendor::python
 

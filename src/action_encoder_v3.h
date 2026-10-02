@@ -437,6 +437,30 @@ public:
     return mask;
   }
 
+  // Enumerate the legal actions of the current player once and hand each to
+  // `sink(id, action)` together with its V3 id. The forced PASS is emitted
+  // when no ordinary action exists, matching get_action_mask(). Search code
+  // uses this instead of decode(): decode() cannot restore short takes.
+  template <typename Sink>
+  static void for_each_legal_with_id(const Game &game, Sink &sink) {
+    int emitted = 0;
+    auto enumerate = [&game, &sink, &emitted](const Action &action) {
+      const int id = encode(action, game);
+      if (id >= 0 && id < ACTION_SIZE) {
+        ++emitted;
+        sink(id, action);
+      }
+      return true;
+    };
+    MoveGenerator::consume_all_capped(game.board, game.simple_payment_mode,
+                                      enumerate);
+    if (emitted == 0 && game.requires_forced_pass()) {
+      Action pass;
+      pass.type = PASS;
+      sink(OFFSET_PASS, pass);
+    }
+  }
+
   static Action decode_and_match(int action_id, const Game &game) {
     return action_encoder_detail::decode_and_match_first<ActionEncoderV3>(
         action_id, game, [&game](auto &sink) {

@@ -281,6 +281,9 @@ V3の区分は、異色取得 `0..839`、同色取得 `840..979`、公開予約 
 
 ### MCTS
 
+V3行動（3,133 ID、全支払い・返却分岐）を扱う多対局探索 `V3SearchSession` は
+[V3探索の設計](doc/mcts_v3.md) を参照してください。48枠の内蔵MCTSとは別実装です。
+
 逐次 `MCTS` に加え、共有tree・root-parallelのnative APIがあります。複数threadのAPIは実験的機能で、Python evaluator callbackは直列に呼ばれます。実モデルの推論時間を含めてthread数・batch sizeを評価してください。[並列MCTSのコード例と制約](doc/parallel_mcts_usage.md)、[実装状況](doc/parallel_search_plan/implementation_status.md) に詳細があります。
 
 ### 詰み探索

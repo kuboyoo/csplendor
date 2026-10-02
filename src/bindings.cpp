@@ -6,4 +6,5 @@ PYBIND11_MODULE(_csplendor, module) {
   csplendor::python::bind_encoding(module);
   csplendor::python::bind_mcts(module);
   csplendor::python::bind_solvers(module);
+  csplendor::python::bind_mcts_v3(module);
 }

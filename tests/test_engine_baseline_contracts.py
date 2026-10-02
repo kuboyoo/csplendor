@@ -31,6 +31,7 @@ EXPECTED_PUBLIC_EXPORTS = {
     "ParallelCancellationToken", "ParallelSearchOptions",
     "ParallelSearchLedger", "ParallelSearchResult", "RootParallelSearchResult",
     "mcts_search_parallel_native", "mcts_search_root_parallel_native",
+    "V3SearchConfig", "V3SearchSession", "v3_semantic_group_id",
     "solve_reveal_verified_frontier_cpp", "solve_reveal_verified_mate_cpp",
     "solve_visible_only_winner_cpp", "decode_mate_frontier_state",
     "encode_mate_frontier_state", "expand_mate_frontier",

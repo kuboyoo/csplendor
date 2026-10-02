@@ -23,6 +23,7 @@
 | [詰み探索ガイド](mate_usage.md) | API、CLI、DAG、外部AIによる問題生成 |
 | [ソルバー仕様](SOLVER.md) | 深さ・証明・Unknown・予算の契約 |
 | [並列MCTS](parallel_mcts_usage.md) | サンプルと実験的APIの制約 |
+| [V3多対局探索](mcts_v3.md) | 3,133行動上のPUCT。多対局の葉バッチ、決定化、サンプル型chance |
 | [並列探索の実装状況](parallel_search_plan/implementation_status.md) | 対応済み機能・残る検証 |
 | [速度ベンチマーク](performance_benchmarks.md) | 測定値、条件、対象commit、再現手順 |
 
