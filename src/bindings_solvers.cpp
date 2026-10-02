@@ -554,6 +554,84 @@ void bind_solvers(py::module_ &m) {
       py::arg("preferred_attacker_actions") = std::vector<uint64_t>{});
 
   m.def(
+      "near_mate_probability_cpp",
+      [](const Game &game, int attacker, int depth, uint64_t max_nodes,
+         double time_limit_seconds, bool root_exact, bool no_take_probe,
+         bool line_transplant, size_t max_memo_states,
+         const std::optional<MateOrderHintsHandle> &order_hints,
+         const std::shared_ptr<RevealSearchCancellationToken>
+             &cancellation_token, double alpha, double beta) {
+        if (attacker < 0 || attacker >= Board::NUM_PLAYERS)
+          throw std::invalid_argument("attacker must be 0 or 1");
+        if (depth < 0)
+          throw std::invalid_argument("depth must be non-negative");
+        Game input_snapshot = game.clone_light();
+        NearMateResult result;
+        {
+          py::gil_scoped_release release;
+          RevealVerifiedSolver solver(attacker, depth, max_nodes,
+                                      time_limit_seconds, {}, false, 0, 0,
+                                      UINT64_MAX, false, 0, true, true,
+                                      cancellation_token);
+          solver.set_line_transplant(line_transplant);
+          solver.set_no_take_probe(no_take_probe);
+          solver.set_max_memo_states(max_memo_states);
+          if (order_hints)
+            solver.set_order_hints(order_hints->table, 0);
+          result = solver.near_mate(input_snapshot, root_exact, alpha, beta);
+        }
+        py::dict stats;
+        stats["nodes"] = result.stats.nodes;
+        stats["memo_hits"] = result.stats.memo_hits;
+        stats["terminal_nodes"] = result.stats.terminal_nodes;
+        stats["legal_moves"] = result.stats.legal_moves;
+        stats["line_order_hits"] = result.stats.line_order_hits;
+        stats["probe_dropped_actions"] = result.stats.probe_dropped_actions;
+        stats["memo_flushes"] = result.stats.memo_flushes;
+        stats["hint_hits"] = result.stats.hint_hits;
+        stats["elapsed_ms"] = result.stats.elapsed_ms;
+        py::list root_actions;
+        for (const NearMateRootAction &entry : result.root_actions) {
+          py::dict item;
+          item["action_code"] = entry.action_code;
+          item["value"] = entry.value;
+          item["lower"] = entry.lower;
+          item["upper"] = entry.upper;
+          root_actions.append(item);
+        }
+        py::list reveals;
+        for (const NearMateReveal &entry : result.best_action_reveals) {
+          py::dict item;
+          item["card"] = entry.card < 0 ? py::none() : py::cast(entry.card);
+          item["weight"] = entry.weight;
+          item["value"] = entry.value;
+          reveals.append(item);
+        }
+        py::dict payload;
+        payload["complete"] = result.complete;
+        payload["attacker"] = result.attacker;
+        payload["depth"] = result.depth;
+        payload["value"] = result.value;
+        payload["best_action"] =
+            result.has_best_action ? py::cast(result.best_action) : py::none();
+        payload["root_actions"] = root_actions;
+        payload["best_action_reveals"] = reveals;
+        payload["unknown_reason"] = result.unknown_reason.empty()
+                                        ? py::none()
+                                        : py::cast(result.unknown_reason);
+        payload["memoized_states"] = result.memoized_states;
+        payload["stats"] = stats;
+        return payload;
+      },
+      py::arg("game"), py::arg("attacker"), py::arg("depth"),
+      py::arg("max_nodes") = 0, py::arg("time_limit_seconds") = 0.0,
+      py::arg("root_exact") = true, py::arg("no_take_probe") = false,
+      py::arg("line_transplant") = true, py::arg("max_memo_states") = 0,
+      py::arg("order_hints") = py::none(),
+      py::arg("cancellation_token") = nullptr,
+      py::arg("alpha") = 0.0, py::arg("beta") = 1.0);
+
+  m.def(
       "solve_reveal_verified_root_split_cpp",
       [](const Game &game, int attacker, int depth,
          uint64_t required_root_action, bool exhaustive_attacker_actions,

@@ -130,6 +130,11 @@ public:
     return result;
   }
 
+  NearMateResult near_mate_public(const Game &input, bool root_exact,
+                                  double alpha, double beta) {
+    return near_mate(input, root_exact, alpha, beta);
+  }
+
   void set_line_transplant(bool enabled) { line_transplant_ = enabled; }
   void set_max_memo_states(size_t limit) { max_memo_states_ = limit; }
   void set_no_take_probe(bool enabled) { no_take_probe_ = enabled; }
@@ -618,6 +623,8 @@ private:
   };
   LineTable line_proofs_;
   LineTable line_refutations_;
+  struct ProbBounds { float lo = 0.0f; float hi = 1.0f; };
+  std::unordered_map<DepthStateKey, ProbBounds, DepthStateKeyHash> prob_memo_;
   uint64_t line_hash_ = 0x9E3779B97F4A7C15ull;
   bool include_proof_dag_ = false;
   RevealProofDagBuilder proof_builder_;
@@ -1885,6 +1892,309 @@ private:
     return z ^ (z >> 31);
   }
 
+
+  // ---- Probabilistic mate ("near mate") -------------------------------
+  // Same tree as the exact proof search: attacker nodes take the maximum,
+  // defender nodes the minimum, a reveal takes the weighted mean over the
+  // equivalence classes of the tier's deck. Leaves are exact outcomes only.
+  // Star1-style windows: a returned value v is exact when alpha < v < beta,
+  // an upper bound when v <= alpha and a lower bound when v >= beta.
+
+  struct WeightedOutcome {
+    int card = -1;
+    int weight = 1;
+  };
+
+  // Reveal classes of the deck drawn by `action` (purchase/visible reserve
+  // refill or deck reservation), with class multiplicities. Empty when the
+  // action draws nothing.
+  void weighted_outcomes(const Game &game, const Action &action, int &level,
+                         int &slot, std::vector<WeightedOutcome> &outcomes) const {
+    outcomes.clear();
+    level = -1;
+    slot = -1;
+    if (action.type == RESERVE_DECK) {
+      level = action.deck_level;
+    } else {
+      level = visible_refill_level(action);
+      if (level >= 0)
+        slot = visible_refill_slot(game.board, action);
+    }
+    if (level < 0 || level >= 3 || game.board.decks[level].empty() ||
+        (action.type != RESERVE_DECK && slot < 0)) {
+      level = -1;
+      return;
+    }
+    for (uint8_t card_id : game.board.decks[level]) {
+      if (reveal_state_.is_claimed(game.board, card_id))
+        continue;
+      const Card &card = get_card(card_id);
+      bool merged = false;
+      for (WeightedOutcome &outcome : outcomes) {
+        if (csplendor::solver_internal::same_card_equivalence_tuple(
+                get_card(outcome.card), card)) {
+          ++outcome.weight;
+          merged = true;
+          break;
+        }
+      }
+      if (!merged)
+        outcomes.push_back(WeightedOutcome{static_cast<int>(card_id), 1});
+    }
+  }
+
+  static double clamp01(double value) {
+    return value < 0.0 ? 0.0 : value > 1.0 ? 1.0 : value;
+  }
+
+  // Weighted mean over the outcomes of one action (fail-soft in the window).
+  double action_probability(Game &game, const OrderedAction &ordered, DepthPath &path,
+                            int depth, double alpha, double beta,
+                            std::vector<NearMateReveal> *log) {
+    const Action action = Action::unpack(ordered.code);
+    const int current_player = game.current_player();
+    int level = -1, slot = -1;
+    std::vector<WeightedOutcome> outcomes;
+    weighted_outcomes(game, action, level, slot, outcomes);
+    if (outcomes.empty())
+      outcomes.push_back(WeightedOutcome{-1, 1});
+    double total = 0.0;
+    for (const WeightedOutcome &outcome : outcomes)
+      total += outcome.weight;
+    double acc = 0.0;       // sum of weight * value over evaluated outcomes
+    double remaining = total;
+    ScopedBranchRollback rollback(*this, game);
+    for (const WeightedOutcome &outcome : outcomes) {
+      rollback.restore();
+      rollback.mark_mutated();
+      bool applied;
+      if (outcome.card < 0)
+        applied = apply_action_tracked(game, action);
+      else if (action.type == RESERVE_DECK)
+        applied = apply_deck_reserve_outcome(game, action, outcome.card);
+      else
+        applied = apply_visible_refill_outcome(game, action, level, slot, outcome.card);
+      if (!applied)
+        throw std::logic_error("near-mate outcome failed to apply");
+      const int next_depth =
+          depth - static_cast<int>(current_player == attacker_ &&
+                                   game.current_player() != current_player);
+      const double w = outcome.weight;
+      // Window for this child so that the mean can still cross alpha/beta.
+      const double child_alpha = clamp01((alpha * total - acc - (remaining - w)) / w);
+      const double child_beta = clamp01((beta * total - acc) / w);
+      double value;
+      if (child_alpha >= child_beta) {
+        // The window is empty: any value decides the mean's side; search
+        // with the tight window to learn which side.
+        value = win_probability(game, path, next_depth, child_alpha, child_alpha + 1e-9);
+      } else {
+        value = win_probability(game, path, next_depth, child_alpha, child_beta);
+      }
+      if (log != nullptr)
+        log->push_back(NearMateReveal{outcome.card, outcome.weight, value});
+      acc += w * value;
+      remaining -= w;
+      const double upper = (acc + remaining) / total;
+      const double lower = acc / total;
+      if (upper <= alpha)
+        return upper; // fail low: true mean <= upper
+      if (lower >= beta)
+        return lower; // fail high: true mean >= lower
+    }
+    return acc / total;
+  }
+
+  double win_probability(Game &game, DepthPath &path, int depth, double alpha,
+                         double beta) {
+    check_limits();
+    ++stats_.nodes;
+    if (game.is_game_over()) {
+      ++stats_.terminal_nodes;
+      return game.winner() == attacker_ ? 1.0 : 0.0;
+    }
+    if (game.current_player() == attacker_ && depth <= 0)
+      return 0.0;
+    const DepthStateKey key{state_key(game, true), depth};
+    const auto memo_it = prob_memo_.find(key);
+    if (memo_it != prob_memo_.end()) {
+      ++stats_.memo_hits;
+      const ProbBounds bounds = memo_it->second;
+      if (bounds.lo >= bounds.hi)
+        return bounds.lo;
+      if (bounds.lo >= beta)
+        return bounds.lo;
+      if (bounds.hi <= alpha)
+        return bounds.hi;
+      alpha = std::max<double>(alpha, bounds.lo);
+      beta = std::min<double>(beta, bounds.hi);
+    }
+    if (path.contains(key)) {
+      ++stats_.terminal_nodes;
+      return 0.0; // repetition inside the horizon: no forced win counted
+    }
+    const bool attacker_node = game.current_player() == attacker_;
+    std::vector<OrderedAction> actions = proof_ordered_actions(game);
+    filter_probe_actions(attacker_node, actions);
+    apply_order_hints(key.state.board_hash(), attacker_node, actions);
+    prefer_line_move(attacker_node, actions);
+    stats_.legal_moves += actions.size();
+    if (actions.empty()) {
+      ++stats_.terminal_nodes;
+      return 0.0;
+    }
+    ScopedPathEntry<DepthPath> path_entry(path, key);
+    const double alpha0 = alpha, beta0 = beta;
+    double best = attacker_node ? 0.0 : 1.0;
+    uint64_t best_code = actions.front().code;
+    for (const OrderedAction &ordered : actions) {
+      const uint64_t line_before = line_hash_;
+      if (attacker_node)
+        line_hash_ = mix_line_hash(line_before, ordered.code);
+      double value;
+      try {
+        value = attacker_node
+                    ? action_probability(game, ordered, path, depth, std::max(alpha, best), beta, nullptr)
+                    : action_probability(game, ordered, path, depth, alpha, std::min(beta, best), nullptr);
+      } catch (...) {
+        line_hash_ = line_before;
+        throw;
+      }
+      line_hash_ = line_before;
+      if (attacker_node ? value > best : value < best) {
+        best = value;
+        best_code = ordered.code;
+      }
+      if (attacker_node ? best >= beta : best <= alpha)
+        break;
+    }
+    if (line_transplant_) {
+      if (attacker_node)
+        line_proofs_.put(line_hash_, best_code);
+      else
+        line_refutations_.put(line_hash_, best_code);
+    }
+    ProbBounds bounds;
+    if (best <= alpha0) {
+      bounds.lo = 0.0f;
+      bounds.hi = static_cast<float>(best);
+    } else if (best >= beta0) {
+      bounds.lo = static_cast<float>(best);
+      bounds.hi = 1.0f;
+    } else {
+      bounds.lo = bounds.hi = static_cast<float>(best);
+    }
+    if (max_memo_states_ > 0 && prob_memo_.size() >= max_memo_states_ &&
+        prob_memo_.find(key) == prob_memo_.end()) {
+      ++stats_.memo_flushes;
+      prob_memo_.clear();
+    }
+    auto slot = prob_memo_.find(key);
+    if (slot == prob_memo_.end()) {
+      prob_memo_.emplace(key, bounds);
+    } else {
+      slot->second.lo = std::max(slot->second.lo, bounds.lo);
+      slot->second.hi = std::min(slot->second.hi, bounds.hi);
+      if (slot->second.lo > slot->second.hi)
+        slot->second.lo = slot->second.hi = bounds.lo;
+    }
+    return best;
+  }
+
+  // Window (alpha, beta): values inside are exact; a result <= alpha is an
+  // upper bound, >= beta a lower bound. A threshold query uses
+  // (T - eps, T): "can the attacker force a win with probability >= T?"
+  // prunes like the proof search (a defender reply or a set of reveals that
+  // pushes the mean below T ends the node).
+  NearMateResult near_mate(const Game &input, bool root_exact, double alpha,
+                           double beta) {
+    max_cache_states_ = 0;
+    prob_memo_.clear();
+    alpha = clamp01(alpha);
+    beta = std::min(beta, 1.0 + 1e-9);
+    if (beta <= alpha)
+      throw std::invalid_argument("near_mate window requires alpha < beta");
+    Game game = begin_search(input);
+    NearMateResult result;
+    result.attacker = attacker_;
+    result.depth = depth_;
+    if (game.current_player() != attacker_) {
+      // A defender-to-move root is the minimum over its replies.
+      try {
+        DepthPath path(path_reserve_capacity(depth_));
+        result.value = win_probability(game, path, depth_, alpha, beta);
+        result.complete = true;
+      } catch (const SearchLimitExceeded &exc) {
+        result.unknown_reason = exc.what();
+      }
+    } else {
+      try {
+        DepthPath path(path_reserve_capacity(depth_));
+        std::vector<OrderedAction> actions = proof_ordered_actions(game);
+        filter_probe_actions(true, actions);
+        apply_order_hints(state_key(game, true).board_hash(), true, actions);
+        prefer_line_move(true, actions);
+        double best = 0.0;
+        std::vector<NearMateReveal> best_log;
+        for (const OrderedAction &ordered : actions) {
+          std::vector<NearMateReveal> log;
+          const double action_alpha = root_exact ? alpha : std::max(alpha, best);
+          const uint64_t line_before = line_hash_;
+          line_hash_ = mix_line_hash(line_before, ordered.code);
+          double value;
+          try {
+            value = action_probability(game, ordered, path, depth_, action_alpha, beta, &log);
+          } catch (...) {
+            line_hash_ = line_before;
+            throw;
+          }
+          line_hash_ = line_before;
+          NearMateRootAction entry;
+          entry.action_code = ordered.code;
+          entry.value = value;
+          if (value <= action_alpha) {
+            entry.lower = 0.0;
+            entry.upper = value;
+          } else if (value >= beta) {
+            entry.lower = value;
+            entry.upper = 1.0;
+          } else {
+            entry.lower = entry.upper = value;
+          }
+          result.root_actions.push_back(entry);
+          if (value > best || !result.has_best_action) {
+            best = value;
+            result.has_best_action = true;
+            result.best_action = ordered.code;
+            best_log = std::move(log);
+          }
+          if (best >= beta)
+            break;
+        }
+        result.value = best;
+        result.best_action_reveals = std::move(best_log);
+        result.complete = true;
+        if (line_transplant_ && result.has_best_action)
+          line_proofs_.put(line_hash_, result.best_action);
+      } catch (const SearchLimitExceeded &exc) {
+        result.unknown_reason = exc.what();
+        // Root actions evaluated so far keep their values: the best of them
+        // is still a sound lower bound.
+        for (const NearMateRootAction &entry : result.root_actions)
+          if (entry.lower > result.value) {
+            result.value = entry.lower;
+            result.best_action = entry.action_code;
+            result.has_best_action = true;
+          }
+      }
+    }
+    verify_reveal_state(game);
+    stats_.elapsed_ms = limits_.elapsed_ms();
+    result.memoized_states = prob_memo_.size();
+    result.stats = stats_;
+    return result;
+  }
+
   template <typename Candidate, typename CodeAccessor>
   void prefer_candidate_action_by(std::vector<Candidate> &actions, int depth,
                                   CodeAccessor code) const {
@@ -2544,6 +2854,11 @@ RevealVerifiedSearchResult RevealVerifiedSolver::solve_reusing_exact_cache(
       input, depth, max_nodes, time_limit_seconds,
       std::move(preferred_attacker_actions), std::move(cancellation_token),
       max_cache_states);
+}
+
+NearMateResult RevealVerifiedSolver::near_mate(const Game &input, bool root_exact,
+                                               double alpha, double beta) {
+  return impl_->near_mate_public(input, root_exact, alpha, beta);
 }
 
 void RevealVerifiedSolver::set_line_transplant(bool enabled) {

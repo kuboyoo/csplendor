@@ -76,6 +76,12 @@ public:
                        int attacker_restrict_top_k = 0);
 
   RevealVerifiedSearchResult solve(const Game &input);
+  // Probabilistic mate within `depth` attacker moves (see NearMateResult).
+  // `root_exact` evaluates every root action with the full [0, 1] window so
+  // the per-action values are comparable; otherwise later actions are only
+  // searched to beat the best so far.
+  NearMateResult near_mate(const Game &input, bool root_exact = true,
+                           double alpha = 0.0, double beta = 1.0);
   RevealVerifiedSearchResult solve_reusing_exact_cache(
       const Game &input, int depth, uint64_t max_nodes,
       double time_limit_seconds,

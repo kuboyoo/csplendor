@@ -108,6 +108,37 @@ struct RevealVerifiedProofDag {
   std::vector<RevealVerifiedProofNode> nodes;
 };
 
+// Probabilistic ("near") mate: lower bound of the probability that the
+// attacker can force a win within `depth` of its own moves, against a
+// best-defending opponent, with every deck reveal uniformly random over the
+// unseen cards of its tier. 1.0 is an exact mate.
+struct NearMateRootAction {
+  uint64_t action_code = 0;
+  double value = 0.0; // exact when lower == upper
+  double lower = 0.0;
+  double upper = 1.0;
+};
+
+struct NearMateReveal {
+  int card = -1;    // representative card of an equivalence class, -1: no reveal
+  int weight = 1;   // cards of that class in the deck
+  double value = 0.0;
+};
+
+struct NearMateResult {
+  bool complete = false; // every root action evaluated within the limits
+  int attacker = -1;
+  int depth = 0;
+  double value = 0.0; // best lower bound over the evaluated root actions
+  bool has_best_action = false;
+  uint64_t best_action = 0;
+  std::vector<NearMateRootAction> root_actions;
+  std::vector<NearMateReveal> best_action_reveals;
+  std::string unknown_reason;
+  size_t memoized_states = 0;
+  RevealVerifiedSearchStats stats;
+};
+
 struct RevealVerifiedSearchResult {
   bool proven = false;
   int attacker = -1;

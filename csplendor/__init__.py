@@ -31,6 +31,7 @@ from ._csplendor import (
     V3SearchConfig,
     V3SearchSession,
     MateOrderHints,
+    near_mate_probability_cpp,
     get_all_cards,
     v3_semantic_group_id,
     get_all_nobles,
@@ -59,6 +60,7 @@ from .mate_depth import (
     search_reveal_verified_mate_anytime,
     search_reveal_verified_mate_depths,
 )
+from .near_mate import NEAR_MATE_FORMAT, search_near_mate
 from .mate_frontier import (
     decode_mate_frontier_state,
     encode_mate_frontier_state,
@@ -82,6 +84,9 @@ __all__ = [
     "MCTSConfig", "MCTSNode", "MCTS",
     "V3SearchConfig", "V3SearchSession", "v3_semantic_group_id",
     "MateOrderHints",
+    "near_mate_probability_cpp",
+    "NEAR_MATE_FORMAT",
+    "search_near_mate",
     "ParallelTreeBackend", "ParallelSearchMode", "ParallelSearchStopReason",
     "ParallelCancellationToken", "ParallelSearchOptions",
     "ParallelSearchLedger", "ParallelSearchResult",
