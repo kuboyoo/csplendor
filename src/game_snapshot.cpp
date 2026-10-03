@@ -365,11 +365,8 @@ Game deserialize(std::string_view snapshot) {
     throw std::invalid_argument("trailing data in csplendor game snapshot");
   board.begin_editor_mutation();
 
-  Game game(0);
-  game.board = std::move(board);
-  game.simple_payment_mode = (mode_flags & 1U) != 0;
-  game.blank_refill_mode = (mode_flags & 2U) != 0;
-  return game;
+  return Game::from_state(std::move(board), (mode_flags & 1U) != 0,
+                         (mode_flags & 2U) != 0);
 }
 
 } // namespace csplendor::snapshot

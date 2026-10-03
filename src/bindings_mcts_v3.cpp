@@ -70,6 +70,7 @@ void bind_mcts_v3(py::module_ &m) {
       .def_readwrite("chance_enumeration_depth", &Config::chance_enumeration_depth)
       .def_readwrite("chance_risk_weight", &Config::chance_risk_weight)
       .def_readwrite("chance_control_variate", &Config::chance_control_variate)
+      .def_readwrite("num_threads", &Config::num_threads)
       .def_property_readonly("state_dim", &Config::state_dim);
 
   py::class_<Session>(

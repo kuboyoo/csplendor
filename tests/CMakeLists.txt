@@ -131,10 +131,14 @@ csplendor_add_native_test(state_copy_unit state_copy_unit.cpp
                           "unit;state;copy;snapshot;undo" 30)
 csplendor_add_native_test(perf_counters_unit perf_counters_unit.cpp
                           "unit;performance;instrumentation" 30)
+csplendor_add_native_test(fastpath_equivalence_unit fastpath_equivalence_unit.cpp
+                          "unit;oracle;equivalence;rng" 60)
 csplendor_add_native_test(rule_query_unit rule_query_unit.cpp
                           "unit;rules;query;validation;transition;equivalence" 90)
 csplendor_add_native_test(encoding_schema_unit encoding_schema_unit.cpp
                           "unit;encoding;schema;equivalence;golden" 90)
+csplendor_add_native_test(v3_session_parallel_unit v3_session_parallel_unit.cpp
+                          "unit;v3;parallel;determinism" 120)
 csplendor_add_native_test(v3_payment_codec_unit v3_payment_codec_unit.cpp
                           "unit;encoding;v3;oracle;equivalence" 90)
 csplendor_add_native_test(solver_components_unit solver_components_unit.cpp

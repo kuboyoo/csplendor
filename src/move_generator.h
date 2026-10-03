@@ -541,9 +541,8 @@ private:
         return sink(action);
     }
 
-    const auto next_gems =
-        csplendor::rules::gems_after_token_action(board, action);
-    const int excess = csplendor::rules::required_token_return(next_gems);
+    const int excess =
+        csplendor::rules::token_excess_after_token_action(board, action);
     if (excess <= 0) {
       if constexpr (PackedCodes)
         return sink(base_code);
@@ -551,6 +550,8 @@ private:
         return sink(action);
     }
 
+    const auto next_gems =
+        csplendor::rules::gems_after_token_action(board, action);
     if (excess <= 3 &&
         csplendor::move_generation_detail::return_pattern_table_enabled) {
       const auto &table =
@@ -590,11 +591,12 @@ private:
     if (action.type == PURCHASE)
       return std::min<uint16_t>(1, limit);
 
-    const auto next_gems =
-        csplendor::rules::gems_after_token_action(board, action);
-    const int excess = csplendor::rules::required_token_return(next_gems);
+    const int excess =
+        csplendor::rules::token_excess_after_token_action(board, action);
     if (excess <= 0)
       return std::min<uint16_t>(1, limit);
+    const auto next_gems =
+        csplendor::rules::gems_after_token_action(board, action);
     if (excess <= 3 &&
         csplendor::move_generation_detail::closed_form_return_count_enabled) {
       return csplendor::move_generation_detail::count_small_token_returns(

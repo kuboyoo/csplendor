@@ -116,8 +116,12 @@ void bind_rules(py::module_ &m) {
       .def_static(
           "deserialize_snapshot",
           [](py::bytes snapshot) {
+            char *data = nullptr;
+            Py_ssize_t size = 0;
+            if (PyBytes_AsStringAndSize(snapshot.ptr(), &data, &size) != 0)
+              throw py::error_already_set();
             return csplendor::snapshot::deserialize(
-                snapshot.cast<std::string>());
+                std::string_view(data, static_cast<size_t>(size)));
           },
           py::arg("snapshot"),
           "Restore a versioned lightweight game-state snapshot")

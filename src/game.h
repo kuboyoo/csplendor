@@ -28,6 +28,17 @@ public:
 
   explicit Game(uint64_t seed = 0) { board.init(seed); }
 
+  // Wrap an already-complete state without the seeded deal performed by
+  // Game(seed). Used by snapshot restoration, which overwrites every field.
+  static Game from_state(Board board, bool simple_payment_mode,
+                         bool blank_refill_mode) {
+    Game game(NoInit{});
+    game.board = std::move(board);
+    game.simple_payment_mode = simple_payment_mode;
+    game.blank_refill_mode = blank_refill_mode;
+    return game;
+  }
+
   // Full user-visible copy, including the action and undo journals.
   Game clone() const { return *this; }
 
