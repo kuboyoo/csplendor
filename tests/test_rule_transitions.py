@@ -191,24 +191,28 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
     ).hexdigest()
 
 
+# Digests include every RevealVerifiedSearchStats counter. The six counters
+# added on 2026-10-02 (hint_*, line_order_hits, probe_dropped_actions,
+# memo_flushes) are all 0 here; without them each payload, node counts
+# included, still hashes to its pre-change golden value.
 @pytest.mark.parametrize(
     ("fixture", "expected_digest"),
     [
         (
             "seed0_d1",
-            "14f0d044fde184c43d0aac65977e6e70024186d49b8201175397d87d990187f9",
+            "060611affa5c8b51c72b7b7f2ab0ed1e04c953f7499717a4269d6e58dcfbb44c",
         ),
         (
             "seed7_d2",
-            "69ce0311114cbd040afe929f3849a5da1634e0252316f0bbb46f0bbc63e512b8",
+            "fe20c1952534ddebe55fbf349a31083c26bbda25b76aa554c9e1dd0f3af4c752",
         ),
         (
             "purchase_dag",
-            "29bc5c0c9f0ea209c6965837eb6303935367d4771f6404626830c3258e5e1290",
+            "a79c4e195b0d6c0d08049369ef21fedf8a39950f4675be1c4237f6adc59e53ff",
         ),
         (
             "oracle_blank",
-            "3b025a800bef7ae148479e28071a5cd5183e2b0a4915df8711f30e87de451786",
+            "c880392b51d87c945d2f51c3d067addbae85dcbab7fa0acd8727a1cf3c61c63e",
         ),
     ],
 )

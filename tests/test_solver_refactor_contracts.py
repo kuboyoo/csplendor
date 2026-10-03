@@ -92,8 +92,12 @@ def test_reveal_solver_proof_dag_and_action_order_golden():
     assert [entry["action_code"] for entry in result["line"]] == [692, 37]
     assert result["proof_dag"]["complete"] is True
     assert result["proof_dag"]["validated"] is True
+    # 2026-10-02 added six RevealVerifiedSearchStats counters (hint_*,
+    # line_order_hits, probe_dropped_actions, memo_flushes; all 0 here). With
+    # them removed the payload still hashes to the pre-change golden
+    # 9732dd60583389a9220ae450619dcaecadc1defc73f6c9cfcbec128173fe2ba2.
     assert _digest_without_elapsed(result) == (
-        "9732dd60583389a9220ae450619dcaecadc1defc73f6c9cfcbec128173fe2ba2"
+        "6b2453972ede6937b7a1d7bf0b36013d5303ca004b48f32de3ae9d2e8a29717e"
     )
 
 
