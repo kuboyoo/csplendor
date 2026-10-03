@@ -34,6 +34,41 @@
  *   PASS:              1                                       [3132]
  *   Total: 3133
  */
+namespace action_encoder_detail {
+
+// count_compositions(s, pos, CARDS[card].cost) for every card, position and
+// gold sum: the number of ways to split s gold over colours pos..4 within
+// each colour's printed cost.  Precomputed because encode() ranks payments
+// on every legal-action enumeration.
+constexpr int v3_count_compositions(int s, int pos,
+                                    const std::array<uint8_t, 5> &upper) {
+  if (pos == 5)
+    return (s == 0) ? 1 : 0;
+  int count = 0;
+  const int max_v = s < static_cast<int>(upper[pos]) ? s : upper[pos];
+  for (int v = 0; v <= max_v; ++v)
+    count += v3_count_compositions(s - v, pos + 1, upper);
+  return count;
+}
+
+using V3CompositionTable =
+    std::array<std::array<std::array<uint8_t, 6>, 6>, CARD_COUNT>;
+
+constexpr V3CompositionTable make_v3_composition_table() {
+  V3CompositionTable table{};
+  for (int card = 0; card < CARD_COUNT; ++card)
+    for (int pos = 0; pos <= 5; ++pos)
+      for (int s = 0; s <= 5; ++s)
+        table[card][pos][s] = static_cast<uint8_t>(
+            v3_count_compositions(s, pos, CARDS[card].cost));
+  return table;
+}
+
+inline constexpr V3CompositionTable V3_COMPOSITIONS =
+    make_v3_composition_table();
+
+} // namespace action_encoder_detail
+
 class ActionEncoderV3 {
 public:
   using Schema = csplendor::encoding::ActionSpaceV3;
@@ -151,10 +186,12 @@ public:
     if (s < 0 || s > MAX_GOLD)
       return -1;
 
+    const auto &compositions = action_encoder_detail::V3_COMPOSITIONS[card_id];
+
     // Offset: count patterns with sum < s
     int offset = 0;
     for (int k = 0; k < s; ++k) {
-      offset += count_compositions(k, 0, cost);
+      offset += compositions[0][k];
     }
 
     // Rank within sum s (lexicographic: lower values first)
@@ -162,7 +199,7 @@ public:
     int remaining = s;
     for (int i = 0; i < 4; ++i) {
       for (int v = 0; v < static_cast<int>(gold_as[i]); ++v) {
-        rank += count_compositions(remaining - v, i + 1, cost);
+        rank += compositions[i + 1][remaining - v];
       }
       remaining -= gold_as[i];
     }
@@ -182,11 +219,13 @@ public:
     if (pattern == 0)
       return ga;
 
+    const auto &compositions = action_encoder_detail::V3_COMPOSITIONS[card_id];
+
     // Determine sum s
     int s = 0;
     int cumulative = 0;
     for (s = 0; s <= MAX_GOLD; ++s) {
-      int cnt = count_compositions(s, 0, cost);
+      int cnt = compositions[0][s];
       if (cumulative + cnt > pattern)
         break;
       cumulative += cnt;
@@ -199,7 +238,7 @@ public:
     for (int i = 0; i < 4; ++i) {
       int max_v = std::min(remaining, static_cast<int>(cost[i]));
       for (int v = 0; v <= max_v; ++v) {
-        int cnt = count_compositions(remaining - v, i + 1, cost);
+        int cnt = compositions[i + 1][remaining - v];
         if (local_rank < cnt) {
           ga[i] = static_cast<uint8_t>(v);
           remaining -= v;
