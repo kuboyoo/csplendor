@@ -560,7 +560,8 @@ void bind_solvers(py::module_ &m) {
          bool line_transplant, size_t max_memo_states,
          const std::optional<MateOrderHintsHandle> &order_hints,
          const std::shared_ptr<RevealSearchCancellationToken>
-             &cancellation_token, double alpha, double beta) {
+             &cancellation_token, double alpha, double beta,
+         uint64_t required_root_action) {
         if (attacker < 0 || attacker >= Board::NUM_PLAYERS)
           throw std::invalid_argument("attacker must be 0 or 1");
         if (depth < 0)
@@ -578,7 +579,8 @@ void bind_solvers(py::module_ &m) {
           solver.set_max_memo_states(max_memo_states);
           if (order_hints)
             solver.set_order_hints(order_hints->table, 0);
-          result = solver.near_mate(input_snapshot, root_exact, alpha, beta);
+          result = solver.near_mate(input_snapshot, root_exact, alpha, beta,
+                                    required_root_action);
         }
         py::dict stats;
         stats["nodes"] = result.stats.nodes;
@@ -629,7 +631,8 @@ void bind_solvers(py::module_ &m) {
       py::arg("line_transplant") = true, py::arg("max_memo_states") = 0,
       py::arg("order_hints") = py::none(),
       py::arg("cancellation_token") = nullptr,
-      py::arg("alpha") = 0.0, py::arg("beta") = 1.0);
+      py::arg("alpha") = 0.0, py::arg("beta") = 1.0,
+      py::arg("required_root_action") = UINT64_MAX);
 
   m.def(
       "solve_reveal_verified_root_split_cpp",

@@ -81,7 +81,8 @@ public:
   // the per-action values are comparable; otherwise later actions are only
   // searched to beat the best so far.
   NearMateResult near_mate(const Game &input, bool root_exact = true,
-                           double alpha = 0.0, double beta = 1.0);
+                           double alpha = 0.0, double beta = 1.0,
+                           uint64_t required_root_action = UINT64_MAX);
   RevealVerifiedSearchResult solve_reusing_exact_cache(
       const Game &input, int depth, uint64_t max_nodes,
       double time_limit_seconds,

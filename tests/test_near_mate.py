@@ -88,3 +88,17 @@ def test_near_mate_bounds_the_exact_sweep():
         if seen_mate and seen_refuted:
             break
     assert seen_refuted
+
+
+def test_required_root_action_evaluates_only_that_move():
+    game = _five_move_mate_fixture()
+    full = cs.near_mate_probability_cpp(game, attacker=0, depth=5, time_limit_seconds=10)
+    best = int(full["best_action"])
+    only = cs.near_mate_probability_cpp(game, attacker=0, depth=5, time_limit_seconds=10, required_root_action=best)
+    assert only["value"] == 1.0 and [int(a["action_code"]) for a in only["root_actions"]] == [best]
+    other = next(int(a.pack()) for a in game.legal_actions if int(a.pack()) != best)
+    worse = cs.near_mate_probability_cpp(game, attacker=0, depth=5, time_limit_seconds=10, required_root_action=other)
+    assert [int(a["action_code"]) for a in worse["root_actions"]] == [other]
+    assert worse["value"] <= 1.0
+    with pytest.raises(ValueError):
+        cs.near_mate_probability_cpp(game, attacker=0, depth=5, required_root_action=999_999_999)
