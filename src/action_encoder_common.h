@@ -64,52 +64,108 @@ struct ReturnCodec {
   }
 };
 
-struct TakeDifferentCodec {
-  static constexpr std::array<std::array<uint8_t, 3>, 10> COMBINATIONS = {{
-      {0, 1, 2}, {0, 1, 3}, {0, 1, 4}, {0, 2, 3}, {0, 2, 4},
-      {0, 3, 4}, {1, 2, 3}, {1, 2, 4}, {1, 3, 4}, {2, 3, 4},
-  }};
+inline constexpr std::array<std::array<uint8_t, 3>, 10>
+    TAKE_DIFFERENT_COMBINATIONS = {{
+        {0, 1, 2}, {0, 1, 3}, {0, 1, 4}, {0, 2, 3}, {0, 2, 4},
+        {0, 3, 4}, {1, 2, 3}, {1, 2, 4}, {1, 3, 4}, {2, 3, 4},
+    }};
 
-  static constexpr int find_index(const std::array<uint8_t, 5> &take) {
-    std::array<uint8_t, 3> colors = {0, 0, 0};
-    int count = 0;
-    for (int color = 0; color < 5; ++color) {
-      if (take[color] == 0)
-        continue;
-      if (take[color] != 1 || count == 3)
-        return -1;
-      colors[count++] = static_cast<uint8_t>(color);
-    }
-    if (count == 0)
+// Reference rank of a take-different action: the original search, kept as
+// the oracle from which the hot-path mask table is derived.
+constexpr int take_different_index_reference(const std::array<uint8_t, 5> &take) {
+  std::array<uint8_t, 3> colors = {0, 0, 0};
+  int count = 0;
+  for (int color = 0; color < 5; ++color) {
+    if (take[color] == 0)
+      continue;
+    if (take[color] != 1 || count == 3)
       return -1;
+    colors[count++] = static_cast<uint8_t>(color);
+  }
+  if (count == 0)
+    return -1;
 
-    if (count == 3) {
-      for (int index = 0; index < 10; ++index) {
-        if (COMBINATIONS[index] == colors)
-          return index;
-      }
-      return -1;
-    }
-
-    // When fewer than three colors remain in the bank, Splendor requires
-    // taking every remaining color.  Reuse the first ordinary three-color
-    // policy slot containing that subset.  The missing supersets are not
-    // legal in the same state, so this remains injective over legal actions
-    // and matches the legacy 48-action encoder's established mapping.
+  if (count == 3) {
     for (int index = 0; index < 10; ++index) {
-      bool contains_all = true;
-      for (int i = 0; i < count && contains_all; ++i) {
-        bool found = false;
-        for (int j = 0; j < 3; ++j)
-          found = found || COMBINATIONS[index][j] == colors[i];
-        contains_all = contains_all && found;
-      }
-      if (contains_all)
+      const auto &combination = TAKE_DIFFERENT_COMBINATIONS[index];
+      if (combination[0] == colors[0] && combination[1] == colors[1] &&
+          combination[2] == colors[2])
         return index;
     }
     return -1;
   }
+
+  // When fewer than three colors remain in the bank, Splendor requires
+  // taking every remaining color.  Reuse the first ordinary three-color
+  // policy slot containing that subset.  The missing supersets are not
+  // legal in the same state, so this remains injective over legal actions
+  // and matches the legacy 48-action encoder's established mapping.
+  for (int index = 0; index < 10; ++index) {
+    bool contains_all = true;
+    for (int i = 0; i < count && contains_all; ++i) {
+      bool found = false;
+      for (int j = 0; j < 3; ++j)
+        found = found || TAKE_DIFFERENT_COMBINATIONS[index][j] == colors[i];
+      contains_all = contains_all && found;
+    }
+    if (contains_all)
+      return index;
+  }
+  return -1;
+}
+
+constexpr std::array<int8_t, 32> make_take_different_index_by_mask() {
+  std::array<int8_t, 32> table{};
+  for (unsigned mask = 0; mask < 32; ++mask) {
+    std::array<uint8_t, 5> take = {0, 0, 0, 0, 0};
+    for (int color = 0; color < 5; ++color)
+      take[color] = static_cast<uint8_t>((mask >> color) & 1U);
+    table[mask] = static_cast<int8_t>(take_different_index_reference(take));
+  }
+  return table;
+}
+
+inline constexpr std::array<int8_t, 32> TAKE_DIFFERENT_INDEX_BY_MASK =
+    make_take_different_index_by_mask();
+
+struct TakeDifferentCodec {
+  static constexpr const std::array<std::array<uint8_t, 3>, 10>
+      &COMBINATIONS = TAKE_DIFFERENT_COMBINATIONS;
+
+  // Hot path: every legal-action enumeration encodes each take, so the
+  // colour set is mapped through a 5-bit mask table instead of a search.
+  static constexpr int find_index(const std::array<uint8_t, 5> &take) {
+    unsigned mask = 0;
+    for (int color = 0; color < 5; ++color) {
+      if (take[color] == 0)
+        continue;
+      if (take[color] != 1)
+        return -1;
+      mask |= 1U << color;
+    }
+    return TAKE_DIFFERENT_INDEX_BY_MASK[mask];
+  }
 };
+
+constexpr bool take_different_index_matches_reference() {
+  // Counts 0..2 per colour cover every control-flow path: absent colours,
+  // single tokens, invalid doubles and over-long sets.
+  std::array<uint8_t, 5> take = {0, 0, 0, 0, 0};
+  for (int code = 0; code < 243; ++code) {
+    int rest = code;
+    for (int color = 0; color < 5; ++color) {
+      take[color] = static_cast<uint8_t>(rest % 3);
+      rest /= 3;
+    }
+    if (TakeDifferentCodec::find_index(take) !=
+        take_different_index_reference(take))
+      return false;
+  }
+  return true;
+}
+
+static_assert(take_different_index_matches_reference(),
+              "mask-indexed take codec must match the reference search");
 
 inline int find_visible_slot(int8_t card_id, const Board &board) {
   const auto source = csplendor::rules::find_visible_card_source(board, card_id);

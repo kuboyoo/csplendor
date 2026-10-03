@@ -154,6 +154,33 @@ struct Node {
         [](const Edge &edge, int32_t value) { return edge.key < value; });
     return (it != edges.end() && it->key == key) ? &*it : nullptr;
   }
+  // Same result as find(key). `cursor` keeps the lower bound of the previous
+  // lookup, so a mostly ascending key sequence (legal actions are generated
+  // in near id order) resolves by a short forward scan instead of a fresh
+  // binary search; a backward step falls back to the binary search.
+  const Edge *find_from(int32_t key, size_t &cursor) const {
+    size_t index = cursor;
+    if (index > 0 && edges[index - 1].key >= key) {
+      index = static_cast<size_t>(
+          std::lower_bound(edges.begin(), edges.begin() + index, key,
+                           [](const Edge &edge, int32_t value) {
+                             return edge.key < value;
+                           }) -
+          edges.begin());
+    } else {
+      while (index < edges.size() && edges[index].key < key)
+        ++index;
+    }
+    cursor = index;
+    return (index < edges.size() && edges[index].key == key) ? &edges[index]
+                                                              : nullptr;
+  }
+  // Position of `key` in edges, or edges.size() when absent.
+  size_t position(int32_t key) const {
+    const Edge *edge = find(key);
+    return edge == nullptr ? edges.size()
+                           : static_cast<size_t>(edge - edges.data());
+  }
   Edge &insert(int32_t key, float prior) {
     auto it = std::lower_bound(
         edges.begin(), edges.end(), key,
@@ -263,7 +290,8 @@ public:
                        ? root_.shuffled_clone(static_cast<uint8_t>(observer_),
                                               rng_())
                        : root_.clone_light();
-      std::vector<int32_t> path;
+      std::vector<int32_t> &path = path_;
+      path.clear();
       path.push_back(root_index_);
       int32_t current = root_index_;
       int depth = 0;
@@ -334,15 +362,20 @@ public:
                                            : select_flat(node, legal_);
         const int32_t chosen_id = legal_[choice].id;
         const Action chosen_action = legal_[choice].action;
-        if (node.find(chosen_id) == nullptr)
-          node.insert(chosen_id, config_.unseen_action_prior);
+        // Edge positions stay valid until this node's edge list is modified;
+        // new_node() may move nodes_, but each node keeps its edges buffer.
+        size_t chosen_edge = node.position(chosen_id);
+        if (chosen_edge == node.edges.size()) {
+          Edge &inserted = node.insert(chosen_id, config_.unseen_action_prior);
+          chosen_edge = static_cast<size_t>(&inserted - node.edges.data());
+        }
         const uint8_t actor = static_cast<uint8_t>(world.current_player());
         // Reveal lookahead needs the pre-action world; clone it only when the
         // chance node below this edge is still to be enumerated.
         const bool may_enumerate =
             depth < config_.chance_enumeration_depth &&
             reveals_to_observer(chosen_action, actor) &&
-            chance_needs_enumeration(nodes_[current].find(chosen_id)->child);
+            chance_needs_enumeration(nodes_[current].edges[chosen_edge].child);
         if (may_enumerate)
           before_ = world.clone_light();
         const int32_t revealed = apply_with_reveal(world, chosen_action, actor);
@@ -350,11 +383,11 @@ public:
         const uint8_t mover = static_cast<uint8_t>(world.current_player());
         int32_t next;
         if (revealed != NO_REVEAL) {
-          int32_t chance_index = nodes_[current].find(chosen_id)->child;
+          int32_t chance_index = nodes_[current].edges[chosen_edge].child;
           if (chance_index < 0) {
             chance_index = new_node(NodeKind::Chance, actor);
             nodes_[chance_index].expanded = true;
-            nodes_[current].find(chosen_id)->child = chance_index;
+            nodes_[current].edges[chosen_edge].child = chance_index;
           }
           path.push_back(chance_index);
           if (may_enumerate) {
@@ -378,18 +411,22 @@ public:
               corrections_.emplace_back(chance_index, actor == 0 ? delta : -delta);
             }
           }
-          if (nodes_[chance_index].find(revealed) == nullptr)
-            nodes_[chance_index].insert(revealed, 0.0f);
-          next = nodes_[chance_index].find(revealed)->child;
+          size_t outcome_edge = nodes_[chance_index].position(revealed);
+          if (outcome_edge == nodes_[chance_index].edges.size()) {
+            Edge &inserted = nodes_[chance_index].insert(revealed, 0.0f);
+            outcome_edge =
+                static_cast<size_t>(&inserted - nodes_[chance_index].edges.data());
+          }
+          next = nodes_[chance_index].edges[outcome_edge].child;
           if (next < 0) {
             next = new_node(NodeKind::Decision, mover);
-            nodes_[chance_index].find(revealed)->child = next;
+            nodes_[chance_index].edges[outcome_edge].child = next;
           }
         } else {
-          next = nodes_[current].find(chosen_id)->child;
+          next = nodes_[current].edges[chosen_edge].child;
           if (next < 0) {
             next = new_node(NodeKind::Decision, mover);
-            nodes_[current].find(chosen_id)->child = next;
+            nodes_[current].edges[chosen_edge].child = next;
           }
         }
         path.push_back(next);
@@ -725,8 +762,9 @@ private:
       return 1.0;
     double weight_sum = 0.0, mean = 0.0, m2 = 0.0;
     int count = 0;
+    size_t cursor = 0;
     for (const LegalAction &entry : legal) {
-      const Edge *edge = node.find(entry.id);
+      const Edge *edge = node.find_from(entry.id, cursor);
       if (edge == nullptr || edge->child < 0)
         continue;
       const Node &child = nodes_[edge->child];
@@ -818,8 +856,9 @@ private:
   size_t select_flat(const Node &node, const std::vector<LegalAction> &legal) {
     edge_cache_.clear();
     double visited_mass = 0.0;
+    size_t cursor = 0;
     for (const LegalAction &entry : legal) {
-      const Edge *edge = node.find(entry.id);
+      const Edge *edge = node.find_from(entry.id, cursor);
       edge_cache_.push_back(edge);
       if (edge != nullptr && edge->child >= 0) {
         const Node &child = nodes_[edge->child];
@@ -854,8 +893,9 @@ private:
     edge_cache_.clear();
     group_of_.clear();
     groups_.clear();
+    size_t cursor = 0;
     for (const LegalAction &entry : legal) {
-      const Edge *edge = node.find(entry.id);
+      const Edge *edge = node.find_from(entry.id, cursor);
       edge_cache_.push_back(edge);
       const int group = semantic_group_id(entry.id);
       size_t position = groups_.size();
@@ -1363,6 +1403,7 @@ private:
   std::vector<std::pair<int32_t, float>> corrections_;
   std::vector<std::pair<int32_t, ChancePending>> chance_pending_;
   std::vector<const Edge *> edge_cache_;
+  std::vector<int32_t> path_; // descent path scratch, reused per simulation
   std::vector<size_t> group_of_;
   struct GroupStat {
     int group;
