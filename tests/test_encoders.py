@@ -86,3 +86,43 @@ def test_action_encoder_v3_card_payment_tables_are_self_consistent():
         total += stored_count
 
     assert total == ActionEncoderV3.TOTAL_PURCHASE
+
+
+def test_v3_legal_action_ids_match_per_action_encoding():
+    import random
+
+    import numpy as np
+
+    import csplendor as cs
+
+    seen_waiting_noble = seen_many_actions = False
+    for seed in range(40):
+        rng = random.Random(seed)
+        game = cs.Game(seed=seed)
+        for _ in range(120):
+            if game.is_game_over():
+                break
+            actions = game.legal_actions
+            expected = [cs.ActionEncoderV3.encode(action, game) for action in actions]
+            ids = cs.ActionEncoderV3.legal_action_ids(game)
+            assert isinstance(ids, np.ndarray) and ids.dtype == np.int32
+            assert ids.tolist() == expected
+            seen_waiting_noble |= bool(game.board.waiting_noble)
+            seen_many_actions |= len(expected) > 30
+            game.apply(actions[rng.randrange(len(actions))], False)
+    assert seen_many_actions
+    assert cs.ActionEncoderV3.legal_action_ids(cs.Game(seed=1)).tolist() == [
+        cs.ActionEncoderV3.encode(action, cs.Game(seed=1))
+        for action in cs.Game(seed=1).legal_actions
+    ]
+
+
+def test_v3_legal_action_ids_cover_the_forced_pass():
+    import csplendor as cs
+    from tests.test_forced_pass import _forced_pass_game
+
+    game = _forced_pass_game()
+    assert game.requires_forced_pass
+    expected = [cs.ActionEncoderV3.encode(action, game) for action in game.legal_actions]
+    assert expected == [cs.ActionEncoderV3.OFFSET_PASS]
+    assert cs.ActionEncoderV3.legal_action_ids(game).tolist() == expected

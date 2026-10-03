@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <vector>
 
 /**
  * ActionEncoderV3 - ID-based action space encoder (3133 actions)
@@ -498,6 +499,19 @@ public:
       pass.type = PASS;
       sink(OFFSET_PASS, pass);
     }
+  }
+
+  // encode(action, game) for every entry of game.legal_actions(), in that
+  // order, from a single native enumeration (-1 where encode() would fail).
+  static std::vector<int32_t> legal_action_ids(const Game &game) {
+    std::vector<int32_t> ids;
+    auto sink = [&ids, &game](const Action &action) {
+      ids.push_back(encode(action, game));
+      return true;
+    };
+    MoveGenerator::consume_all_capped(game.board, game.simple_payment_mode,
+                                      sink);
+    return ids;
   }
 
   static Action decode_and_match(int action_id, const Game &game) {

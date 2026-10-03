@@ -236,6 +236,20 @@ void bind_encoding(py::module_ &m) {
           "schema_sections",
           []() { return action_schema_sections<ActionEncoderV3::Schema>(); })
       .def_static(
+          "legal_action_ids",
+          [](const Game &game) {
+            const std::vector<int32_t> ids =
+                ActionEncoderV3::legal_action_ids(game);
+            py::array_t<int32_t> result(static_cast<py::ssize_t>(ids.size()));
+            if (!ids.empty())
+              std::memcpy(result.mutable_data(), ids.data(),
+                          ids.size() * sizeof(int32_t));
+            return result;
+          },
+          py::arg("game"),
+          "V3 ids of game.legal_actions in order, as an int32 array; equal to "
+          "[ActionEncoderV3.encode(a, game) for a in game.legal_actions]")
+      .def_static(
           "encode",
           [](const Action &action, const Game &game) {
             return ActionEncoderV3::encode(action, game);
