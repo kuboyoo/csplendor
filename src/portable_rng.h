@@ -54,7 +54,77 @@ void portable_shuffle(RandomIt first, RandomIt last, PortableRng &rng) {
 // is observable through deck order, snapshots, and seeded replay fixtures.
 // This downscaling and paired shuffle preserve that sequence without depending
 // on the host standard library, so libc++ and MSVC produce the same layout.
-inline uint32_t portable_mt19937_bounded(std::mt19937 &rng, uint32_t bound) {
+// Bit-exact std::mt19937 whose seeding and twisting are performed lazily.
+// A seeded std::mt19937 initialises all 624 state words and twists the whole
+// block before its first output, although a deck shuffle consumes only a few
+// dozen values.  Output k is a function of words k, k+1 and k+397 of the
+// in-place twisted state, so the generator initialises seed words only up to
+// the furthest word the next output reads and twists one word per output.
+// The produced sequence is identical to std::mt19937 for every seed and
+// output position (verified against the standard engine in the unit tests).
+class LazyMt19937 {
+public:
+  using result_type = uint32_t;
+
+  explicit LazyMt19937(uint32_t seed) noexcept {
+    state_[0] = seed;
+    seeded_ = 1;
+  }
+
+  static constexpr result_type min() noexcept { return 0; }
+  static constexpr result_type max() noexcept { return 0xffffffffU; }
+
+  result_type operator()() noexcept {
+    const std::size_t index = index_;
+    const std::size_t next = index + 1 == kStateSize ? 0 : index + 1;
+    const std::size_t shifted = index + kShift >= kStateSize
+                                    ? index + kShift - kStateSize
+                                    : index + kShift;
+    // Before the first full block completes, output k reads seed word k+397
+    // (k < 227) or, once indices wrap, already-twisted words plus the tail of
+    // the seed block.  Initialise exactly the prefix that can be read.
+    const std::size_t needed =
+        index < kStateSize - kShift ? index + kShift : kStateSize - 1;
+    if (seeded_ <= needed)
+      seed_through(needed);
+
+    const uint32_t mixed =
+        (state_[index] & kUpperMask) | (state_[next] & kLowerMask);
+    uint32_t value =
+        state_[shifted] ^ (mixed >> 1) ^ ((mixed & 1U) ? kMatrix : 0U);
+    state_[index] = value;
+    index_ = next;
+
+    value ^= value >> 11;
+    value ^= (value << 7) & 0x9d2c5680U;
+    value ^= (value << 15) & 0xefc60000U;
+    value ^= value >> 18;
+    return value;
+  }
+
+private:
+  static constexpr std::size_t kStateSize = 624;
+  static constexpr std::size_t kShift = 397;
+  static constexpr uint32_t kMatrix = 0x9908b0dfU;
+  static constexpr uint32_t kUpperMask = 0x80000000U;
+  static constexpr uint32_t kLowerMask = 0x7fffffffU;
+
+  void seed_through(std::size_t last) noexcept {
+    for (std::size_t i = seeded_; i <= last; ++i) {
+      const uint32_t previous = state_[i - 1];
+      state_[i] = 1812433253U * (previous ^ (previous >> 30)) +
+                  static_cast<uint32_t>(i);
+    }
+    seeded_ = last + 1;
+  }
+
+  uint32_t state_[kStateSize];
+  std::size_t seeded_ = 0;
+  std::size_t index_ = 0;
+};
+
+template <typename Mt19937>
+inline uint32_t portable_mt19937_bounded(Mt19937 &rng, uint32_t bound) {
   if (bound == 0)
     throw std::invalid_argument("portable mt19937 bound must be positive");
 
@@ -70,9 +140,8 @@ inline uint32_t portable_mt19937_bounded(std::mt19937 &rng, uint32_t bound) {
   return static_cast<uint32_t>(product >> 32);
 }
 
-template <typename RandomIt>
-void portable_mt19937_shuffle(RandomIt first, RandomIt last,
-                              std::mt19937 &rng) {
+template <typename RandomIt, typename Mt19937>
+void portable_mt19937_shuffle(RandomIt first, RandomIt last, Mt19937 &rng) {
   const auto distance = last - first;
   if (distance <= 1)
     return;

@@ -91,6 +91,24 @@ gems_after_token_action(const Board &board, const Action &action) noexcept {
   return result;
 }
 
+// Scalar equivalent of required_token_return(gems_after_token_action(...)).
+// Generators call this once per base action; avoiding the byte-array copy
+// keeps the common no-return case free of narrow-store/wide-load stalls.
+inline int token_excess_after_token_action(const Board &board,
+                                           const Action &action) noexcept {
+  const PlayerState &player = board.players[board.current_player];
+  int total = token_total(player.gems);
+  if (action.type == TAKE_DIFFERENT || action.type == TAKE_SAME) {
+    for (int color = 0; color < 5; ++color)
+      total += static_cast<uint8_t>(player.gems[color] + action.take[color]) -
+               player.gems[color];
+  } else if (action.type == RESERVE_VISIBLE || action.type == RESERVE_DECK) {
+    if (board.bank[GOLD] > 0)
+      total += static_cast<uint8_t>(player.gems[GOLD] + 1) - player.gems[GOLD];
+  }
+  return total - Board::MAX_TOKENS;
+}
+
 inline bool
 validate_purchase_payment(const PlayerState &player, const Card &card,
                           const std::array<uint8_t, 5> &gold_as) noexcept {
