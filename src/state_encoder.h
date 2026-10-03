@@ -27,6 +27,18 @@ static constexpr size_t PUBLIC_CARD_FEATURE_SIZE =
  * C++ implementation of StateFeaturizer for encoding game state.
  * Supports observer-aware encoding to hide opponent's hidden reserved cards.
  */
+namespace state_encoder_detail {
+constexpr bool card_costs_fit_packed_sum() {
+  for (const Card &card : CARDS)
+    for (uint8_t cost : card.cost)
+      if (cost > 15)
+        return false;
+  return true;
+}
+static_assert(card_costs_fit_packed_sum(),
+              "packed_positive_sum assumes per-colour card costs below 16");
+} // namespace state_encoder_detail
+
 class StateEncoder {
 public:
   using Schema = csplendor::encoding::StateFeatureV1;
@@ -192,8 +204,8 @@ public:
 
     for (int level_index = 0; level_index < 3; ++level_index) {
       const auto &deck = game.board.decks[level_index];
-      const auto pool =
-          game.board.observable_card_pool(observer, level_index + 1);
+      SortedCardPool pool;
+      sorted_observable_card_pool(game.board, observer, level_index + 1, pool);
       const size_t pool_size = pool.size();
       const size_t hidden_count = pool_size - deck.size();
 
@@ -234,19 +246,23 @@ public:
         float distance_sum = 0.0f;
         float efficiency_sum = 0.0f;
 
+        // Pack from the arrays (not the cached packed fields) so editor
+        // states with unsynchronised caches keep their exact semantics.
+        const uint64_t packed_bonuses =
+            cli::ResourceBundle::pack(target_player.bonuses);
+        const uint64_t packed_gems = cli::ResourceBundle::pack(
+            {target_player.gems[0], target_player.gems[1],
+             target_player.gems[2], target_player.gems[3],
+             target_player.gems[4]});
         for (size_t index = 0; index < pool_size; ++index) {
           const Card &card = get_card(pool[index]);
-          int colored_shortfall = 0;
-          int effective_cost = 0;
-          for (int color = 0; color < 5; ++color) {
-            const int discounted =
-                std::max(0, static_cast<int>(card.cost[color]) -
-                                static_cast<int>(target_player.bonuses[color]));
-            effective_cost += discounted;
-            colored_shortfall +=
-                std::max(0, discounted -
-                                static_cast<int>(target_player.gems[color]));
-          }
+          // sum(max(0, cost - bonus)) and, because gems are non-negative,
+          // sum(max(0, max(0, cost - bonus) - gems)) == sum(max(0, cost -
+          // bonus - gems)).
+          const int effective_cost =
+              packed_positive_sum(card.packed_cost, packed_bonuses, 0);
+          const int colored_shortfall = packed_positive_sum(
+              card.packed_cost, packed_bonuses, packed_gems);
           const int distance =
               std::max(0, colored_shortfall -
                               static_cast<int>(target_player.gems[GOLD]));
@@ -286,7 +302,88 @@ public:
     return features;
   }
 
+  using SortedCardPool = FixedStack<uint8_t, Board::MAX_DECK_SIZE +
+                                                 Board::MAX_RESERVED>;
+
+  // Same multiset and ascending order as Board::observable_card_pool(), built
+  // without a heap allocation or comparison sort.  Valid card IDs are unique,
+  // so a two-word bitset enumerates them in sorted order; editor states with
+  // duplicate or out-of-range IDs keep the original sort-based path.
+  static void sorted_observable_card_pool(const Board &board, uint8_t observer,
+                                          int level, SortedCardPool &pool) {
+    const auto &deck = board.decks[level - 1];
+    const PlayerState &opponent = board.players[1 - observer];
+    uint64_t bits[2] = {0, 0};
+    size_t total = 0;
+    bool canonical = deck.size() <= Board::MAX_DECK_SIZE;
+    auto add = [&bits, &total, &canonical](int card_id) {
+      ++total;
+      if (card_id < 0 || card_id >= 128) {
+        canonical = false;
+        return;
+      }
+      const uint64_t bit = uint64_t{1} << (card_id & 63);
+      uint64_t &word = bits[card_id >> 6];
+      if (word & bit)
+        canonical = false;
+      word |= bit;
+    };
+    for (uint8_t card_id : deck)
+      add(card_id);
+    for (int slot = 0; slot < Board::MAX_RESERVED; ++slot) {
+      const int card_id = opponent.reserved[slot];
+      if (opponent.reserved_is_hidden[slot] && is_valid_card_id(card_id) &&
+          get_card(card_id).level == level)
+        add(card_id);
+    }
+
+    pool.clear();
+    if (!canonical || total > pool.capacity()) {
+      const auto sorted = board.observable_card_pool(observer, level);
+      if (sorted.size() > pool.capacity())
+        throw std::logic_error("observable card pool exceeds capacity");
+      for (uint8_t card_id : sorted)
+        pool.push_back_unchecked(card_id);
+      return;
+    }
+    for (int word = 0; word < 2; ++word) {
+      uint64_t remaining = bits[word];
+      while (remaining != 0) {
+        const int bit = csplendor_ctz64(remaining);
+        pool.push_back_unchecked(static_cast<uint8_t>(word * 64 + bit));
+        remaining &= remaining - 1;
+      }
+    }
+  }
+
 private:
+  // Sum over the five 12-bit fields of max(0, cost - subtract_a -
+  // subtract_b).  Subtrahends are at most 2 * 255, so the 0x800 bias keeps
+  // each field from borrowing into its neighbour; a positive difference is
+  // bounded by the card cost (< 16), so the multiply-fold cannot carry.
+  static int packed_positive_sum(uint64_t packed_cost, uint64_t subtract_a,
+                                 uint64_t subtract_b) noexcept {
+    using cli::ResourceBundle;
+    const uint64_t biased =
+        (packed_cost + ResourceBundle::BIT_11) - subtract_a - subtract_b;
+    const uint64_t positive = (biased & ResourceBundle::BIT_11) >> 11;
+    const uint64_t values = biased & (positive * 0x7FFULL);
+    return static_cast<int>(((values * 0x0001001001001001ULL) >> 48) & 0xFFF);
+  }
+
+  static int csplendor_ctz64(uint64_t value) noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+    return __builtin_ctzll(value);
+#else
+    int index = 0;
+    while ((value & 1U) == 0) {
+      value >>= 1;
+      ++index;
+    }
+    return index;
+#endif
+  }
+
   static float probability_at_least_one(size_t population, size_t successes,
                                         int draws) {
     if (population == 0 || successes == 0 || draws <= 0)
