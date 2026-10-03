@@ -37,10 +37,13 @@
 #include "state_encoder.h"
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
+#include <exception>
 #include <cstdint>
 #include <random>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -91,6 +94,10 @@ struct Config {
   // v - v0(reveal) + mean(v0) above the node, removing the variance of which
   // reveal the sampled world happened to produce.
   bool chance_control_variate = false;
+  // Worker threads used by Session::collect/apply. Games are independent, so
+  // each game's leaves are produced by one thread and concatenated in slot
+  // order: rows, RNG streams and trees are identical for every thread count.
+  int num_threads = 1;
 
   int state_dim() const {
     return TOTAL_FEATURES +
@@ -229,6 +236,20 @@ struct Stats {
   uint64_t rollout_games = 0;
   uint64_t chance_enumerations = 0;
   uint64_t chance_rows = 0;
+
+  Stats &operator+=(const Stats &other) {
+    simulations += other.simulations;
+    leaves += other.leaves;
+    terminals += other.terminals;
+    depth_limits += other.depth_limits;
+    collisions += other.collisions;
+    nodes += other.nodes;
+    rollout_rows += other.rollout_rows;
+    rollout_games += other.rollout_games;
+    chance_enumerations += other.chance_enumerations;
+    chance_rows += other.chance_rows;
+    return *this;
+  }
 };
 
 class GameSearch {
@@ -325,7 +346,7 @@ public:
             ++nodes_[index].virtual_visits;
           node.pending = true;
           ++pending_count_;
-          PendingLeaf leaf{slot_, current, path, generation_};
+          PendingLeaf leaf{slot_, current, path, generation_, false, -1, {}};
           leaf.corrections = corrections_;
           pending.push_back(std::move(leaf));
           ++produced;
@@ -1111,7 +1132,7 @@ private:
       encode_leaf(world, batch);
       batch.slots.push_back(slot_);
       child.pending = true;
-      PendingLeaf leaf{slot_, edge->child, {}, generation_};
+      PendingLeaf leaf{slot_, edge->child, {}, generation_, false, -1, {}};
       leaf.chance = chance_index;
       pending.push_back(std::move(leaf));
       ++record.outstanding;
@@ -1422,6 +1443,8 @@ public:
       throw std::invalid_argument("simulations and leaf batch must be positive");
     if (config.max_depth < 1)
       throw std::invalid_argument("max_depth must be positive");
+    if (config.num_threads < 1)
+      throw std::invalid_argument("num_threads must be positive");
   }
 
   const Config &config() const { return config_; }
@@ -1488,9 +1511,13 @@ public:
     Batch batch;
     batch.state_dim = config_.state_dim();
     batch.offsets.push_back(0);
-    for (auto &game : games_)
-      if (!game.done())
-        game.collect(config_.leaf_batch_size, batch, pending_, stats_);
+    if (worker_count(games_.size()) <= 1) {
+      for (auto &game : games_)
+        if (!game.done())
+          game.collect(config_.leaf_batch_size, batch, pending_, stats_);
+    } else {
+      collect_parallel(batch);
+    }
     stats_.nodes = 0;
     for (const auto &game : games_)
       stats_.nodes += game.node_count();
@@ -1503,6 +1530,9 @@ public:
              const float *priors, const float *values) {
     if (rows != pending_.size())
       throw std::invalid_argument("evaluation rows do not match pending leaves");
+    if (worker_count(games_.size()) > 1 &&
+        apply_parallel(legal_ids, offsets, rows, priors, values))
+      return;
     for (size_t row = 0; row < rows; ++row) {
       const PendingLeaf &leaf = pending_[row];
       const size_t start = static_cast<size_t>(offsets[row]);
@@ -1523,6 +1553,149 @@ private:
   void check_slot(int slot) const {
     if (slot < 0 || static_cast<size_t>(slot) >= games_.size())
       throw std::out_of_range("game slot out of range");
+  }
+
+  size_t worker_count(size_t tasks) const {
+    return std::min(static_cast<size_t>(config_.num_threads), tasks);
+  }
+
+  // Runs task(i) for i in [0, tasks) on worker_count(tasks) threads (the
+  // caller is one of them). Each task index runs exactly once; the exception
+  // of the lowest failing index is rethrown after every worker has joined.
+  template <typename Task> void run_tasks(size_t tasks, Task &&task) {
+    std::vector<std::exception_ptr> errors(tasks);
+    std::atomic<size_t> next{0};
+    auto worker = [&]() {
+      for (;;) {
+        const size_t index = next.fetch_add(1, std::memory_order_relaxed);
+        if (index >= tasks)
+          return;
+        try {
+          task(index);
+        } catch (...) {
+          errors[index] = std::current_exception();
+        }
+      }
+    };
+    std::vector<std::thread> threads;
+    const size_t extra = worker_count(tasks) - 1;
+    threads.reserve(extra);
+    try {
+      for (size_t index = 0; index < extra; ++index)
+        threads.emplace_back(worker);
+    } catch (...) {
+      // Could not start every helper: finish the work on the threads we have.
+    }
+    worker();
+    for (std::thread &thread : threads)
+      thread.join();
+    for (const std::exception_ptr &error : errors)
+      if (error)
+        std::rethrow_exception(error);
+  }
+
+  // Each game appends to its own buffers; offsets inside a part are relative
+  // to that part's legal ids and are rebased while concatenating in slot
+  // order, which reproduces the sequential batch exactly.
+  void collect_parallel(Batch &batch) {
+    struct Part {
+      Batch batch;
+      std::vector<PendingLeaf> pending;
+      Stats stats;
+    };
+    std::vector<Part> parts(games_.size());
+    std::exception_ptr failure;
+    try {
+      run_tasks(games_.size(), [this, &parts](size_t index) {
+        if (games_[index].done())
+          return;
+        Part &part = parts[index];
+        part.batch.offsets.push_back(0);
+        games_[index].collect(config_.leaf_batch_size, part.batch,
+                              part.pending, part.stats);
+      });
+    } catch (...) {
+      // Keep the leaves of every game that succeeded, as the sequential loop
+      // keeps those collected before a failure, then report the error.
+      failure = std::current_exception();
+    }
+    size_t feature_count = batch.features.size();
+    size_t legal_count = batch.legal_ids.size();
+    size_t row_count = batch.slots.size();
+    for (const Part &part : parts) {
+      feature_count += part.batch.features.size();
+      legal_count += part.batch.legal_ids.size();
+      row_count += part.batch.slots.size();
+    }
+    batch.features.reserve(feature_count);
+    batch.legal_ids.reserve(legal_count);
+    batch.slots.reserve(row_count);
+    batch.offsets.reserve(row_count + 1);
+    pending_.reserve(pending_.size() + row_count);
+    for (Part &part : parts) {
+      const int32_t base = static_cast<int32_t>(batch.legal_ids.size());
+      batch.features.insert(batch.features.end(), part.batch.features.begin(),
+                            part.batch.features.end());
+      batch.legal_ids.insert(batch.legal_ids.end(), part.batch.legal_ids.begin(),
+                             part.batch.legal_ids.end());
+      for (size_t row = 1; row < part.batch.offsets.size(); ++row)
+        batch.offsets.push_back(base + part.batch.offsets[row]);
+      batch.slots.insert(batch.slots.end(), part.batch.slots.begin(),
+                         part.batch.slots.end());
+      for (PendingLeaf &leaf : part.pending)
+        pending_.push_back(std::move(leaf));
+      stats_ += part.stats;
+    }
+    if (failure)
+      std::rethrow_exception(failure);
+  }
+
+  // Rows of one game are contiguous (collect concatenates per slot) and are
+  // applied in row order by a single thread, so every tree sees the same
+  // update sequence as the sequential loop.
+  // Returns false, without applying anything, when a game's rows are not
+  // contiguous; the caller then uses the sequential loop.
+  bool apply_parallel(const int32_t *legal_ids, const int32_t *offsets,
+                      size_t rows, const float *priors, const float *values) {
+    std::vector<std::pair<size_t, size_t>> segments; // [begin, end) rows
+    std::vector<bool> seen(games_.size(), false);
+    for (size_t row = 0; row < rows;) {
+      const int slot = pending_[row].slot;
+      if (slot < 0 || static_cast<size_t>(slot) >= games_.size() || seen[slot])
+        return false;
+      seen[slot] = true;
+      size_t end = row + 1;
+      while (end < rows && pending_[end].slot == slot)
+        ++end;
+      segments.emplace_back(row, end);
+      row = end;
+    }
+    std::vector<uint64_t> simulations(segments.size(), 0);
+    std::exception_ptr failure;
+    try {
+      run_tasks(segments.size(), [&](size_t index) {
+        for (size_t row = segments[index].first; row < segments[index].second;
+             ++row) {
+          const PendingLeaf &leaf = pending_[row];
+          const size_t start = static_cast<size_t>(offsets[row]);
+          const size_t count = static_cast<size_t>(offsets[row + 1]) - start;
+          if (leaf.generation == ~0u)
+            continue; // belonged to a tree that was reset
+          games_[leaf.slot].apply(leaf, legal_ids + start, count,
+                                  priors + start, values[row]);
+          if (leaf.chance < 0)
+            ++simulations[index];
+        }
+      });
+    } catch (...) {
+      failure = std::current_exception();
+    }
+    for (uint64_t count : simulations)
+      stats_.simulations += count;
+    if (failure)
+      std::rethrow_exception(failure); // pending_ kept, as in the sequential loop
+    pending_.clear();
+    return true;
   }
 
   Config config_;
