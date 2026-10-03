@@ -2,6 +2,7 @@
 // straightforward implementations they replace.
 #include "game.h"
 #include "portable_rng.h"
+#include "action_encoder_v3.h"
 #include "rule_query.h"
 #include "state_encoder.h"
 
@@ -291,9 +292,34 @@ void public_card_statistics_match_reference() {
   }
 }
 
+// Exhaustive runtime checks of the codec tables (kept out of constant
+// evaluation to respect compiler step limits).
+void codec_tables_match_reference() {
+  using action_encoder_detail::ReturnCodec;
+  std::array<uint8_t, 6> ret = {0, 0, 0, 0, 0, 0};
+  for (int code = 0; code < 15625; ++code) {
+    int rest = code;
+    for (int color = 0; color < 6; ++color) {
+      ret[color] = static_cast<uint8_t>(rest % 5);
+      rest /= 5;
+    }
+    check(ReturnCodec::encode(ret) == ReturnCodec::encode_reference(ret),
+          "return codec table");
+  }
+  ret = {255, 0, 0, 0, 0, 0};
+  check(ReturnCodec::encode(ret) == -1, "return codec overflow");
+  for (int card = 0; card < CARD_COUNT; ++card)
+    for (int pos = 0; pos <= 5; ++pos)
+      for (int sum = 0; sum <= 5; ++sum)
+        check(action_encoder_detail::V3_COMPOSITIONS[card][pos][sum] ==
+                  ActionEncoderV3::count_compositions(sum, pos, CARDS[card].cost),
+              "v3 composition table");
+}
+
 } // namespace
 
 int main() {
+  codec_tables_match_reference();
   public_card_statistics_match_reference();
   sorted_card_pool_matches_observable_pool();
   lazy_mt19937_matches_standard_engine();

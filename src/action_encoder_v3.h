@@ -40,28 +40,27 @@ namespace action_encoder_detail {
 // count_compositions(s, pos, CARDS[card].cost) for every card, position and
 // gold sum: the number of ways to split s gold over colours pos..4 within
 // each colour's printed cost.  Precomputed because encode() ranks payments
-// on every legal-action enumeration.
-constexpr int v3_count_compositions(int s, int pos,
-                                    const std::array<uint8_t, 5> &upper) {
-  if (pos == 5)
-    return (s == 0) ? 1 : 0;
-  int count = 0;
-  const int max_v = s < static_cast<int>(upper[pos]) ? s : upper[pos];
-  for (int v = 0; v <= max_v; ++v)
-    count += v3_count_compositions(s - v, pos + 1, upper);
-  return count;
-}
-
+// on every legal-action enumeration.  Built by the suffix recurrence
+// C[pos][s] = sum_{v <= min(s, cost[pos])} C[pos + 1][s - v], which equals the
+// recursive count (checked exhaustively in the native unit tests).
 using V3CompositionTable =
     std::array<std::array<std::array<uint8_t, 6>, 6>, CARD_COUNT>;
 
 constexpr V3CompositionTable make_v3_composition_table() {
   V3CompositionTable table{};
-  for (int card = 0; card < CARD_COUNT; ++card)
-    for (int pos = 0; pos <= 5; ++pos)
-      for (int s = 0; s <= 5; ++s)
-        table[card][pos][s] = static_cast<uint8_t>(
-            v3_count_compositions(s, pos, CARDS[card].cost));
+  for (int card = 0; card < CARD_COUNT; ++card) {
+    auto &counts = table[card];
+    counts[5][0] = 1;
+    for (int pos = 4; pos >= 0; --pos) {
+      const int cost = CARDS[card].cost[pos];
+      for (int s = 0; s <= 5; ++s) {
+        int total = 0;
+        for (int v = 0; v <= s && v <= cost; ++v)
+          total += counts[pos + 1][s - v];
+        counts[pos][s] = static_cast<uint8_t>(total);
+      }
+    }
+  }
   return table;
 }
 

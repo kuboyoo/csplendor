@@ -68,14 +68,22 @@ struct ReturnCodec {
 };
 
 // Rank of every return vector whose six counts are each at most 3, keyed by
-// two bits per colour.  Larger counts always exceed the three-token limit.
+// two bits per colour; -1 for vectors above the three-token limit (larger
+// counts always exceed it).  The 84 valid vectors are exactly decode(0..83)
+// and encode_reference(decode(p)) == p (static_assert below), so filling the
+// table from decode() reproduces encode_reference() while keeping the
+// constant evaluation far below compiler step limits.  The exhaustive
+// comparison with encode_reference() lives in the native unit tests.
 constexpr std::array<int8_t, 4096> make_return_pattern_by_key() {
   std::array<int8_t, 4096> table{};
-  for (unsigned key = 0; key < 4096; ++key) {
-    std::array<uint8_t, 6> ret = {0, 0, 0, 0, 0, 0};
+  for (unsigned key = 0; key < 4096; ++key)
+    table[key] = -1;
+  for (int pattern = 0; pattern < 84; ++pattern) {
+    const std::array<uint8_t, 6> ret = ReturnCodec::decode(pattern);
+    unsigned key = 0;
     for (int color = 0; color < 6; ++color)
-      ret[color] = static_cast<uint8_t>((key >> (2 * color)) & 3U);
-    table[key] = static_cast<int8_t>(ReturnCodec::encode_reference(ret));
+      key |= static_cast<unsigned>(ret[color]) << (2 * color);
+    table[key] = static_cast<int8_t>(pattern);
   }
   return table;
 }
@@ -93,23 +101,17 @@ constexpr int ReturnCodec::encode(const std::array<uint8_t, 6> &ret) {
   return RETURN_PATTERN_BY_KEY[key];
 }
 
-constexpr bool return_codec_matches_reference() {
-  // Counts 0..4 per colour reach both the table and the over-limit branch.
-  std::array<uint8_t, 6> ret = {0, 0, 0, 0, 0, 0};
-  for (int code = 0; code < 15625; ++code) {
-    int rest = code;
-    for (int color = 0; color < 6; ++color) {
-      ret[color] = static_cast<uint8_t>(rest % 5);
-      rest /= 5;
-    }
-    if (ReturnCodec::encode(ret) != ReturnCodec::encode_reference(ret))
+constexpr bool return_codec_reference_round_trips() {
+  for (int pattern = 0; pattern < 84; ++pattern) {
+    if (ReturnCodec::encode_reference(ReturnCodec::decode(pattern)) != pattern)
       return false;
   }
   return true;
 }
 
-static_assert(return_codec_matches_reference(),
-              "table-driven return codec must match the reference ranking");
+static_assert(return_codec_reference_round_trips(),
+              "the return table is derived from decode(); it must invert the "
+              "reference ranking");
 
 inline constexpr std::array<std::array<uint8_t, 3>, 10>
     TAKE_DIFFERENT_COMBINATIONS = {{

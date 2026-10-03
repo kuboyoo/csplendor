@@ -366,7 +366,10 @@ dlsplendor の実際の呼び出し方（`../dlsplendor` を grep で確認）:
 - `v3_session_parallel_unit` を ThreadSanitizer 付きで実行し、データ競合はなかった。
 - Python テスト 668件がすべて合格した（`-W error`、スキップ0件。usi リポジトリと `generated/` を参照する2件も含む）。
 - `python -m py_compile csplendor/*.py` が通った。
-- コーデックの表はすべて、旧関数から constexpr で生成している。全入力での一致は `static_assert` で保証した。
+- コーデックの表は constexpr で生成している。Clang/MSVC の定数評価ステップ上限に収まるよう、生成は軽い方法（`decode` からの逆引き、DP）に限った。旧関数との全入力比較は、実行時のネイティブテストで行う。
+- CI と同じ条件でも確認した。
+  - GCC・Clang ともに `-Wall -Wextra -Wpedantic -Werror` で binding をビルドできた。
+  - Clang＋ASan/UBSan、Clang＋TSan でネイティブテスト46件が全件合格した。
 
 ### 9.4 採用しなかったもの（実測・仕様確認の結果）
 
