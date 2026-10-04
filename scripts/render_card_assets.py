@@ -9,7 +9,7 @@ The data comes from the engine (``csplendor.get_all_cards`` /
 
 Outputs:
     assets/cards/card_XX.svg       one development card per file
-    assets/cards/level{1,2,3}.svg  every card of a level, sorted by bonus colour
+    assets/cards/level{1,2,3}.svg  every card of a level, one row per bonus colour
     assets/nobles/noble_XX.svg     one noble tile per file
     assets/nobles/nobles.svg       all noble tiles
 """
@@ -346,16 +346,18 @@ def svg_document(width: int, height: int, title: str, body: str) -> str:
     )
 
 
-def sheet(items: Sequence, columns: int, item_w: int, item_h: int,
+def sheet(rows: Sequence[Sequence], item_w: int, item_h: int,
           draw: Callable[[object, str], str], title: str, prefix: str) -> str:
-    rows = (len(items) + columns - 1) // columns
+    """Lay out items row by row (each inner sequence is one row)."""
+    columns = max(len(row) for row in rows)
     width = columns * item_w + (columns - 1) * GAP
-    height = rows * item_h + (rows - 1) * GAP
+    height = len(rows) * item_h + (len(rows) - 1) * GAP
     body = []
-    for index, item in enumerate(items):
-        x = (index % columns) * (item_w + GAP)
-        y = (index // columns) * (item_h + GAP)
-        body.append(f'<g transform="translate({x},{y})">{draw(item, f"{prefix}{index}")}</g>')
+    for r, row in enumerate(rows):
+        for c, item in enumerate(row):
+            x = c * (item_w + GAP)
+            y = r * (item_h + GAP)
+            body.append(f'<g transform="translate({x},{y})">{draw(item, f"{prefix}{r}_{c}")}</g>')
     return svg_document(width, height, title, "".join(body))
 
 
@@ -384,16 +386,25 @@ def render() -> Dict[Path, str]:
         out[ASSETS / "cards" / f"card_{int(card.id):02d}.svg"] = svg_document(
             CARD_W, CARD_H, card_title(card), card_body(card, f"c{int(card.id)}"))
     for level in (1, 2, 3):
-        members = sorted((c for c in cards if int(c.level) == level),
-                         key=lambda c: (int(c.bonus), int(c.points), int(c.id)))
+        # one row per bonus colour (white, blue, green, red, black), cheapest
+        # prestige first; every level has the same number of cards per colour
+        rows = [
+            sorted((c for c in cards if int(c.level) == level and int(c.bonus) == color),
+                   key=lambda c: (int(c.points), int(c.id)))
+            for color in range(len(COLOR_NAMES))
+        ]
+        if len({len(row) for row in rows}) != 1:
+            raise RuntimeError(f"level {level} colours have different card counts")
         out[ASSETS / "cards" / f"level{level}.svg"] = sheet(
-            members, 10, CARD_W, CARD_H, card_body,
-            f"レベル{level}の発展カード{len(members)}枚", f"l{level}_")
+            rows, CARD_W, CARD_H, card_body,
+            f"レベル{level}の発展カード{sum(len(r) for r in rows)}枚（1行1色）", f"l{level}_")
     for noble in nobles:
         out[ASSETS / "nobles" / f"noble_{int(noble.id):02d}.svg"] = svg_document(
             NOBLE, NOBLE, noble_title(noble), noble_body(noble, f"n{int(noble.id)}"))
+    noble_list = list(nobles)
     out[ASSETS / "nobles" / "nobles.svg"] = sheet(
-        list(nobles), 6, NOBLE, NOBLE, noble_body, f"貴族タイル{len(nobles)}枚", "n_")
+        [noble_list[:6], noble_list[6:]], NOBLE, NOBLE, noble_body,
+        f"貴族タイル{len(noble_list)}枚", "n_")
     return out
 
 
