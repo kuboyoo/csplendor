@@ -1910,12 +1910,14 @@ private:
     int card = -1;
     int weight = 1;
   };
+  // One entry per equivalence class of a deck, plus the no-reveal outcome.
+  using WeightedOutcomes = FixedStack<WeightedOutcome, Board::MAX_DECK_SIZE + 1>;
 
   // Reveal classes of the deck drawn by `action` (purchase/visible reserve
   // refill or deck reservation), with class multiplicities. Empty when the
   // action draws nothing.
   void weighted_outcomes(const Game &game, const Action &action, int &level,
-                         int &slot, std::vector<WeightedOutcome> &outcomes) const {
+                         int &slot, WeightedOutcomes &outcomes) const {
     outcomes.clear();
     level = -1;
     slot = -1;
@@ -1931,21 +1933,23 @@ private:
       level = -1;
       return;
     }
+    // Equivalence classes coincide exactly with same_card_equivalence_tuple
+    // (static_assert in solver_card_equivalence.h); the first card of each
+    // class in deck order stays its representative.
+    csplendor::solver_internal::CardEquivalenceMask seen;
+    std::array<uint8_t, 128> position_of_class;
     for (uint8_t card_id : game.board.decks[level]) {
       if (reveal_state_.is_claimed(game.board, card_id))
         continue;
-      const Card &card = get_card(card_id);
-      bool merged = false;
-      for (WeightedOutcome &outcome : outcomes) {
-        if (csplendor::solver_internal::same_card_equivalence_tuple(
-                get_card(outcome.card), card)) {
-          ++outcome.weight;
-          merged = true;
-          break;
-        }
+      const uint8_t class_id =
+          csplendor::solver_internal::card_equivalence_class(card_id);
+      if (seen.insert(class_id)) {
+        position_of_class[class_id] = static_cast<uint8_t>(outcomes.size());
+        outcomes.push_back_unchecked(
+            WeightedOutcome{static_cast<int>(card_id), 1});
+      } else {
+        ++outcomes[position_of_class[class_id]].weight;
       }
-      if (!merged)
-        outcomes.push_back(WeightedOutcome{static_cast<int>(card_id), 1});
     }
   }
 
@@ -1960,10 +1964,10 @@ private:
     const Action action = Action::unpack(ordered.code);
     const int current_player = game.current_player();
     int level = -1, slot = -1;
-    std::vector<WeightedOutcome> outcomes;
+    WeightedOutcomes outcomes;
     weighted_outcomes(game, action, level, slot, outcomes);
     if (outcomes.empty())
-      outcomes.push_back(WeightedOutcome{-1, 1});
+      outcomes.push_back_unchecked(WeightedOutcome{-1, 1});
     double total = 0.0;
     for (const WeightedOutcome &outcome : outcomes)
       total += outcome.weight;

@@ -351,3 +351,36 @@ def test_chance_enumeration_with_risk_weight_prefers_safer_reveals_consistently(
         outcomes.append(session.root_visits(0))
     # both settings run to completion with a full visit budget
     assert all(sum(visits.values()) == 119 for visits in outcomes)
+
+
+def _threaded_trace(threads):
+    config = cs.V3SearchConfig()
+    config.num_simulations = 64
+    config.leaf_batch_size = 8
+    config.num_threads = threads
+    session = cs.V3SearchSession(config)
+    games = [cs.Game(seed=seed) for seed in (21, 22, 23, 24, 25)]
+    for index, game in enumerate(games):
+        session.add_game(game, game.current_player, seed=900 + index)
+    batches = []
+    while not session.all_done():
+        features, ids, offsets, slots = session.collect()
+        if len(slots) == 0:
+            break
+        batches.append((features.tobytes(), ids.tolist(), offsets.tolist(), slots.tolist()))
+        uniform_apply(session, features, ids, offsets, slots, 0.25)
+    return batches, [session.root_visits(i) for i in range(len(games))], session.stats()
+
+
+def test_session_threads_reproduce_the_sequential_search():
+    assert cs.V3SearchConfig().num_threads == 1
+    sequential = _threaded_trace(1)
+    for threads in (2, 4):
+        assert _threaded_trace(threads) == sequential
+
+
+def test_session_rejects_non_positive_thread_count():
+    config = cs.V3SearchConfig()
+    config.num_threads = 0
+    with pytest.raises(ValueError):
+        cs.V3SearchSession(config)

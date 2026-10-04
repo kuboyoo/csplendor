@@ -1,5 +1,20 @@
 # 変更履歴 / Changelog
 
+## 未出荷：ホットスポット高速化（2026-10-04）
+
+- 探索結果・特徴量・行動IDを変えずに（mainとビット一致を確認）、エンジンのホットパスを高速化した。
+  V3SearchSession は単一スレッドで main 比 1.31〜1.45 倍になった。
+  内訳は、合法手の数え上げ、遅延MT19937、公開カード統計、V3コーデックの表引き、辺検索の改善である。
+- `V3SearchConfig.num_threads`（既定1）を追加した。対局単位で collect/apply を並列化し、結果はスレッド数によらず同一である。
+  64局ベンチでは、16スレッドで main（逐次）比 約8倍だった。
+- `ActionEncoderV3.legal_action_ids(game)` を追加した。合法手のV3 IDを int32 配列で一括取得でき、Python で1手ずつ encode する場合の約20倍速い。
+- スナップショット復元は約3.2倍、準詰みは約5%速くなった。
+- 詳細・採用しなかった案・計測条件は `doc/speed_review_20261004.md` を参照。
+
+English: Bit-identical hot-path optimizations (V3 search 1.31-1.45x single
+threaded), an opt-in `V3SearchConfig.num_threads` for per-game parallel
+collect/apply, and a batched `ActionEncoderV3.legal_action_ids`.
+
 ## 未出荷：最終高速化候補（2026-09-06）
 
 - 計測・受入対象のエンジンは `b202e6a0cbb2eded9bc2ee5e59f750428e73ca49`。
