@@ -237,6 +237,17 @@ sentinel. Terminal masks are all zero. The fixed 48-slot MCTS policy omits this
 forced transition: callers apply it before a root search and search resolves
 passes reached below the root automatically.
 
+## Python Helpers
+
+- `ActionEncoderV3.get_action_mask(game)`: 3133-slot mask (all zero at terminal states).
+- `ActionEncoderV3.legal_action_ids(game)`: `int32` ids of `game.legal_actions` in
+  list order, identical to encoding each legal action (forced pass gives `[3132]`).
+- `ActionEncoderV3.encode` / `decode` / `decode_and_match`: single-action conversion.
+
+The payment and return codecs are table driven. The tables are generated from the
+reference ranking defined above and checked against it exhaustively in the native
+unit tests, so ids are unchanged.
+
 ## Migration Notes
 
 ### From V2 to V3

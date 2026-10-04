@@ -36,6 +36,12 @@
   持たなかった手には `unseen_action_prior`（既定 1e-3）を与えます。
 - **終局・深さ上限**: 終局は勝敗（±1、引き分け 0）、`max_depth` 到達は `draw_value` で逆伝播します。
   強制パスは PASS（3132）を唯一の合法手として扱います。
+- **対局単位のマルチスレッド（任意、2026-10-04 追加）**: `num_threads`（既定 1）を 2 以上にすると、
+  `collect()` / `apply()` が対局ごとに独立したスレッドで処理されます。各対局は自分の木・乱数・作業領域だけを
+  使い、葉は slot 順に連結され、`apply()` も対局ごとに行の順序を保ちます。そのため、バッチの並び・乱数列・
+  木の更新はスレッド数によらず同一です。`num_threads=1` は従来の逐次処理と同じ経路です。
+  1 プロセスで多数の対局を探索する場合に有効です。複数プロセスで並列実行している場合は、プロセス数と合わせて
+  CPU コア数を超えないようにしてください。
 
 含まれないもの: 詰み探索、rollout、手をまたぐ木の再利用、シミュレーション途中の相手手番での
 再決定化、反復回避。これらは呼び出し側（dlsplendor）で必要に応じて重ねます。
@@ -53,6 +59,7 @@ import csplendor as cs
 config = cs.V3SearchConfig()
 config.num_simulations = 800
 config.leaf_batch_size = 32
+config.num_threads = 4              # 任意。既定 1（結果はスレッド数によらず同一）
 session = cs.V3SearchSession(config)
 slot = session.add_game(game, observer=game.current_player, seed=1, root_noise=False)
 while not session.all_done():
@@ -72,9 +79,15 @@ session.reset_game(slot, next_game, observer, seed)
 
 `tests/test_mcts_v3.py`: 予算どおりの訪問数、root の訪問手が合法手集合に含まれること、
 同一 seed の再現性、バッチ形状、価値の符号（深さ 1 のみの構成で厳密検証）、root ノイズ、
-二段階選択、不正な観測者の拒否。
+二段階選択、不正な観測者の拒否、`num_threads` を変えても同じ探索結果になること。
+`tests/v3_session_parallel_unit.cpp`: スレッド数 1/2/4/16 で全バッチと木がビット一致すること
+（rollout・chance 列挙を含む構成も対象。ThreadSanitizer でも実行）。
 
 速度の目安（dlsplendor 側の計測、Ryzen 9 7900X＋RTX 4060 Ti、selfplay21 の 3.4M パラメータ網、
 800 探索、64 局同時、1 Python thread）: 約 5,400 局/時、約 6.5 万 sim/秒。
 Python 実装の木探索は 12 プロセスで約 420 局/時でした。詳細は dlsplendor 側の
 `doc/native_v3_search_20260929.md` を参照してください。
+
+上の値は 2026-10-04 の高速化より前の計測です。この高速化では、NN 推論を除いたエンジン部分が
+1 スレッドで 1.31〜1.43 倍になりました（結果はビット一致）。さらに `num_threads=16` では、従来の逐次処理の
+約 8 倍になります。条件は [速度ベンチマーク](performance_benchmarks.md) を参照してください。

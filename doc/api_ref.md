@@ -107,6 +107,25 @@ Represents a game move.
 - `csplendor.MateSearchSession(attacker, *, jobs=..., max_cache_states=2_000_000)`: Reusable AI-facing search session with cooperative cancellation and a bounded exact transposition table retained across depths and turns. It reuses exact descendant results and shallower-depth move ordering. Use `search_anytime()` for live play, `search()` for minimal-depth analysis, and `clear()` between games.
 - `csplendor.MateSearchCancellationToken`: Cooperative cancellation token accepted by the stateless mate-search APIs.
 
+## V3 action encoder helpers
+
+- `ActionEncoderV3.get_action_mask(game) -> numpy.ndarray`: 3133-slot legality mask.
+- `ActionEncoderV3.encode(action, game) -> int` / `decode(action_id, game) -> Action` /
+  `decode_and_match(action_id, game) -> Action`: Convert single actions.
+- `ActionEncoderV3.legal_action_ids(game) -> numpy.ndarray`: The V3 ids of
+  `game.legal_actions`, in the same order, as an owning `int32` array. Equal to
+  `[ActionEncoderV3.encode(a, game) for a in game.legal_actions]` (including the
+  forced `PASS` id 3132 and `-1` for an action the encoder cannot represent), but
+  produced by one native enumeration without creating Python `Action` objects.
+
+## Native V3 search (`V3SearchSession`, experimental)
+
+`V3SearchConfig` fields are documented in [V3 multi-game search](mcts_v3.md).
+`V3SearchConfig.num_threads` (default `1`, must be positive) runs `collect()` and
+`apply()` with one worker per game. Rows are concatenated in slot order, so the
+collected batches, RNG streams and trees are identical for every thread count.
+Both calls release the GIL.
+
 ## State feature arrays
 
 - `StateEncoder.encode(game, observer=-1) -> list[float]`: The existing list API is unchanged.

@@ -55,6 +55,8 @@ The [Japanese README](README.md) contains the complete guide; focused documents 
 | HTTP integration | [Web API](doc/web_api.md) |
 | All documents | [Documentation index](doc/index.md) |
 
+October 4, 2026 hot-path work (main `0088f76` → `c35062d`, bit-identical results) made the native `V3SearchSession` 1.31–1.43x faster single threaded. It added an opt-in `V3SearchConfig.num_threads` (per-game parallel `collect()`/`apply()`, identical results for any thread count; 8.0x the previous sequential rate at 16 threads in a 64-game benchmark) and a batched `ActionEncoderV3.legal_action_ids(game)` returning an int32 array. These figures exclude neural-network inference.
+
 Saved September 6, 2026 measurements of the F1 candidate include 3,112,938 native legal-count calls/sec and 1,051.16 ms for an exact-reveal search with a 1-million-node cap. The latter stops at UNKNOWN, not a completed mate proof. These are measurements of identified historical binaries, not a fresh benchmark of the latest HEAD. The benchmark reference records fixtures, revisions, confidence intervals and limitations.
 
 Gem arrays use White, Blue, Green, Red, Black, Gold order; five-element arrays omit Gold. USI symbols are W, U, G, R, K, D. Card IDs, action-list indices, packed action codes and policy IDs are different identifiers. Built-in C++ MCTS uses a fixed **48-action** policy; V3 cannot be substituted directly.
