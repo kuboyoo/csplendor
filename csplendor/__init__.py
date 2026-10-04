@@ -14,6 +14,7 @@ from ._csplendor import (
     GemType,
     InferenceResult,
     LeafRequest,
+    MateOrderHints,
     MateSearchCancellationToken,
     MCTSConfig,
     MCTSNode,
@@ -30,18 +31,17 @@ from ._csplendor import (
     StateEncoder,
     V3SearchConfig,
     V3SearchSession,
-    MateOrderHints,
-    near_mate_probability_cpp,
     get_all_cards,
-    v3_semantic_group_id,
     get_all_nobles,
     get_card,
     get_noble,
     mcts_search_parallel_native,
     mcts_search_root_parallel_native,
+    near_mate_probability_cpp,
     solve_reveal_verified_frontier_cpp,
     solve_reveal_verified_mate_cpp,
     solve_visible_only_winner_cpp,
+    v3_semantic_group_id,
 )
 from .action_space import ActionEncoder
 from .features import StateFeaturizer
@@ -60,7 +60,6 @@ from .mate_depth import (
     search_reveal_verified_mate_anytime,
     search_reveal_verified_mate_depths,
 )
-from .near_mate import NEAR_MATE_FORMAT, search_near_mate
 from .mate_frontier import (
     decode_mate_frontier_state,
     encode_mate_frontier_state,
@@ -68,6 +67,7 @@ from .mate_frontier import (
     load_mate_frontier_game,
 )
 from .mate_session import MATE_SEARCH_SESSION_FORMAT, MateSearchSession
+from .near_mate import NEAR_MATE_FORMAT, search_near_mate
 
 try:
     __version__ = _distribution_version("csplendor")
