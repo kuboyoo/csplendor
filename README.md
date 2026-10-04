@@ -126,9 +126,26 @@ action = cs.ActionEncoderV3.decode(action_id, game)
 assert game.apply(action)
 ```
 
+合法手のV3 IDを `game.legal_actions` と同じ順で並べたものは、`cs.ActionEncoderV3.legal_action_ids(game)` で一括取得できます。戻り値は int32 の NumPy 配列で、`[cs.ActionEncoderV3.encode(a, game) for a in game.legal_actions]` と同じ内容をネイティブ側で1回の列挙により作ります。
+
 ## 速度ベンチマーク
 
-以下は**保存済みの測定結果**です。今回の文書整理で最新HEADの速度を測り直した値ではありません。「回/秒」は局面1個の合法手生成などを1回と数え、生成した個々の手の数ではありません。
+以下は**保存済みの測定結果**です。「回/秒」は局面1個の合法手生成などを1回と数え、生成した個々の手の数ではありません。
+
+### V3探索・行動符号化（2026-10-04）
+
+ホットスポット高速化（main `0088f76` → `c35062d`）の測定です。探索結果・特徴量・行動IDは比較元とビット一致します。Ryzen 9 7900X、Linux x86_64、GCC 15.2、Python 3.12.1、portable Release。別の学習ジョブが並走している条件で測っています。
+
+| 処理 | 比較元 | 高速化後 | 速度比 | 条件 |
+|---|---:|---:|---:|---|
+| `V3SearchSession`（決定化あり） | 111,601 sim/s | 157,477 sim/s | 1.41倍 | 48局×400探索、葉batch 32、Pythonから呼出し、NN推論を含まない |
+| `V3SearchSession`（決定化なし） | 116,567 sim/s | 152,908 sim/s | 1.31倍 | 同上 |
+| `V3SearchSession` 16スレッド | 99,574 sim/s（逐次） | 798,148 sim/s | 8.0倍 | 64局×400探索、`num_threads=16` |
+| V3合法手マスク | 3,616 ns | 2,692 ns | 1.34倍 | `midgame_250`、CPU1コア固定 |
+| `ActionEncoderV3.legal_action_ids` | 14.11 µs | 0.72 µs | 約20倍 | 比較元はPythonで1手ずつ `encode` |
+| `Game.deserialize_snapshot` | 1,959 ns | 618 ns | 3.2倍 | 184バイトのsnapshot |
+
+各処理の測定値や、採用しなかった案は [ベンチマーク資料](doc/performance_benchmarks.md) と [高速化レビュー](doc/speed_review_20261004.md) にまとめています。
 
 ### 合法手生成・特徴量・詰み探索
 
@@ -283,6 +300,7 @@ V3の区分は、異色取得 `0..839`、同色取得 `840..979`、公開予約 
 
 V3行動（3,133 ID、全支払い・返却分岐）を扱う多対局探索 `V3SearchSession` は
 [V3探索の設計](doc/mcts_v3.md) を参照してください。48枠の内蔵MCTSとは別実装です。
+`V3SearchConfig.num_threads`（既定1）を2以上にすると、対局単位で `collect()` / `apply()` を並列に処理します。結果はスレッド数によらず同一です。
 
 逐次 `MCTS` に加え、共有tree・root-parallelのnative APIがあります。複数threadのAPIは実験的機能で、Python evaluator callbackは直列に呼ばれます。実モデルの推論時間を含めてthread数・batch sizeを評価してください。[並列MCTSのコード例と制約](doc/parallel_mcts_usage.md)、[実装状況](doc/parallel_search_plan/implementation_status.md) に詳細があります。
 

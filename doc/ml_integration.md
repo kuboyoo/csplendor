@@ -58,6 +58,8 @@ assert cs.ActionEncoderV3.encode(action, game) == action_id
 assert game.apply(action)
 ```
 
+policy の教師データや推論で合法手の V3 ID 列が必要な場合は、`cs.ActionEncoderV3.legal_action_ids(game)` を使えます（`game.legal_actions` と同じ順の int32 配列）。Python で1手ずつ `encode` するより約20倍速く、結果は同じです。
+
 着手する局面のマスクでpolicyを制限します。終局時はV2/V3のマスクが全ゼロです。モデルには行動schemaのversion・fingerprintと支払いモードも保存してください。
 
 ## 内蔵MCTSとの接続

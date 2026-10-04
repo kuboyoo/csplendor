@@ -23,7 +23,7 @@
 | [詰み探索ガイド](mate_usage.md) | API、CLI、DAG、外部AIによる問題生成 |
 | [ソルバー仕様](SOLVER.md) | 深さ・証明・Unknown・予算の契約 |
 | [並列MCTS](parallel_mcts_usage.md) | サンプルと実験的APIの制約 |
-| [V3多対局探索](mcts_v3.md) | 3,133行動上のPUCT。多対局の葉バッチ、決定化、サンプル型chance |
+| [V3多対局探索](mcts_v3.md) | 3,133行動上のPUCT。多対局の葉バッチ、決定化、サンプル型chance、対局単位のマルチスレッド |
 | [並列探索の実装状況](parallel_search_plan/implementation_status.md) | 対応済み機能・残る検証 |
 | [速度ベンチマーク](performance_benchmarks.md) | 測定値、条件、対象commit、再現手順 |
 
@@ -50,5 +50,6 @@
 - [リリース検証](release_validation.md)
 - [リファクタリング計画・完了記録](refactoring_plan_v2.md) / [フェーズ別記録](refactoring_plan/README.md)
 - [MCTS高速化](mcts_hotpath_optimizations.md)
+- [ホットスポット高速化のレビューと実施結果（2026-10-04）](speed_review_20261004.md)
 - [性能実験の記録ディレクトリ](performance_experiments/)
 - [並列探索の設計・検証記録](parallel_search_plan/README.md)
