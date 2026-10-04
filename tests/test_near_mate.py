@@ -1,3 +1,4 @@
+import pytest
 
 import csplendor as cs
 from tests.test_reveal_verified_solver import (
