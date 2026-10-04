@@ -1,7 +1,9 @@
-import csplendor as cs
-import pytest
 
-from tests.test_reveal_verified_solver import _five_move_mate_fixture, _six_move_mate_fixture
+import csplendor as cs
+from tests.test_reveal_verified_solver import (
+    _five_move_mate_fixture,
+    _six_move_mate_fixture,
+)
 
 
 def test_near_mate_matches_exact_proofs_on_forced_lines():
