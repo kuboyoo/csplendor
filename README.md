@@ -277,6 +277,16 @@ assert len(cs.get_all_nobles()) == 12
 
 `cs.get_noble(id)` の `points` と `requirement` から取得できます。正本は [src/noble_data.h](src/noble_data.h) です。カード・貴族の画像は `python scripts/render_card_assets.py` でエンジンのデータから生成しており、データを変更したら再生成します（`--check` でずれを検出）。
 
+### 対局用の画像
+
+上の画像は開発用（ID・V3行動番号・レベルの◆入り）です。ゲーム画面向けには、それらを除き点数・コストの数字を大きく太くした版を `assets/play/` に出力します。`python scripts/render_card_assets.py` が両方を生成し、`--check` が両方のずれを検出します。
+
+- `assets/play/cards/card_XX.svg`（90枚、XXはカードID）
+- `assets/play/nobles/noble_XX.svg`（12枚、XXは貴族ID）
+- `assets/play/decks/deck_l{1,2,3}.svg`（山札の裏面。枠の色と◆の数がレベル。残り枚数は含まない）
+
+カード・貴族の大きさは開発用と同じ（カード140×196、貴族140×140）で、画面には幅96〜128px程度に拡大縮小して使えます。
+
 ## AI向けの特徴量・行動空間・探索
 
 ### 特徴量と行動エンコーダ

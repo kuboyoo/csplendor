@@ -12,6 +12,9 @@ Outputs:
     assets/cards/level{1,2,3}.svg  every card of a level, one row per bonus colour
     assets/nobles/noble_XX.svg     one noble tile per file
     assets/nobles/nobles.svg       all noble tiles
+    assets/play/cards/card_XX.svg  play edition: no ids, larger numerals
+    assets/play/nobles/noble_XX.svg
+    assets/play/decks/deck_l{1,2,3}.svg  face-down deck of a level
 """
 
 from __future__ import annotations
@@ -109,38 +112,52 @@ def gem_icon(cx: float, cy: float, size: float, color: str) -> str:
     )
 
 
-def cost_token(cx: float, cy: float, color: str, amount: int) -> str:
-    fill, edge, light, text = GEM[color]
+def numeral(x: float, y: float, size: float, weight: int, fill: str, value: int,
+            outline: str = "") -> str:
+    """A centred number; with ``outline`` the digits get a stroke in that colour."""
     return (
-        f'<circle cx="{cx}" cy="{cy}" r="13" fill="{fill}" stroke="{edge}" stroke-width="1.6"/>'
-        f'<circle cx="{cx - 4}" cy="{cy - 4}" r="4" fill="{light}" opacity="0.45"/>'
-        f'<text x="{cx}" y="{cy + 5.5}" text-anchor="middle" font-size="16" font-weight="700" '
-        f'fill="{text}" {FONT}>{amount}</text>'
+        f'<text x="{x}" y="{y}" text-anchor="middle" font-size="{size}" font-weight="{weight}" '
+        f'fill="{fill}"'
+        + (f' stroke="{outline}" stroke-width="3" paint-order="stroke" stroke-linejoin="round"' if outline else "")
+        + f' {FONT}>{value}</text>'
     )
 
 
-def requirement_tile(x: float, y: float, color: str, amount: int) -> str:
+def cost_token(cx: float, cy: float, color: str, amount: int, play: bool = False) -> str:
     fill, edge, light, text = GEM[color]
+    r, size, weight, dy, hl = (16, 23, 800, 7.8, 4.8) if play else (13, 16, 700, 5.5, 4)
     return (
-        f'<rect x="{x}" y="{y}" width="24" height="24" rx="4" fill="{fill}" stroke="{edge}" stroke-width="1.6"/>'
-        f'<rect x="{x + 3}" y="{y + 3}" width="8" height="5" rx="2" fill="{light}" opacity="0.45"/>'
-        f'<text x="{x + 12}" y="{y + 17.5}" text-anchor="middle" font-size="15" font-weight="700" '
-        f'fill="{text}" {FONT}>{amount}</text>'
+        f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="{fill}" stroke="{edge}" stroke-width="1.6"/>'
+        f'<circle cx="{cx - hl}" cy="{cy - hl}" r="{hl}" fill="{light}" opacity="0.45"/>'
+        + numeral(cx, cy + dy, size, weight, text, amount, edge if play else "")
+    )
+
+
+def requirement_tile(x: float, y: float, color: str, amount: int, play: bool = False) -> str:
+    fill, edge, light, text = GEM[color]
+    side, size, weight, dy, hw, hh = (34, 24, 800, 25.2, 11, 7) if play else (24, 15, 700, 17.5, 8, 5)
+    return (
+        f'<rect x="{x}" y="{y}" width="{side}" height="{side}" rx="4" fill="{fill}" stroke="{edge}" stroke-width="1.6"/>'
+        f'<rect x="{x + 3}" y="{y + 3}" width="{hw}" height="{hh}" rx="2" fill="{light}" opacity="0.45"/>'
+        + numeral(x + side / 2, y + dy, size, weight, text, amount, edge if play else "")
     )
 
 
 def points_label(points: int, fill: str, edge: str, text: str,
-                 outline: str = "") -> str:
+                 outline: str = "", play: bool = False) -> str:
     """Prestige points as a ribbon in the top-left corner. Cards and noble
     tiles share the shape so equal values read the same; colours follow the
     tile (the card's bonus colour, or the noble tile's parchment)."""
+    # paint-order hides the inner half of the outline, so a 3px stroke
+    # shows the same 1.5px width as the ribbon's edge
+    if play:
+        return (
+            f'<path d="M5,1.5 H49 V55 L27,45 L5,55 Z" fill="{fill}" stroke="{edge}" stroke-width="1.5"/>'
+            + numeral(27, 37, 36, 800, text, points, outline)
+        )
     return (
         f'<path d="M8,1.5 H36 V40 L22,33 L8,40 Z" fill="{fill}" stroke="{edge}" stroke-width="1.5"/>'
-        f'<text x="22" y="27" text-anchor="middle" font-size="22" font-weight="800" fill="{text}"'
-        # paint-order hides the inner half of the outline, so a 3px stroke
-        # shows the same 1.5px width as the ribbon's edge
-        + (f' stroke="{outline}" stroke-width="3" paint-order="stroke" stroke-linejoin="round"' if outline else "")
-        + f' {FONT}>{points}</text>'
+        + numeral(22, 27, 22, 800, text, points, outline)
     )
 
 
@@ -240,10 +257,11 @@ def portrait(cx: float, top: float, kind: str, robe: str, hair: str) -> str:
     return "".join(parts)
 
 
-def card_body(card, uid: str) -> str:
+def card_body(card, uid: str, play: bool = False) -> str:
     color = COLOR_NAMES[int(card.bonus)]
     top, bottom = TINT[color]
     frame = LEVEL_FRAME[int(card.level)]
+    band = 62 if play else 50
     parts = [
         f'<defs><linearGradient id="bg{uid}" x1="0" y1="0" x2="0" y2="1">'
         f'<stop offset="0" stop-color="{top}"/><stop offset="1" stop-color="{bottom}"/>'
@@ -253,24 +271,28 @@ def card_body(card, uid: str) -> str:
         # faint watermark of the bonus gem in the art area
         f'<g opacity="0.16">{gem_icon(CARD_W / 2 + 14, 118, 92, color)}</g>',
         # header band (rounded top corners only): points left, bonus gem right
-        f'<path d="M1.5,50 V12.5 A11,11 0 0 1 12.5,1.5 H{CARD_W - 12.5} '
-        f'A11,11 0 0 1 {CARD_W - 1.5},12.5 V50 Z" fill="#FFFFFF" opacity="0.74"/>',
-        f'<line x1="1.5" y1="50" x2="{CARD_W - 1.5}" y2="50" stroke="{frame}" stroke-width="1" opacity="0.35"/>',
-        gem_icon(CARD_W - 28, 26, 32, color),
+        f'<path d="M1.5,{band} V12.5 A11,11 0 0 1 12.5,1.5 H{CARD_W - 12.5} '
+        f'A11,11 0 0 1 {CARD_W - 1.5},12.5 V{band} Z" fill="#FFFFFF" opacity="0.74"/>',
+        f'<line x1="1.5" y1="{band}" x2="{CARD_W - 1.5}" y2="{band}" stroke="{frame}" stroke-width="1" opacity="0.35"/>',
+        gem_icon(CARD_W - 30, 29, 40, color) if play else gem_icon(CARD_W - 28, 26, 32, color),
     ]
     if int(card.points):
         # a light tint of the bonus colour; white digits outlined in the
         # ribbon's edge colour
         edge = GEM[color][1]
-        parts.append(points_label(int(card.points), RIBBON_TINT[color], edge, "#FFFFFF", edge))
+        parts.append(points_label(int(card.points), RIBBON_TINT[color], edge, "#FFFFFF", edge, play))
     # cost tokens in the bottom-left column, largest amount at the top
     # (ties keep the white, blue, green, red, black order)
     costs = sorted(
         ((COLOR_NAMES[i], int(v)) for i, v in enumerate(card.cost) if int(v)),
         key=lambda item: -item[1],
     )
+    pitch = 36 if play else 30
     for row, (gem, amount) in enumerate(costs):
-        parts.append(cost_token(20, CARD_H - 22 - (len(costs) - 1 - row) * 30, gem, amount))
+        parts.append(cost_token(23 if play else 20, CARD_H - (23 if play else 22) - (len(costs) - 1 - row) * pitch,
+                                gem, amount, play))
+    if play:
+        return "".join(parts)
     # level pips and the engine card id (bottom-right)
     for pip in range(int(card.level)):
         x = CARD_W - 18 - pip * 11
@@ -289,53 +311,87 @@ def card_body(card, uid: str) -> str:
     return "".join(parts)
 
 
-def noble_body(noble, uid: str) -> str:
+def noble_body(noble, uid: str, play: bool = False) -> str:
     """Current-edition layout: a points label in the top-left corner, the
     portrait in the middle and the required bonuses in a row along the bottom."""
     nid = int(noble.id)
+    band = 94 if play else 102
     parts = [
         f'<rect x="1.5" y="1.5" width="{NOBLE - 3}" height="{NOBLE - 3}" rx="8" fill="#F1E3C2" '
         f'stroke="#8C6A3A" stroke-width="3"/>',
         # bottom band holding the requirements
-        f'<path d="M1.5,102 H{NOBLE - 1.5} V{NOBLE - 9.5} A8,8 0 0 1 {NOBLE - 9.5},{NOBLE - 1.5} '
+        f'<path d="M1.5,{band} H{NOBLE - 1.5} V{NOBLE - 9.5} A8,8 0 0 1 {NOBLE - 9.5},{NOBLE - 1.5} '
         f'H9.5 A8,8 0 0 1 1.5,{NOBLE - 9.5} Z" fill="#E2CC97"/>',
-        f'<line x1="3" y1="102" x2="{NOBLE - 3}" y2="102" stroke="#8C6A3A" stroke-width="1" opacity="0.5"/>',
+        f'<line x1="3" y1="{band}" x2="{NOBLE - 3}" y2="{band}" stroke="#8C6A3A" stroke-width="1" opacity="0.5"/>',
     ]
     robe = ROBES[nid % len(ROBES)]
     hair = HAIR[nid % len(HAIR)]
     parts.append(portrait(70, -14, NOBLE_PORTRAIT[nid], robe, hair))
-    parts.append(points_label(int(noble.points), "#E2CC97", "#8C6A3A", "#3E2C14"))
-    # implementation ids in the top-right corner
-    parts.append(
-        f'<text x="{NOBLE - 9}" y="17" text-anchor="end" font-size="11" font-weight="700" '
-        f'fill="#4A3820" {FONT}>ID {nid}</text>'
-        f'<text x="{NOBLE - 9}" y="29" text-anchor="end" font-size="9" fill="#6A5634" '
-        f'{FONT}>V3 {v3_noble_index(nid)}</text>'
-    )
+    parts.append(points_label(int(noble.points), "#E2CC97", "#8C6A3A", "#3E2C14", play=play))
+    if not play:
+        # implementation ids in the top-right corner
+        parts.append(
+            f'<text x="{NOBLE - 9}" y="17" text-anchor="end" font-size="11" font-weight="700" '
+            f'fill="#4A3820" {FONT}>ID {nid}</text>'
+            f'<text x="{NOBLE - 9}" y="29" text-anchor="end" font-size="9" fill="#6A5634" '
+            f'{FONT}>V3 {v3_noble_index(nid)}</text>'
+        )
     requirements = [(COLOR_NAMES[i], int(v)) for i, v in enumerate(noble.requirement) if int(v)]
-    pitch = 30
-    start = NOBLE / 2 - (len(requirements) * pitch - 6) / 2
+    side, gap = (34, 6) if play else (24, 6)
+    pitch = side + gap
+    start = NOBLE / 2 - (len(requirements) * pitch - gap) / 2
     for column, (gem, amount) in enumerate(requirements):
-        parts.append(requirement_tile(start + column * pitch, 108, gem, amount))
+        parts.append(requirement_tile(start + column * pitch, band + (4 if play else 6), gem, amount, play))
     return "".join(parts)
 
 
-def card_title(card) -> str:
+def card_title(card, play: bool = False) -> str:
     color = COLOR_LABELS_JA[int(card.bonus)]
     cost = "・".join(
         f"{COLOR_LABELS_JA[i]}{int(v)}" for i, v in enumerate(card.cost) if int(v)
     )
+    if play:
+        return f"レベル{int(card.level)} {int(card.points)}点 ボーナス{color} コスト{cost}"
     first, last = v3_purchase_range(int(card.id))
     return (f"カード ID {int(card.id)} レベル{int(card.level)} {int(card.points)}点 "
             f"ボーナス{color} コスト{cost} V3購入インデックス{first}〜{last}")
 
 
-def noble_title(noble) -> str:
+def noble_title(noble, play: bool = False) -> str:
     need = "・".join(
         f"{COLOR_LABELS_JA[i]}{int(v)}" for i, v in enumerate(noble.requirement) if int(v)
     )
+    if play:
+        return f"貴族 {int(noble.points)}点 必要ボーナス{need}"
     return (f"貴族 ID {int(noble.id)} {int(noble.points)}点 必要ボーナス{need} "
             f"V3インデックス{v3_noble_index(int(noble.id))}")
+
+
+def deck_body(level: int) -> str:
+    """Face-down deck: the level's frame colour, a lattice and one gem per level."""
+    frame = LEVEL_FRAME[level]
+    lattice = "".join(
+        f'<line x1="{x}" y1="3" x2="{x - CARD_H}" y2="{CARD_H - 3}"/>'
+        f'<line x1="{x - CARD_H}" y1="3" x2="{x}" y2="{CARD_H - 3}"/>'
+        for x in range(CARD_H, CARD_W + CARD_H, 28)
+    )
+    pips = "".join(
+        f'<polygon points="{x},{CARD_H / 2 - 9} {x + 9},{CARD_H / 2} {x},{CARD_H / 2 + 9} {x - 9},{CARD_H / 2}" '
+        f'fill="{frame}" stroke="#FFFFFF" stroke-width="2"/>'
+        for x in (CARD_W / 2 + (i - (level - 1) / 2) * 26 for i in range(level))
+    )
+    return (
+        f'<defs><clipPath id="deck{level}"><rect x="1.5" y="1.5" width="{CARD_W - 3}" '
+        f'height="{CARD_H - 3}" rx="11"/></clipPath></defs>'
+        f'<rect x="1.5" y="1.5" width="{CARD_W - 3}" height="{CARD_H - 3}" rx="11" fill="#F6F1E4"/>'
+        f'<g clip-path="url(#deck{level})" stroke="{frame}" stroke-width="1.5" opacity="0.35">{lattice}</g>'
+        f'<rect x="1.5" y="1.5" width="{CARD_W - 3}" height="{CARD_H - 3}" rx="11" fill="none" '
+        f'stroke="{frame}" stroke-width="3"/>'
+        f'<rect x="12" y="12" width="{CARD_W - 24}" height="{CARD_H - 24}" rx="6" fill="none" '
+        f'stroke="{frame}" stroke-width="1.5"/>'
+        f'<rect x="{CARD_W / 2 - 46}" y="{CARD_H / 2 - 22}" width="92" height="44" rx="22" '
+        f'fill="#F6F1E4" stroke="{frame}" stroke-width="2"/>{pips}'
+    )
 
 
 def svg_document(width: int, height: int, title: str, body: str) -> str:
@@ -385,6 +441,16 @@ def render() -> Dict[Path, str]:
     for card in cards:
         out[ASSETS / "cards" / f"card_{int(card.id):02d}.svg"] = svg_document(
             CARD_W, CARD_H, card_title(card), card_body(card, f"c{int(card.id)}"))
+    play = ASSETS / "play"
+    for card in cards:
+        out[play / "cards" / f"card_{int(card.id):02d}.svg"] = svg_document(
+            CARD_W, CARD_H, card_title(card, True), card_body(card, f"c{int(card.id)}", True))
+    for noble in nobles:
+        out[play / "nobles" / f"noble_{int(noble.id):02d}.svg"] = svg_document(
+            NOBLE, NOBLE, noble_title(noble, True), noble_body(noble, f"n{int(noble.id)}", True))
+    for level in (1, 2, 3):
+        out[play / "decks" / f"deck_l{level}.svg"] = svg_document(
+            CARD_W, CARD_H, f"レベル{level}の山札", deck_body(level))
     for level in (1, 2, 3):
         # one row per bonus colour (white, blue, green, red, black), cheapest
         # prestige first; every level has the same number of cards per colour
