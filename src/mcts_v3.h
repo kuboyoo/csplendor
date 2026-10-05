@@ -158,7 +158,7 @@ inline int semantic_group_id(int action_id) {
 enum class NodeKind : uint8_t { Decision = 0, Chance = 1, Terminal = 2 };
 
 struct Edge {
-  int32_t key = -1; // V3 action id, or revealed card id below a chance node
+  int32_t key = -1; // V4 action id, or revealed card id below a chance node
   float prior = 0.0f;
   float clean_prior = 0.0f; // prior before root noise (root edges only)
   int32_t child = -1;
