@@ -29,7 +29,6 @@ Splendorの**2人対戦用ルールエンジン**です。C++17の合法手生�
 | 実行時 | NumPy 1.20以上 |
 | Web API（任意） | `[web]` extra: FastAPI、Uvicorn、Pydantic、HTTPX |
 | 開発（任意） | `[dev]` extra: pytest、coverage、Ruffなど |
-| ML（任意） | `[ml]` extra: PyTorch。外部AIやモデルは別途必要 |
 
 `pip`はPythonの依存関係とビルド依存を導入します。C++コンパイラは事前に用意してください。ルールエンジン単体にGPUやPyTorchは不要です。
 
@@ -391,9 +390,8 @@ OpenAPIは `http://127.0.0.1:8000/docs` です。
 | 添字で着手 | `POST /game/{session_id}/action?action_idx=0` |
 | USIで着手 | `POST /game/{session_id}/action_usi`、JSON `{"usi_move":"take:WUG"}` |
 | 戻す | `POST /game/{session_id}/undo` |
-| 外部AI互換bridge | `POST /game/{session_id}/ai_move` |
 
-`action_idx` は直前の状態の `legal_actions` 内の添字です。保存用IDやV3のIDとして使わないでください。`/ai_move` は外部 `dlsplendor` とモデルが必要で、未導入なら503です。詳細は [Web API](doc/web_api.md)。
+`action_idx` は直前の状態の `legal_actions` 内の添字です。保存用IDやV3のIDとして使わないでください。AIの着手選択は提供しないため、AIは呼出し側で動かして着手を送ります。詳細は [Web API](doc/web_api.md)。
 
 ### 対戦サービス側で担当すること
 

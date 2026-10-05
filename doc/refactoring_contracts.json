@@ -144,7 +144,6 @@
       "KifuApplicationService",
       "ReplayApplicationService"
     ],
-    "optional_ai_boundary": "AIProvider",
     "usi_canonical_repository": "usi",
     "legacy_replay_trust": "administrator-controlled-local-files-only"
   },

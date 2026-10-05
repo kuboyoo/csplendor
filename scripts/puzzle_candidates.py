@@ -29,7 +29,7 @@ def generate_candidate_positions(
     while not game.is_game_over() and game.legal_actions:
         if progress is not None:
             progress.emit(
-                "genbu_playout",
+                "playout",
                 attempt=attempt,
                 ply=ply,
                 start_ply=start_ply,

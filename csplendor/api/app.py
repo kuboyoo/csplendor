@@ -1,4 +1,3 @@
-import logging
 import os
 from typing import Any, Dict, List, Optional
 
@@ -6,7 +5,6 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from .. import Action, Game
-from .ai_provider import AIRequest, get_ai_provider
 from .application_errors import ApplicationError
 from .game_presenter import (
     core_to_schema_action as _present_action,
@@ -19,11 +17,9 @@ from .kifu_service import KifuApplicationService
 from .replay import replay_router
 from .schemas import ActionSchema, GameStateSchema
 from .stores import InMemoryStore
-from .usi_serializer import action_to_usi
 
 app = FastAPI(title="Splendor Engine API")
 app.include_router(replay_router)
-logger = logging.getLogger(__name__)
 
 # Dictionary-compatible aliases are retained for existing embedders and tests.
 # Application code accesses them through the injected store interfaces.
@@ -248,120 +244,6 @@ async def undo_action(session_id: str):
         raise _http_error(error) from error
 
 
-@app.post("/game/{session_id}/ai_move", response_model=Dict[str, Any])
-async def get_ai_move(
-    session_id: str,
-    ai_type: str = "greedy",
-    time_limit: float = 2.0,
-    use_determinization: bool = True,
-    num_simulations: int = None,
-    # AlphaZero advanced options - inference defaults (optimized for strongest play)
-    fpu: float = 0.0,              # Keep same as training
-    forced_playouts: bool = False, # OFF for inference
-    ratio_full_mcts: int = 5,      # Keep same as training
-    prob_full_mcts: float = 0.25,  # Keep same as training
-    temperature_early: float = 0.1,  # Low for deterministic play
-    temperature_late: float = 0.1,   # Low for deterministic play
-    cpuct: float = 1.5,            # Keep same as training
-    dirichlet_alpha: float = 0.03, # Effectively disabled for inference
-    model_path: str = None,        # Path to .pt model file (optional)
-):
-    """
-    Get AI move for the current game state.
-
-    Args:
-        session_id: Game session ID
-        ai_type: AI type - "mcts", "greedy", "genbu", "alphazero", "deepsets", "set_transformer", or "nnue"
-        time_limit: Max thinking time in seconds (default: 2.0)
-        use_determinization: Whether to use determinization for MCTS (default: True)
-        num_simulations: Fixed number of MCTS simulations (optional, overrides time_limit for alphazero)
-        model_path: Path to .pt model file (optional, uses default if not specified)
-
-        AlphaZero advanced options:
-        fpu: First Play Urgency value (negative=absolute, positive=parent reduction)
-        forced_playouts: Enable forced playouts for high-policy moves
-        ratio_full_mcts: Ratio between full and fast MCTS simulations
-        prob_full_mcts: Probability of choosing full MCTS exploration
-        temperature_early: Softmax temperature for early game moves
-        temperature_late: Softmax temperature for late game moves
-        cpuct: PUCT exploration constant
-        dirichlet_alpha: Dirichlet noise alpha for root exploration
-    """
-    try:
-        game = _game_service.require_game(session_id)
-    except ApplicationError as error:
-        raise _http_error(error) from error
-
-    allowed_ai_types = {
-        "mcts",
-        "greedy",
-        "genbu",
-        "alphazero",
-        "deepsets",
-        "set_transformer",
-        "nnue",
-    }
-    if ai_type not in allowed_ai_types:
-        raise HTTPException(status_code=400, detail=f"Unknown AI type: {ai_type}")
-
-    # Distilled/search AIs must explicitly run with a fixed-count search
-    # budget. Validate this before loading any optional model dependency.
-    if ai_type in ("deepsets", "set_transformer", "nnue") and (
-        num_simulations is None or num_simulations <= 0
-    ):
-        ai_name = {
-            "deepsets": "DeepSets",
-            "set_transformer": "SetTransformer",
-            "nnue": "NNUE",
-        }[ai_type]
-        raise HTTPException(
-            status_code=400,
-            detail=f"{ai_name} requires a positive num_simulations "
-            "(search budget).",
-        )
-
-    try:
-        decision = get_ai_provider().choose_action(
-            game,
-            AIRequest(
-                ai_type=ai_type,
-                time_limit=time_limit,
-                use_determinization=use_determinization,
-                num_simulations=num_simulations,
-                options={
-                    "fpu": fpu,
-                    "forced_playouts": forced_playouts,
-                    "ratio_fullMCTS": ratio_full_mcts,
-                    "prob_fullMCTS": prob_full_mcts,
-                    "temperature": [temperature_early, temperature_late],
-                    "cpuct": cpuct,
-                    "dirichletAlpha": dirichlet_alpha,
-                    "model_path": model_path,
-                },
-            ),
-        )
-        action_usi = None
-        if 0 <= decision.action_index < len(game.legal_actions):
-            action_usi = action_to_usi(
-                game.legal_actions[decision.action_index], game=game
-            )
-        return {
-            "action_idx": decision.action_index,
-            "action_usi": action_usi,
-            "used_mode": decision.used_mode,
-            "used_simulations": decision.used_simulations,
-            "elapsed_ms": decision.elapsed_ms,
-        }
-    except ApplicationError as error:
-        raise _http_error(error) from error
-    except Exception as error:
-        logger.exception(
-            "AI provider failed",
-            extra={"event": "ai_provider_failure", "ai_type": ai_type},
-        )
-        raise HTTPException(status_code=500, detail=str(error)) from error
-
-
 @app.post("/game/{session_id}/export_kifu", response_model=Dict[str, Any])
 async def export_game_kifu(session_id: str, req: Optional[KifuMetaUpdate] = None):
     try:
@@ -407,13 +289,3 @@ async def branch_from_kifu(session_id: str, req: BranchRequest):
         return _kifu_service.branch(session_id, int(req.step))
     except ApplicationError as error:
         raise _http_error(error) from error
-
-
-@app.get("/models", response_model=Dict[str, List[Dict[str, str]]])
-async def list_models():
-    """
-    List available .pt model files for AlphaZero.
-
-    Returns a list of model files found in common directories.
-    """
-    return {"models": get_ai_provider().list_models()}

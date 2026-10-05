@@ -31,18 +31,10 @@ from scripts.puzzle_candidates import (
     generate_candidate_position,
     generate_candidate_positions,
 )
-from scripts.puzzle_engine_adapter import (
-    DEFAULT_GENBU_WEIGHTS,
-    DLSPLENDOR_ROOT,
-    GenbuPuzzlePlayer,
-    PuzzlePlayer,
-    create_genbu_players,
-)
+from scripts.puzzle_engine_adapter import PuzzlePlayer, RandomPurchasePlayer
 from scripts.puzzle_persistence import save_puzzle as _persist_puzzle
 
 _COMPAT_COMPONENT_EXPORTS = (
-    DLSPLENDOR_ROOT,
-    GenbuPuzzlePlayer,
     PuzzlePlayer,
     generate_candidate_position,
     generate_candidate_positions,
@@ -435,7 +427,7 @@ def generate_ranked_candidate_positions(
     ply = 0
     while not game.is_game_over() and game.legal_actions:
         if progress is not None:
-            progress.emit("genbu_playout", attempt=attempt, ply=ply, start_ply=start_ply)
+            progress.emit("playout", attempt=attempt, ply=ply, start_ply=start_ply)
         before_player = int(game.board.current_player)
         if not game.apply(players[before_player].select_action(game), False):
             raise RuntimeError("engine rejected a generated legal action")
@@ -933,22 +925,13 @@ def generate_puzzles(args: argparse.Namespace) -> GenerationStats:
         force=True,
         count=args.count,
         max_attempts=args.max_attempts,
-        genbu_simulations=args.genbu_simulations,
-        genbu_time_limit=args.genbu_time_limit,
         build_strategy_dag=args.build_strategy_dag,
         require_complete_dag=args.require_complete_dag,
         min_losing_alternatives=args.min_losing_alternatives,
         mate_jobs=args.mate_jobs,
     )
-    players = create_genbu_players(
-        Path(args.genbu_weights),
-        time_limit=args.genbu_time_limit,
-        num_simulations=args.genbu_simulations,
-        rng=rng,
-        best_action_rate=args.genbu_best_action_rate,
-        top_action_rate=args.genbu_top_action_rate,
-        top_action_count=args.genbu_top_action_count,
-    )
+    player = RandomPurchasePlayer(rng)
+    players = (player, player)
 
     while stats.saved < args.count and stats.attempts < args.max_attempts:
         stats.attempts += 1
@@ -1016,12 +999,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--count", type=int, default=100, help="number of puzzles to save")
     parser.add_argument("--max-attempts", type=int, default=10000)
     parser.add_argument("--seed", type=int, default=0, help="generator RNG seed")
-    parser.add_argument("--genbu-weights", default=str(DEFAULT_GENBU_WEIGHTS))
-    parser.add_argument("--genbu-time-limit", type=float, default=0.25, help="seconds per Genbu move")
-    parser.add_argument("--genbu-simulations", type=int, default=100, help="maximum MCTS simulations per Genbu move")
-    parser.add_argument("--genbu-best-action-rate", type=float, default=0.7)
-    parser.add_argument("--genbu-top-action-rate", type=float, default=0.2)
-    parser.add_argument("--genbu-top-action-count", type=int, default=4)
     parser.add_argument("--min-playout-plies", type=int, default=18)
     parser.add_argument("--max-playout-plies", type=int, default=48)
     parser.add_argument("--boundary-history", type=int, default=10)
@@ -1140,16 +1117,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise ValueError("count and max-attempts must be non-negative")
     if args.min_playout_plies < 0 or args.min_playout_plies > args.max_playout_plies:
         raise ValueError("invalid playout ply range")
-    if (
-        args.genbu_time_limit < 0
-        or args.genbu_simulations <= 0
-        or args.genbu_best_action_rate < 0
-        or args.genbu_top_action_rate < 0
-        or args.genbu_best_action_rate + args.genbu_top_action_rate > 1
-        or args.genbu_best_action_rate + args.genbu_top_action_rate <= 0
-        or args.genbu_top_action_count <= 0
-    ):
-        raise ValueError("invalid Genbu search limits")
     if (
         args.boundary_history <= 0
         or args.boundary_trigger_depth < 0

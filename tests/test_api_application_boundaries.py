@@ -1,9 +1,8 @@
-"""Contracts for the R7 application, store and optional-AI boundaries."""
+"""Contracts for the R7 application and store boundaries."""
 
 from __future__ import annotations
 
 import asyncio
-import logging
 import subprocess
 import sys
 from pathlib import Path
@@ -12,13 +11,6 @@ import httpx
 import pytest
 
 import csplendor as cs
-from csplendor.api import ai_manager
-from csplendor.api.ai_provider import (
-    AIDecision,
-    AIRequest,
-    reset_ai_provider,
-    set_ai_provider,
-)
 from csplendor.api.app import app, kifu_sessions, session_records, sessions
 from csplendor.api.game_service import GameSessionService
 from csplendor.api.stores import InMemoryStore, KifuStore, SessionStore
@@ -42,9 +34,7 @@ def _isolated_application_state():
     sessions.clear()
     session_records.clear()
     kifu_sessions.clear()
-    reset_ai_provider()
     yield
-    reset_ai_provider()
     sessions.clear()
     session_records.clear()
     kifu_sessions.clear()
@@ -72,38 +62,11 @@ def test_in_memory_store_satisfies_replaceable_store_interfaces():
     assert record_store[session_id]["meta"]["Player0"] == "A"
 
 
-def test_fake_ai_provider_controls_move_and_model_endpoints():
-    class FakeProvider:
-        def choose_action(self, game, request: AIRequest) -> AIDecision:
-            assert game is sessions["game"]
-            assert request.ai_type == "greedy"
-            return AIDecision(
-                action_index=0,
-                used_mode="fake-provider",
-                used_simulations=11,
-                elapsed_ms=3,
-            )
-
-        def list_models(self):
-            return [
-                {
-                    "path": "/virtual/model.pt",
-                    "name": "model.pt",
-                    "display": "virtual/model.pt",
-                    "dir": "virtual",
-                }
-            ]
-
+def test_web_api_does_not_offer_ai_move_selection():
     sessions["game"] = cs.Game(seed=42)
-    set_ai_provider(FakeProvider())
 
-    move = _request("POST", "/game/game/ai_move?ai_type=greedy")
-    models = _request("GET", "/models")
-
-    assert move.status_code == 200
-    assert move.json()["used_mode"] == "fake-provider"
-    assert move.json()["used_simulations"] == 11
-    assert models.json()["models"][0]["name"] == "model.pt"
+    assert _request("POST", "/game/game/ai_move").status_code == 404
+    assert _request("GET", "/models").status_code == 404
 
 
 def test_web_application_import_does_not_scan_external_models_or_repositories():
@@ -135,11 +98,30 @@ assert app is not None
     assert completed.returncode == 0, completed.stderr
 
 
-def test_legacy_ai_diagnostics_are_structured_log_records(caplog):
-    caplog.set_level(logging.WARNING, logger="csplendor.api.ai_manager")
-    ai_manager._structured_diagnostic("WARNING: fixture diagnostic")
+def test_core_import_does_not_require_web_extras():
+    script = r'''
+import builtins
 
-    record = caplog.records[-1]
-    assert record.getMessage() == "WARNING: fixture diagnostic"
-    assert record.event == "legacy_ai_diagnostic"
-    assert record.component == "ai_manager"
+real_import = builtins.__import__
+blocked = {"fastapi", "httpx", "pydantic", "uvicorn"}
+
+def guarded_import(name, *args, **kwargs):
+    if name.partition(".")[0] in blocked:
+        raise ImportError(f"blocked optional dependency: {name}")
+    return real_import(name, *args, **kwargs)
+
+builtins.__import__ = guarded_import
+import csplendor
+
+game = csplendor.Game(seed=42)
+assert game.legal_action_count > 0
+'''
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
