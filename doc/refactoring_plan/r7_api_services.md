@@ -2,6 +2,11 @@
 
 実施日: 2026-08-05
 
+> 2026-10-05 追記: 外部AI連携（`ai_provider.py`、`external_ai_bridge.py`、`ai_manager.py`、
+> `/game/{id}/ai_move`、`/models`、`CSPLENDOR_*_PATH`）は削除した。下記の外部AIに関する記述は
+> 当時の記録として残す。AIは呼出し側で動かし、`action` / `action_usi` で着手する
+> （[CHANGELOG](../../CHANGELOG.md) 参照）。
+
 ## 目的と維持契約
 
 FastAPI、process-global dictionary、USI/KIFU codec、legacy replay、外部AI実装の

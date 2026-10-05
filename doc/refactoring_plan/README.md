@@ -244,7 +244,7 @@ GIL release/acquire自体にもコストがあるので、短いmethodへ一律�
 2. native計算時間とPython変換時間を別々に計測する。
 3. 既存APIの返却型を変えず、内部一時vectorのreserveや不要な再copyを局所改善する。shared backing/view化はNumPyのownershipとaliasingを変えるため、挙動維持Phaseへ入れない。
 4. 新しいfast APIの追加は「公開APIを変更しない」の解釈確認が必要なので、自動的には行わない。
-5. `ai_manager.py` のnative maskは一時の所有NumPy arrayでC++ stateを共有しないため、`np.array(...)` から `np.asarray(...)` への置換候補は比較的低リスクである。それでもconsumer側のdtype、contiguity、保持/変更をtestする。
+5. （2026-10-05に `ai_manager.py` は削除済み）`ai_manager.py` のnative maskは一時の所有NumPy arrayでC++ stateを共有しないため、`np.array(...)` から `np.asarray(...)` への置換候補は比較的低リスクである。それでもconsumer側のdtype、contiguity、保持/変更をtestする。
 
 ## 6. Action Encoder の役割
 

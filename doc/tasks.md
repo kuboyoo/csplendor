@@ -1,6 +1,6 @@
 # csplendor 継続課題
 
-最終更新: 2026-08-05
+最終更新: 2026-10-05
 
 第1次リファクタリング（Phase 0--7）と第2次リファクタリング（R0--R8）は完了した。
 完了内容は[`refactoring_plan/README.md`](refactoring_plan/README.md)と
@@ -40,5 +40,6 @@
 - PyPI公開前にmanylinux repair、TestPyPI、配布wheelのmacOS/Windows隔離installを行う。
 - setuptoolsの2027年非互換化より前にlicense metadataをSPDX文字列へ移行する。
 - `usi`仕様や`dlsplendor` consumer変更時はcross-repository compatibility testを同時に更新する。
+  csplendorは`dlsplendor`に依存しない（外部AI連携は2026-10-05に削除）。依存方向は`dlsplendor`→csplendorの一方向に保つ。
 
 完了済み項目をこの一覧へ戻さず、仕様変更・性能改善・release作業はそれぞれ独立PRとして扱う。
