@@ -64,6 +64,42 @@ def test_kifu_codec_has_stable_text_and_parse_contract():
     ]
 
 
+def test_kifu_codec_round_trips_time_control_and_time_forfeit():
+    text = build_kifu_text(
+        headers={
+            "Format": "Splendor KIFU v1.1",
+            "Players": "2",
+            "TimeControl": "150+30/150",
+        },
+        position="startpos 2",
+        moves=[
+            {"player": 0, "usi": "reserve:L2", "time_ms": 1800},
+            {"player": 0, "usi": "return:W", "time_ms": 400},
+        ],
+        result="P0_WIN",
+        result_detail="TIME",
+        final_scores=[3, 5],
+        total_turns=12,
+    )
+    assert "TimeControl: 150+30/150\n" in text
+    assert "\nResult: P0_WIN TIME\n" in text
+    parsed = parse_kifu_text(text)
+    assert parsed["headers"]["TimeControl"] == "150+30/150"
+    assert (parsed["result"], parsed["result_detail"]) == ("P0_WIN", "TIME")
+    assert [move["time_ms"] for move in parsed["moves"]] == [1800, 400]
+
+
+def test_kifu_result_without_detail_parses_to_none():
+    text = build_kifu_text(
+        headers={"Format": "Splendor KIFU v1.0"},
+        position="startpos 2",
+        moves=[],
+        result="DRAW",
+    )
+    parsed = parse_kifu_text(text)
+    assert (parsed["result"], parsed["result_detail"]) == ("DRAW", None)
+
+
 def test_sibling_usi_repository_color_contract_when_checkout_is_available():
     canonical = Path(__file__).resolve().parents[2] / "usi" / "docs" / "USI.md"
     if not canonical.is_file():
