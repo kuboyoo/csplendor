@@ -1,5 +1,21 @@
 # 変更履歴 / Changelog
 
+## 未出荷：外部AI連携の削除（2026-10-05）
+
+- Web APIの `POST /game/{session_id}/ai_move` と `GET /models`、`csplendor.api.ai_manager`・`ai_provider`・
+  `external_ai_bridge`（`AIProvider`、`set_ai_provider()`、`CSPLENDOR_*_PATH` 環境変数）を削除した。
+  AIは呼出し側で動かし、`action` / `action_usi` で着手する。PyTorchだけを入れる `[ml]` extraも削除した。
+- 詰め問題集生成（`scripts/generate_mate_puzzles.py`）のGenbu/`dlsplendor` 対局を削除し、csplendorだけで動く
+  `RandomPurchasePlayer`（購入手を優先する一様ランダム、`--seed` で再現可能）に置き換えた。`--genbu-*` 引数は廃止。
+  進捗表示の段階名は `genbu_playout` から `playout` になった。
+- csplendorは `dlsplendor` に依存しなくなった。
+
+English: Removed the external-AI web endpoints (`/game/{id}/ai_move`, `/models`),
+the `ai_manager`/`ai_provider`/`external_ai_bridge` modules and the `[ml]` extra.
+Mate-puzzle generation no longer drives Genbu through `dlsplendor`; it plays
+seeded random games that prefer purchases (`RandomPurchasePlayer`), and the
+`--genbu-*` options are gone. csplendor no longer depends on `dlsplendor`.
+
 ## 未出荷：山札予約後の返却フェーズと行動空間V4（2026-10-05）
 
 - 山札予約（`RESERVE_DECK`）は返却を持たなくなった。予約で11枚になると同じ手番のまま返却フェーズ

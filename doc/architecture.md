@@ -62,8 +62,7 @@ FastAPI endpointは`GameSessionService`、`KifuApplicationService`、
 `game_presenter.py`が担う。
 
 USI/KIFUはtoken/parser/DTO、legal-action resolver、serializer/codecに分かれ、仕様の正本は
-`usi` repositoryとする。外部AIは`AIProvider`境界から遅延loadし、通常のengine importでは
-sibling repositoryやmodel fileを探索しない。legacy replay pickleは管理者が配置した
+`usi` repositoryとする。Web APIはAIの着手選択を持たず、外部repositoryやmodel fileに依存しない。legacy replay pickleは管理者が配置した
 信頼済みローカルファイル専用readerに隔離する。
 
 ## 状態・互換性

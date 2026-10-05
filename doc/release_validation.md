@@ -70,9 +70,7 @@ Mach-Oがarm64専用であることを確認します。長時間のnightly soak
 - wheelのbuildはsdistを入力にしても成功し、CPython 3.12の隔離venvでimportできました。
 - Linux host上で直接生成した未修復wheelを、そのまま汎用PyPI wheelとして公開しません。
 - FastAPIは`web` extraです。ルールエンジン本体のimportにWeb依存は不要です。
-- `/ai_move`は互換用のoptional integrationです。torchと外部`dlsplendor`は利用時に
-  遅延loadされ、外部stackがない場合はHTTP 503になります。モデルやNN探索実装は
-  csplendor packageへ同梱しません。
+- Web APIはAIの着手選択を持ちません。モデルやNN探索実装はcsplendor packageへ同梱しません。
 
 ## Replay pickleの信頼境界
 

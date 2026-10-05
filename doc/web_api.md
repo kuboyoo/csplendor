@@ -20,7 +20,6 @@ OpenAPI: `http://127.0.0.1:8000/docs`。現在のリクエスト・レスポン�
 | `POST /game/{session_id}/action` | query: `action_idx`, 任意の `time_ms`, `comment` | 更新後の `GameStateSchema` |
 | `POST /game/{session_id}/action_usi` | JSON: `usi_move`, 任意の `time_ms`, `comment` | `action_idx`, `action_usi`, `state` |
 | `POST /game/{session_id}/undo` | なし | 更新後の `GameStateSchema` |
-| `POST /game/{session_id}/ai_move` | query: `ai_type` など | 外部AIによる着手結果 |
 
 `seed=0` も再現可能な固定seedです。ランダムな初期配置を作る場合は呼出し側でseedを生成します。
 
@@ -49,11 +48,9 @@ Pythonの `Game` は `False` が既定です。対局サーバー・AI・棋譜�
 
 `waiting_noble` の間は同じプレイヤーが貴族を選びます。`waiting_return` の間（山札予約で11枚になった直後）は同じプレイヤーが `RETURN_GEM` で1枚返します。返却はめくれたカードを見てから選び、その後に貴族判定を行います。状態の購入Actionの `usi` は `/pay:` 拡張を含むことがあるため、外部USIエンジンの対応表記を確認してください。
 
-## 外部AIと棋譜
+## 棋譜
 
-`/ai_move` は互換用のoptional bridgeです。外部 `dlsplendor`・PyTorch・モデルがない場合は503を返します。`[ml]` はPyTorchのみを提供し、モデルやAI実装を同梱しません。不明なAIモードや必要な固定探索予算の欠落は、モデルをloadする前に400となります。
-
-組み込みアプリは `AIProvider` と `set_ai_provider()` で独自のAIを接続できます。エンジン/Webアプリのimportだけでは外部repoやモデルを探索しません。互換bridgeの外部ルートは `CSPLENDOR_DLSPLENDOR_PATH`、`CSPLENDOR_ALPHAZERO_PATH`、`CSPLENDOR_DEEPSETS_PATH`、`CSPLENDOR_NNUE_PATH` で指定できます。
+Web APIはAIの着手選択を提供しません。AIは呼出し側のプロセスで動かし、`action` または `action_usi` で着手します。
 
 棋譜のメタデータ更新・保存・再生APIもあります。ルート一覧はOpenAPI、形式は [KIFU](KIFU.md) を参照してください。
 

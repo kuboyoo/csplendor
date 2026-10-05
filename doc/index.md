@@ -20,7 +20,7 @@
 | [機械学習連携](ml_integration.md) | 196特徴、observer、行動マスク、schema |
 | [AI向け仕様](ai_engine_spec.md) | 貴族選択・終局phase・Actionフィールド |
 | [行動空間V2](action_space_v2.md) / [V3](action_space_v3.md) / [V4](action_space_v4.md) | 4869 / 3133 / 3121枠の意味とエンコード。V4は山札予約後の返却（`RETURN_GEM`）とV3からの移行 |
-| [詰み探索ガイド](mate_usage.md) | API、CLI、DAG、外部AIによる問題生成 |
+| [詰み探索ガイド](mate_usage.md) | API、CLI、DAG、問題集生成 |
 | [ソルバー仕様](SOLVER.md) | 深さ・証明・Unknown・予算の契約 |
 | [並列MCTS](parallel_mcts_usage.md) | サンプルと実験的APIの制約 |
 | [V3多対局探索](mcts_v3.md) | V4の3,121行動上のPUCT。多対局の葉バッチ、決定化、サンプル型chance、対局単位のマルチスレッド |

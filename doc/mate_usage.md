@@ -1,7 +1,6 @@
 # 詰み探索・証明・問題集生成
 
 [README](../README.md)の詰み探索APIの補足です。以下のコマンドはリポジトリルートで実行します。
-外部AIによる問題集生成には別途 `dlsplendor` とモデルが必要です。
 
 
 `scripts/dfpn_mate_solver.py` は、任意局面から player0 または player1 の強制勝利を探索します。
@@ -189,15 +188,13 @@ near = cs.search_near_mate(game, attacker=1, min_depth=1, max_depth=3,
 
 ### 詰め問題集の生成
 
-`scripts/generate_mate_puzzles.py` は、`dlsplendor.search.genbu_adapter.GenbuAdapter` を使った Genbu AI 同士の対局から終盤局面を生成し、めくれまで検証済みの詰みだけを問題集として保存します。ランダムに選んだ終盤開始手数に到達した後は、詰みが初めて見つかるまで1手番ごとに候補局面を検証します。AI 対局中だけ簡易支払いモードを有効にします。詰み検証では通常支払いモードに戻し、購入時の全支払いパターン、局面入力後の山札予約、めくれを検証します。
+`scripts/generate_mate_puzzles.py` は、csplendor だけで動くランダム対局（`scripts/puzzle_engine_adapter.py` の `RandomPurchasePlayer`。購入手があれば購入手から、なければ全合法手から一様に選ぶ）から終盤局面を生成し、めくれまで検証済みの詰みだけを問題集として保存します。ランダムに選んだ終盤開始手数に到達した後は、詰みが初めて見つかるまで1手番ごとに候補局面を検証します。対局中だけ簡易支払いモードを有効にします。対局は `--seed` で再現できます。詰み検証では通常支払いモードに戻し、購入時の全支払いパターン、局面入力後の山札予約、めくれを検証します。
 
 ```bash
 python scripts/generate_mate_puzzles.py \
   --output-dir generated/mate_puzzles \
   --count 100 \
   --max-attempts 10000 \
-  --genbu-weights scripts/weights/genbu.pt \
-  --genbu-simulations 100 \
   --min-depth 5 \
   --max-depth 7 \
   --no-strategy-dag \
@@ -206,13 +203,7 @@ python scripts/generate_mate_puzzles.py \
   --time-limit 30
 ```
 
-旧Genbuモデルの実行に必要な `alphazero-general-ori` は、`dlsplendor` 直下、
-同階層、および標準workspaceの `workspace/src/alphazero-general-ori` から自動検出します。
-別の場所に置く場合は `ALPHAZERO_ORI_PATH=/path/to/alphazero-general-ori` を指定してください。
-Numbaキャッシュは既定で一時ディレクトリへ保存するため、旧ソースツリーが読み取り専用でも
-実行できます。
-
-進捗は attempt 開始と詰み探索開始時に表示されます。`--min-losing-alternatives` を1以上にした場合は誤答側詰み探索も表示されます。棄却時は `stage=rejected`、棄却理由、完全な SPN `position` を表示します。Genbu 対局中の定期表示間隔は `--progress-seconds` で変更できます。
+進捗は attempt 開始と詰み探索開始時に表示されます。`--min-losing-alternatives` を1以上にした場合は誤答側詰み探索も表示されます。棄却時は `stage=rejected`、棄却理由、完全な SPN `position` を表示します。対局中の定期表示間隔は `--progress-seconds` で変更できます。
 
 高コストなめくれ検証の前に、点差、合法手数、両者の楽観的な近未来得点、visible-only 探索で候補を絞ります。既定では両者が3手以内に15点へ到達しうる合法手12個以上の局面を対象とし、depth 3以上の詰みだけを採用します。詰み証明後は全合法初手を固定して再検証し、別解がない問題だけを保存します。条件は `--threat-turns`、`--min-legal-actions`、`--min-optimistic-score`、`--min-depth`、`--visible-prefilter-time-limit`、`--uniqueness-time-limit` で調整できます。`--uniqueness-max-depth 8` のように指定すると、各初手を問題の詰み深さから指定深さまで反復深化し、より長い別解も除外します。各初手では最初の `--uniqueness-positive-time-limit` 秒（既定2秒）で別解の正証明を高速に探し、残りの累積予算で全合法手・具体的めくれの不詰みを厳密検証します。各初手の累積予算は `--uniqueness-node-limit` と `--uniqueness-time-limit`、候補局面・誤答側の詰み探索は `--mate-jobs 16`、初手間のCPU並列数は `--uniqueness-jobs 16`（いずれも `0` は論理CPU数）で指定します。誤答時に相手の詰みまで成立することは既定の採用条件ではありません。必要なら `--min-losing-alternatives 1` 以上を指定します。
 

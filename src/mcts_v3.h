@@ -111,7 +111,7 @@ struct Config {
 };
 
 // Decision before payment/return details over V4 ids: 139 groups. Groups
-// 0..132 keep the layout of dlsplendor.search.semantic_actions (V3): take
+// 0..132 are the V3 semantic groups: take
 // different 0..9, take same 10..14, reserve visible 15..26, reserve deck
 // 27..29, purchase 30 + card id, noble 120 + id, pass 132. The post-deck-
 // reservation returns are groups 133..138 (white, blue, green, red, black,
