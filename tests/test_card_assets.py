@@ -54,3 +54,11 @@ def test_deck_backs_are_filled_with_distinct_level_colours():
         fills.append(match.group(1))
         assert text.count("<polygon") == level  # one large diamond per level
     assert len(set(fills)) == 3
+
+
+def test_play_white_gem_numerals_are_white_with_black_outline():
+    files = _play_assets()
+    for name in ("play/cards/card_01.svg", "play/nobles/noble_05.svg"):
+        assert 'fill="#3A3730"' not in files[name], name  # old dark digit on white
+    # noble 5 needs white bonuses: its white tile outlines the digit in black
+    assert 'stroke="#000000" stroke-width="4"' in files["play/nobles/noble_05.svg"]

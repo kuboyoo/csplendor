@@ -113,33 +113,44 @@ def gem_icon(cx: float, cy: float, size: float, color: str) -> str:
 
 
 def numeral(x: float, y: float, size: float, weight: int, fill: str, value: int,
-            outline: str = "") -> str:
+            outline: str = "", stroke: float = 3) -> str:
     """A centred number; with ``outline`` the digits get a stroke in that colour."""
     return (
         f'<text x="{x}" y="{y}" text-anchor="middle" font-size="{size}" font-weight="{weight}" '
         f'fill="{fill}"'
-        + (f' stroke="{outline}" stroke-width="3" paint-order="stroke" stroke-linejoin="round"' if outline else "")
+        + (f' stroke="{outline}" stroke-width="{stroke}" paint-order="stroke" stroke-linejoin="round"' if outline else "")
         + f' {FONT}>{value}</text>'
     )
 
 
+def play_digit(color: str) -> Tuple[str, str, float]:
+    """Fill, outline and outline width of a play-edition numeral on a gem.
+    Every colour is white with an outline; the white gem uses a thick black one
+    so the digit stays readable against the pale gem."""
+    if color == "white":
+        return "#FFFFFF", "#000000", 4
+    return "#FFFFFF", GEM[color][1], 3
+
+
 def cost_token(cx: float, cy: float, color: str, amount: int, play: bool = False) -> str:
     fill, edge, light, text = GEM[color]
+    digit, outline, stroke = play_digit(color) if play else (text, "", 3)
     r, size, weight, dy, hl = (16, 23, 800, 7.8, 4.8) if play else (13, 16, 700, 5.5, 4)
     return (
         f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="{fill}" stroke="{edge}" stroke-width="1.6"/>'
         f'<circle cx="{cx - hl}" cy="{cy - hl}" r="{hl}" fill="{light}" opacity="0.45"/>'
-        + numeral(cx, cy + dy, size, weight, text, amount, edge if play else "")
+        + numeral(cx, cy + dy, size, weight, digit, amount, outline, stroke)
     )
 
 
 def requirement_tile(x: float, y: float, color: str, amount: int, play: bool = False) -> str:
     fill, edge, light, text = GEM[color]
+    digit, outline, stroke = play_digit(color) if play else (text, "", 3)
     side, size, weight, dy, hw, hh = (34, 24, 800, 25.2, 11, 7) if play else (24, 15, 700, 17.5, 8, 5)
     return (
         f'<rect x="{x}" y="{y}" width="{side}" height="{side}" rx="4" fill="{fill}" stroke="{edge}" stroke-width="1.6"/>'
         f'<rect x="{x + 3}" y="{y + 3}" width="{hw}" height="{hh}" rx="2" fill="{light}" opacity="0.45"/>'
-        + numeral(x + side / 2, y + dy, size, weight, text, amount, edge if play else "")
+        + numeral(x + side / 2, y + dy, size, weight, digit, amount, outline, stroke)
     )
 
 
