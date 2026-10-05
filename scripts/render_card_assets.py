@@ -367,30 +367,33 @@ def noble_title(noble, play: bool = False) -> str:
             f"V3インデックス{v3_noble_index(int(noble.id))}")
 
 
+DECK_EDGE = {1: "#1F4F27", 2: "#6B5410", 3: "#173A6B"}
+
+
 def deck_body(level: int) -> str:
-    """Face-down deck: the level's frame colour, a lattice and one gem per level."""
-    frame = LEVEL_FRAME[level]
+    """Face-down deck: filled with the level's colour, a faint lattice, a
+    white inner border and one large outlined diamond per level. The top-right
+    corner stays empty for the remaining-count badge drawn by the UI."""
+    fill, edge = LEVEL_FRAME[level], DECK_EDGE[level]
     lattice = "".join(
         f'<line x1="{x}" y1="3" x2="{x - CARD_H}" y2="{CARD_H - 3}"/>'
         f'<line x1="{x - CARD_H}" y1="3" x2="{x}" y2="{CARD_H - 3}"/>'
         for x in range(CARD_H, CARD_W + CARD_H, 28)
     )
+    half, pitch = 16, 36
     pips = "".join(
-        f'<polygon points="{x},{CARD_H / 2 - 9} {x + 9},{CARD_H / 2} {x},{CARD_H / 2 + 9} {x - 9},{CARD_H / 2}" '
-        f'fill="{frame}" stroke="#FFFFFF" stroke-width="2"/>'
-        for x in (CARD_W / 2 + (i - (level - 1) / 2) * 26 for i in range(level))
+        f'<polygon points="{x},{CARD_H / 2 - half - 4} {x + half},{CARD_H / 2} {x},{CARD_H / 2 + half + 4} '
+        f'{x - half},{CARD_H / 2}" fill="#FFFFFF" stroke="{edge}" stroke-width="3" stroke-linejoin="round"/>'
+        for x in (CARD_W / 2 + (i - (level - 1) / 2) * pitch for i in range(level))
     )
     return (
         f'<defs><clipPath id="deck{level}"><rect x="1.5" y="1.5" width="{CARD_W - 3}" '
         f'height="{CARD_H - 3}" rx="11"/></clipPath></defs>'
-        f'<rect x="1.5" y="1.5" width="{CARD_W - 3}" height="{CARD_H - 3}" rx="11" fill="#F6F1E4"/>'
-        f'<g clip-path="url(#deck{level})" stroke="{frame}" stroke-width="1.5" opacity="0.35">{lattice}</g>'
-        f'<rect x="1.5" y="1.5" width="{CARD_W - 3}" height="{CARD_H - 3}" rx="11" fill="none" '
-        f'stroke="{frame}" stroke-width="3"/>'
-        f'<rect x="12" y="12" width="{CARD_W - 24}" height="{CARD_H - 24}" rx="6" fill="none" '
-        f'stroke="{frame}" stroke-width="1.5"/>'
-        f'<rect x="{CARD_W / 2 - 46}" y="{CARD_H / 2 - 22}" width="92" height="44" rx="22" '
-        f'fill="#F6F1E4" stroke="{frame}" stroke-width="2"/>{pips}'
+        f'<rect x="1.5" y="1.5" width="{CARD_W - 3}" height="{CARD_H - 3}" rx="11" fill="{fill}" '
+        f'stroke="{edge}" stroke-width="3"/>'
+        f'<g clip-path="url(#deck{level})" stroke="#FFFFFF" stroke-width="1.5" opacity="0.14">{lattice}</g>'
+        f'<rect x="10" y="10" width="{CARD_W - 20}" height="{CARD_H - 20}" rx="6" fill="none" '
+        f'stroke="#FFFFFF" stroke-width="2" opacity="0.7"/>{pips}'
     )
 
 

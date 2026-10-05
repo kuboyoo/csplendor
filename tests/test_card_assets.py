@@ -42,3 +42,15 @@ def test_play_edition_shows_only_numerals():
         assert "◆" not in text and "ID" not in re.sub(r"<[^>]*>", "", text), name
         labels = re.findall(r"<text[^>]*>([^<]*)</text>", text)
         assert all(label.isdigit() for label in labels), (name, labels)
+
+
+def test_deck_backs_are_filled_with_distinct_level_colours():
+    files = _play_assets()
+    fills = []
+    for level in (1, 2, 3):
+        text = files[f"play/decks/deck_l{level}.svg"]
+        match = re.search(r'<rect [^>]*fill="(#[0-9A-Fa-f]{6})"', text)
+        assert match, level
+        fills.append(match.group(1))
+        assert text.count("<polygon") == level  # one large diamond per level
+    assert len(set(fills)) == 3

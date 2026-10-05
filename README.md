@@ -283,7 +283,7 @@ assert len(cs.get_all_nobles()) == 12
 
 - `assets/play/cards/card_XX.svg`（90枚、XXはカードID）
 - `assets/play/nobles/noble_XX.svg`（12枚、XXは貴族ID）
-- `assets/play/decks/deck_l{1,2,3}.svg`（山札の裏面。枠の色と◆の数がレベル。残り枚数は含まない）
+- `assets/play/decks/deck_l{1,2,3}.svg`（山札の裏面。カード全面をレベルの色（L1緑・L2黄・L3青、表面の枠色と同じ）で塗り、中央の大きな◆の数がレベル。右上は画面側の残り枚数バッジ用に空け、残り枚数は含まない）
 
 カード・貴族の大きさは開発用と同じ（カード140×196、貴族140×140）で、画面には幅96〜128px程度に拡大縮小して使えます。
 
