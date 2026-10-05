@@ -52,9 +52,11 @@
 
 葉の特徴量は `StateEncoder::encode_canonical(world, player, observer=player)`（196）に、
 `public_card_features` で `encode_public_card_statistics`（117）、`physical_seat_feature` で
-座席符号（先手 −1／後手 +1）、`return_phase_feature`（既定 `True`）で返却フェーズ符号
-（`waiting_return` のとき 1.0、それ以外 0.0）をこの順に連結したもので、既定は 315 次元です。
-従来の 314 次元を維持する場合は `return_phase_feature = False` にします。次元は `config.state_dim` で確認できます。
+座席符号（先手 −1／後手 +1）、`pending_decision_features`（既定 `True`）で手番内の保留判断2次元
+（index 314 = `waiting_return`、index 315 = `waiting_noble`。立っていれば 1.0、それ以外 0.0）を
+この順に連結したもので、既定は 316 次元です。返却と貴族選択は同じプレイヤーが続けて指す2段目の判断で、
+価値網が「まだ自分の手番が残っている」局面を区別できるようにします。
+保留判断の2次元を除く 314 次元にする場合は `pending_decision_features = False` にします。次元は `config.state_dim` で確認できます。
 
 ## Python API
 
@@ -67,7 +69,7 @@ config.num_threads = 4              # 任意。既定 1（結果はスレッド�
 session = cs.V3SearchSession(config)
 slot = session.add_game(game, observer=game.current_player, seed=1, root_noise=False)
 while not session.all_done():
-    features, legal_ids, offsets, slots = session.collect()   # features: (N, 315)、legal_ids は V4 ID
+    features, legal_ids, offsets, slots = session.collect()   # features: (N, 316)、legal_ids は V4 ID
     if len(slots) == 0:
         break
     priors, values = evaluate(features, legal_ids, offsets)    # priors は legal_ids と同じ並び

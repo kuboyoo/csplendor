@@ -31,7 +31,7 @@ assert len(canonical) == 196
 
 `observer=-1`（既定）は完全情報です。対戦AIでは `0` / `1` を明示します。`encode_canonical()` の `player` は特徴量内のプレイヤー順、`observer` は情報公開範囲の指定であり、別の意味です。
 
-V1に `waiting_noble`・`waiting_return`・`final_round` の独立した特徴はありません（`V3SearchSession` は `return_phase_feature` で返却フェーズの1次元を追加します。[V3探索](mcts_v3.md)）。新モデルに追加する場合は、既存196要素の意味を変えず別schemaとして定義してください。`StateEncoder.schema_version()`、`schema_fingerprint()`、`schema_sections()`、`gem_color_ids()` で既存契約を取得できます。
+V1に `waiting_noble`・`waiting_return`・`final_round` の独立した特徴はありません（`V3SearchSession` は `pending_decision_features` で `waiting_return`・`waiting_noble` の2次元を追加します。[V3探索](mcts_v3.md)）。新モデルに追加する場合は、既存196要素の意味を変えず別schemaとして定義してください。`StateEncoder.schema_version()`、`schema_fingerprint()`、`schema_sections()`、`gem_color_ids()` で既存契約を取得できます。
 
 公開カード統計は `StateEncoder.encode_public_card_statistics(game, player, observer)` で別途取得できます。長さは `public_card_feature_size()` を参照し、モデル独自の入力と混同しないでください。
 

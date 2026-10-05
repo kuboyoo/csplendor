@@ -62,9 +62,10 @@ struct Config {
   float draw_value = 0.0f;
   bool public_card_features = true; // +117 inputs
   bool physical_seat_feature = true; // +1 input
-  // 1 while the player to move must return a token after a deck reservation
-  // (Board::waiting_return), else 0. +1 input.
-  bool return_phase_feature = true;
+  // Second-stage decisions of the same player: 1 while the player to move must
+  // return a token (Board::waiting_return), then 1 while it must choose a noble
+  // (Board::waiting_noble), else 0. +2 inputs.
+  bool pending_decision_features = true;
   float dirichlet_alpha = 0.3f;
   float dirichlet_epsilon = 0.25f;
   float unseen_action_prior = 1e-3f; // legal in this world, absent at expansion
@@ -105,7 +106,7 @@ struct Config {
   int state_dim() const {
     return TOTAL_FEATURES +
            (public_card_features ? PUBLIC_CARD_FEATURE_SIZE : 0) +
-           (physical_seat_feature ? 1 : 0) + (return_phase_feature ? 1 : 0);
+           (physical_seat_feature ? 1 : 0) + (pending_decision_features ? 2 : 0);
   }
 };
 
@@ -794,8 +795,10 @@ private:
     }
     if (config_.physical_seat_feature)
       batch.features.push_back(static_cast<float>(2 * player - 1));
-    if (config_.return_phase_feature)
+    if (config_.pending_decision_features) {
       batch.features.push_back(world.board.waiting_return ? 1.0f : 0.0f);
+      batch.features.push_back(world.board.waiting_noble ? 1.0f : 0.0f);
+    }
     auto sink = [&batch](int id, const Action &) {
       batch.legal_ids.push_back(id);
     };

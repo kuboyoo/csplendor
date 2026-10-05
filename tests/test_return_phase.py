@@ -227,22 +227,44 @@ def test_v4_mask_ids_and_decode_agree_including_the_return_phase():
     assert seen_return_phase
 
 
-def test_search_features_flag_the_return_phase():
-    plain = cs.V3SearchConfig()
-    plain.return_phase_feature = False
-    flagged = cs.V3SearchConfig()
-    assert flagged.return_phase_feature is True
-    assert flagged.state_dim == plain.state_dim + 1
+def _noble_choice_game():
+    game, _ = _two_noble_game([2, 2, 2, 2, 2, 0])
+    take = next(a for a in game.legal_actions if a.type == cs.ActionType.TAKE_DIFFERENT)
+    assert game.apply(take, True)
+    assert game.board.waiting_noble
+    return game
 
-    flagged.num_simulations = 8
-    flagged.leaf_batch_size = 1
-    session = cs.V3SearchSession(flagged)
-    game = _return_phase_game()
+
+def test_search_state_dim_adds_two_pending_decision_features():
+    plain = cs.V3SearchConfig()
+    plain.pending_decision_features = False
+    flagged = cs.V3SearchConfig()
+    assert flagged.pending_decision_features is True
+    assert (plain.state_dim, flagged.state_dim) == (314, 316)
+
+
+@pytest.mark.parametrize(
+    "make_game, flags",
+    [
+        (_ten_token_game, (0.0, 0.0)),
+        (_return_phase_game, (1.0, 0.0)),
+        (_noble_choice_game, (0.0, 1.0)),
+    ],
+)
+def test_search_features_flag_the_pending_decision(make_game, flags):
+    config = cs.V3SearchConfig()
+    config.num_simulations = 8
+    config.leaf_batch_size = 1
+    session = cs.V3SearchSession(config)
+    game = make_game()
     session.add_game(game, game.current_player, seed=1)
     features, ids, offsets, slots = session.collect()
-    assert features.shape == (1, flagged.state_dim)
-    assert sorted(ids.tolist()) == [E4.OFFSET_RETURN_GEM + c for c in range(6)]
-    assert cs.v4_semantic_group_id(int(ids[0])) >= 133
+    assert features.shape == (1, 316)
+    # index 314 = waiting_return, index 315 = waiting_noble
+    assert tuple(features[0, 314:].tolist()) == flags
+    if flags[0]:
+        assert sorted(ids.tolist()) == [E4.OFFSET_RETURN_GEM + c for c in range(6)]
+        assert cs.v4_semantic_group_id(int(ids[0])) >= 133
 
 
 def _deck_mate_fixture():
