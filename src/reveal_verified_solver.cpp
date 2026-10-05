@@ -131,8 +131,12 @@ public:
   }
 
   NearMateResult near_mate_public(const Game &input, bool root_exact,
-                                  double alpha, double beta) {
-    return near_mate(input, root_exact, alpha, beta);
+                                  double alpha, double beta,
+                                  uint64_t required_root_action) {
+    near_required_root_ = required_root_action;
+    NearMateResult result = near_mate(input, root_exact, alpha, beta);
+    near_required_root_ = UINT64_MAX;
+    return result;
   }
 
   void set_line_transplant(bool enabled) { line_transplant_ = enabled; }
@@ -562,6 +566,8 @@ private:
   // the same attacker line; the defender move that refuted an AND node is
   // kept the same way. Ordering only: proofs and refutations stay exact.
   bool line_transplant_ = true;
+  // near_mate(): evaluate only this root action (UINT64_MAX = all).
+  uint64_t near_required_root_ = UINT64_MAX;
   // No-take probe: the attacker never takes tokens, so the bank never matters
   // to the attacker; then a defender purchase paid with as few gold as
   // possible dominates the other payment patterns of the same card (gold kept
@@ -2142,6 +2148,15 @@ private:
         DepthPath path(path_reserve_capacity(depth_));
         std::vector<OrderedAction> actions = proof_ordered_actions(game);
         filter_probe_actions(true, actions);
+        if (near_required_root_ != UINT64_MAX) {
+          std::vector<OrderedAction> only;
+          for (const OrderedAction &ordered : actions)
+            if (ordered.code == near_required_root_)
+              only.push_back(ordered);
+          if (only.empty())
+            throw std::invalid_argument("required_root_action is not legal");
+          actions.swap(only);
+        }
         apply_order_hints(state_key(game, true).board_hash(), true, actions);
         prefer_line_move(true, actions);
         double best = 0.0;
@@ -2869,8 +2884,10 @@ RevealVerifiedSearchResult RevealVerifiedSolver::solve_reusing_exact_cache(
 }
 
 NearMateResult RevealVerifiedSolver::near_mate(const Game &input, bool root_exact,
-                                               double alpha, double beta) {
-  return impl_->near_mate_public(input, root_exact, alpha, beta);
+                                               double alpha, double beta,
+                                               uint64_t required_root_action) {
+  return impl_->near_mate_public(input, root_exact, alpha, beta,
+                                 required_root_action);
 }
 
 void RevealVerifiedSolver::set_line_transplant(bool enabled) {
