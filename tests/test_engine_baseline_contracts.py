@@ -36,6 +36,7 @@ EXPECTED_PUBLIC_EXPORTS = {
     "near_mate_probability_cpp",
     "NEAR_MATE_FORMAT",
     "search_near_mate",
+    "root_mate_probe", "RootMateProbeConfig", "RootMateProbeResult",
     "solve_reveal_verified_frontier_cpp", "solve_reveal_verified_mate_cpp",
     "solve_visible_only_winner_cpp", "decode_mate_frontier_state",
     "encode_mate_frontier_state", "expand_mate_frontier",

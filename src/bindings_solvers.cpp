@@ -2,6 +2,7 @@
 #include "card_data.h"
 #include "game.h"
 #include "reveal_verified_solver.h"
+#include "root_mate_probe.h"
 #include "visible_only_solver.h"
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
@@ -264,6 +265,56 @@ py::dict proof_dag_to_py_compact(const RevealVerifiedProofDag &dag) {
 namespace csplendor::python {
 
 void bind_solvers(py::module_ &m) {
+  using csplendor::RootMateProbeConfig;
+  using csplendor::RootMateProbeResult;
+  py::class_<RootMateProbeConfig>(m, "RootMateProbeConfig")
+      .def(py::init<>())
+      .def_readwrite("enabled", &RootMateProbeConfig::enabled)
+      .def_readwrite("min_points", &RootMateProbeConfig::min_points)
+      .def_readwrite("trigger_value", &RootMateProbeConfig::trigger_value)
+      .def_readwrite("endgame_points", &RootMateProbeConfig::endgame_points)
+      .def_readwrite("max_nodes", &RootMateProbeConfig::max_nodes)
+      .def_readwrite("time_limit_ms", &RootMateProbeConfig::time_limit_ms)
+      .def_readwrite("endgame_max_nodes", &RootMateProbeConfig::endgame_max_nodes)
+      .def_readwrite("endgame_time_limit_ms", &RootMateProbeConfig::endgame_time_limit_ms)
+      .def_readwrite("min_depth", &RootMateProbeConfig::min_depth)
+      .def_readwrite("max_depth", &RootMateProbeConfig::max_depth)
+      .def_readwrite("endgame_exact_depth", &RootMateProbeConfig::endgame_exact_depth)
+      .def_readwrite("max_cache_states", &RootMateProbeConfig::max_cache_states)
+      .def_readwrite("warm_start_nodes", &RootMateProbeConfig::warm_start_nodes)
+      .def_readwrite("warm_start_time_ms", &RootMateProbeConfig::warm_start_time_ms);
+
+  py::class_<RootMateProbeResult>(m, "RootMateProbeResult")
+      .def_readonly("attempted", &RootMateProbeResult::attempted)
+      .def_readonly("proven", &RootMateProbeResult::proven)
+      .def_readonly("value_proven", &RootMateProbeResult::value_proven)
+      .def_readonly("depth", &RootMateProbeResult::depth)
+      .def_readonly("action_code", &RootMateProbeResult::action_code)
+      .def_readonly("action_id", &RootMateProbeResult::action_id)
+      .def_readonly("nodes", &RootMateProbeResult::nodes)
+      .def_readonly("elapsed_ms", &RootMateProbeResult::elapsed_ms)
+      .def_readonly("stop_reason", &RootMateProbeResult::stop_reason)
+      .def_readonly("value_triggered", &RootMateProbeResult::value_triggered);
+
+  m.def(
+      "root_mate_probe",
+      [](const Game &game, const RootMateProbeConfig &config,
+         std::optional<double> previous_value,
+         std::optional<double> time_limit_seconds) {
+        if (config.min_depth < 1 || config.max_depth < config.min_depth ||
+            config.endgame_exact_depth < 0)
+          throw std::invalid_argument("depth range must satisfy 1 <= min_depth <= max_depth");
+        if (time_limit_seconds && *time_limit_seconds < 0.0)
+          throw std::invalid_argument("time_limit_seconds must be non-negative");
+        Game input_snapshot = game.clone_light();
+        py::gil_scoped_release release;
+        return csplendor::root_mate_probe(input_snapshot, config, previous_value,
+                               time_limit_seconds);
+      },
+      py::arg("game"), py::arg("config") = RootMateProbeConfig{},
+      py::arg("previous_value") = py::none(),
+      py::arg("time_limit_seconds") = py::none());
+
   using csplendor::solver_internal::RevealSearchCancellationToken;
   py::class_<RevealSearchCancellationToken,
              std::shared_ptr<RevealSearchCancellationToken>>(

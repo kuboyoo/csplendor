@@ -33,6 +33,7 @@ set(CSPLENDOR_STANDALONE_HEADERS
     move_generator.h
     noble_data.h
     player.h
+    root_mate_probe.h
     solver_types.h
     state_encoder.h
     types.h
