@@ -1,5 +1,19 @@
 # 変更履歴 / Changelog
 
+## 未出荷：root の詰みの探り（root_mate_probe、2026-10-05）
+
+- AI が手を選ぶ前の root の詰み探索（発火条件、相手の非公開予約の除外、終盤予算、anytime の探り、
+  終盤の厳密探索、合法手との照合）を C++ の `root_mate_probe`（`src/root_mate_probe.h`）にまとめ、
+  `cs.root_mate_probe` / `cs.RootMateProbeConfig` / `cs.RootMateProbeResult` を追加した。
+  スレッドと Python に依存しないので、WASM（embind）からも同じ結果で呼べる。
+- ノード上限だけの条件では、dlsplendor の `RootMateSearch.probe`（新しい `MateSearchSession(jobs=1)`）と
+  全項目が一致する。探りと厳密探索が1つの締め切りを共有するため、呼び出し全体が時間上限を超えない。
+- 詳細は `doc/mate_usage.md` を参照。
+
+English: New single-threaded `root_mate_probe` (C++, Python binding) reproducing
+dlsplendor's RootMateSearch for both Python and WASM; one shared deadline
+bounds the whole call.
+
 ## 未出荷：外部AI連携の削除（2026-10-05）
 
 - Web APIの `POST /game/{session_id}/ai_move` と `GET /models`、`csplendor.api.ai_manager`・`ai_provider`・

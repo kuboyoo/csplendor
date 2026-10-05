@@ -97,6 +97,57 @@ session.clear()
 具体的めくれについて確定してからN+1へ進むため、実戦向けより高コストです。
 思考時間を外部から打ち切る場合は `session.cancel()` を別スレッドから呼べます。
 
+### root の詰みの探り（`root_mate_probe`、2026-10-05 追加）
+
+AI が手を選ぶ前に root で詰みを探る処理を、C++ の1関数 `root_mate_probe`
+（`src/root_mate_probe.h`）にまとめています。Python と WASM（embind）の両方から同じ結果で
+呼べるよう、スレッドと Python に依存しません。1回の呼び出しで完結し、対局をまたぐキャッシュは
+持ちません。
+
+```python
+config = cs.RootMateProbeConfig()          # 既定値は下表
+result = cs.root_mate_probe(game, config, previous_value=0.72, time_limit_seconds=0.3)
+if result.proven:
+    action = cs.Action.unpack(result.action_code)   # result.action_id は V4 の行動ID
+```
+
+手順（攻め方 = 手番のプレイヤー）:
+
+1. **発火**: `enabled` で、攻め方の点数が `min_points` 以上、または `previous_value`
+   （攻め方の前回の手番の root 評価値）が `trigger_value` 以上なら探る。評価値で発火したとき
+   `value_triggered` が真になる。`trigger_value` が未設定（`None`）なら点数だけで決める。
+2. **非公開の予約**: 相手が非公開の予約札を持つ局面は探らない（ソルバーが札を見てしまうため）。
+   `stop_reason = "opponent_hidden_reserve"`。
+3. **予算**: 攻め方の点数が `endgame_points` 以上、または評価値で発火したら「終盤」で、
+   `endgame_max_nodes`・`endgame_time_limit_ms` を使う。それ以外は `max_nodes`・`time_limit_ms`。
+   引数 `time_limit_seconds` を渡すと、選んだ時間上限を上書きする。0 は上限なし。
+4. **探り**: 深さ `min_depth`〜`max_depth` を浅い順に、正の詰み証明だけを探す
+   （`MateSearchSession.search_anytime` と同じ予算配分。各深さは残り予算を残りの深さ数で割った分を使い、
+   その 1/4 までを置換表の温め（`warm_start_nodes`・`warm_start_time_ms` が上限）に使う）。
+5. **終盤の厳密探索**: 4 で詰みが出ず「終盤」なら、深さ 1〜`endgame_exact_depth` を攻め方の全手・
+   具体的なめくれで調べる（`search_reveal_verified_mate_depths` と同じ）。ノード上限は選んだ予算、
+   時間は **4 と共有する1つの締め切りの残り** で、残りが無ければ実行しない。
+   したがって呼び出し全体が時間上限を超えない。
+6. **結果**: 詰みなら `value_proven`。root の手が特定できれば `proven` と `action_code`・`action_id`
+   を返す。手のない証明は `stop_reason = "mate_proven_without_root_action"`。
+
+| 設定 | 既定 | 結果 | 内容 |
+|---|---|---|---|
+| `enabled` | `True` | `attempted` | 探索したか |
+| `min_points` | 9 | `proven` | root の手まで特定した詰みか |
+| `trigger_value` | `0.6`（`None` 可） | `value_proven` | 詰み（手の有無を問わない） |
+| `endgame_points` | 10 | `depth` | 詰みの深さ（攻め方の手数。無ければ -1） |
+| `max_nodes` / `time_limit_ms` | 20,000 / 20 | `action_code` / `action_id` | 詰みの初手（pack 値 / V4 の行動ID。無ければ -1） |
+| `endgame_max_nodes` / `endgame_time_limit_ms` | 2,000,000 / 150 | `nodes` / `elapsed_ms` | 4 と 5 の合計 |
+| `min_depth` / `max_depth` | 1 / 3 | `stop_reason` | 停止理由（探らなかった場合は空文字列） |
+| `endgame_exact_depth` | 2 | `value_triggered` | 評価値で発火したか |
+| `max_cache_states` | 50,000 | | |
+| `warm_start_nodes` / `warm_start_time_ms` | 50,000 / 50 | | |
+
+ノード上限だけで打ち切る条件（時間上限 0）では、新しい `MateSearchSession(jobs=1)` を使った
+dlsplendor の `RootMateSearch.probe` と、状態・深さ・手・停止理由・ノード数が一致します。
+時間で打ち切る条件では、5 の時間を共有の締め切りの残りにしている分だけ結果が異なり得ます。
+
 ### 外部評価による手の順序表と探り（2026-10-02 追加）
 
 `MateOrderHints` は「局面ハッシュ → 手番側の手（pack code、良い順）」の表です。局面の

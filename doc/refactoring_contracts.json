@@ -56,6 +56,9 @@
       "near_mate_probability_cpp",
       "NEAR_MATE_FORMAT",
       "search_near_mate",
+      "root_mate_probe",
+      "RootMateProbeConfig",
+      "RootMateProbeResult",
       "mcts_search_parallel_native",
       "mcts_search_root_parallel_native",
       "v3_semantic_group_id",
@@ -89,7 +92,8 @@
     "experimental": [
       "mcts_parallel_searcher.h",
       "mcts_root_parallel.h",
-      "reveal_verified_solver.h"
+      "reveal_verified_solver.h",
+      "root_mate_probe.h"
     ],
     "internal": [
       "action_encoder_common.h",
