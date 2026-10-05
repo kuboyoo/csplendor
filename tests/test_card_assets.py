@@ -62,3 +62,13 @@ def test_play_white_gem_numerals_are_white_with_black_outline():
         assert 'fill="#3A3730"' not in files[name], name  # old dark digit on white
     # noble 5 needs white bonuses: its white tile outlines the digit in black
     assert 'stroke="#000000" stroke-width="4"' in files["play/nobles/noble_05.svg"]
+
+
+def test_play_points_have_no_ribbon_and_are_outlined_numerals():
+    files = _play_assets()
+    for name, text in files.items():
+        assert "L27,45" not in text, name  # the bookmark-shaped ribbon path
+    noble = files["play/nobles/noble_00.svg"]
+    assert 'fill="#FFFFFF" stroke="#3E2C14"' in noble
+    card = files["play/cards/card_23.svg"]  # 1 point, black bonus
+    assert 'font-size="36"' in card and 'fill="#FFFFFF" stroke="#000000"' in card

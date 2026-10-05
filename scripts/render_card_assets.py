@@ -162,10 +162,8 @@ def points_label(points: int, fill: str, edge: str, text: str,
     # paint-order hides the inner half of the outline, so a 3px stroke
     # shows the same 1.5px width as the ribbon's edge
     if play:
-        return (
-            f'<path d="M5,1.5 H49 V55 L27,45 L5,55 Z" fill="{fill}" stroke="{edge}" stroke-width="1.5"/>'
-            + numeral(27, 37, 36, 800, text, points, outline)
-        )
+        # no ribbon: the outlined numeral alone, white on its outline colour
+        return numeral(25, 38, 36, 800, text, points, outline, 4)
     return (
         f'<path d="M8,1.5 H36 V40 L22,33 L8,40 Z" fill="{fill}" stroke="{edge}" stroke-width="1.5"/>'
         + numeral(22, 27, 22, 800, text, points, outline)
@@ -338,7 +336,8 @@ def noble_body(noble, uid: str, play: bool = False) -> str:
     robe = ROBES[nid % len(ROBES)]
     hair = HAIR[nid % len(HAIR)]
     parts.append(portrait(70, -14, NOBLE_PORTRAIT[nid], robe, hair))
-    parts.append(points_label(int(noble.points), "#E2CC97", "#8C6A3A", "#3E2C14", play=play))
+    parts.append(points_label(int(noble.points), "#E2CC97", "#8C6A3A", "#FFFFFF" if play else "#3E2C14",
+                              "#3E2C14" if play else "", play))
     if not play:
         # implementation ids in the top-right corner
         parts.append(
