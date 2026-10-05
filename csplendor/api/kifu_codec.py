@@ -23,6 +23,7 @@ def build_kifu_text(
     result: str,
     final_scores: Optional[Sequence[int]] = None,
     total_turns: Optional[int] = None,
+    result_detail: Optional[str] = None,
 ) -> str:
     ordered = [
         "Format",
@@ -51,7 +52,8 @@ def build_kifu_text(
         if move.get("comment"):
             line += f" # {move['comment']}"
         lines.append(line)
-    lines.extend(("", f"Result: {result}"))
+    # result_detail qualifies how the game ended, e.g. "TIME" for a time forfeit.
+    lines.extend(("", f"Result: {result} {result_detail}" if result_detail else f"Result: {result}"))
     if final_scores is not None:
         parts = [
             f"P{index}={safe_int(score)}"
@@ -69,6 +71,7 @@ def parse_kifu_text(text: str) -> Dict[str, object]:
     position = ""
     moves: List[Dict[str, object]] = []
     result = ""
+    result_detail: Optional[str] = None
     final_scores: Optional[List[int]] = None
     total_turns: Optional[int] = None
     mode = "header"
@@ -108,7 +111,8 @@ def parse_kifu_text(text: str) -> Dict[str, object]:
                 moves.append(entry)
             continue
         if stripped.startswith("Result:"):
-            result = stripped[len("Result:") :].strip()
+            result, _, detail = stripped[len("Result:") :].strip().partition(" ")
+            result_detail = detail.strip() or None
         elif stripped.startswith("FinalScores:"):
             values = []
             for token in stripped[len("FinalScores:") :].strip().split():
@@ -123,6 +127,7 @@ def parse_kifu_text(text: str) -> Dict[str, object]:
         "position": position,
         "moves": moves,
         "result": result,
+        "result_detail": result_detail,
         "final_scores": final_scores,
         "total_turns": total_turns,
     }
