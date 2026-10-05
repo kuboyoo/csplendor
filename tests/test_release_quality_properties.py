@@ -81,7 +81,13 @@ def _assert_reachable_rule_invariants(game):
     board = game.board
     assert board.current_player in (0, 1)
     assert board.winner in (-2, -1, 0, 1)
-    assert all(sum(map(int, player.gems)) <= 10 for player in board.players)
+    # The player to move holds one token above the limit while the
+    # post-deck-reservation return is pending.
+    assert all(
+        sum(map(int, player.gems))
+        <= 10 + int(bool(board.waiting_return) and index == int(board.current_player))
+        for index, player in enumerate(board.players)
+    )
     assert [
         int(board.bank[color])
         + sum(int(player.gems[color]) for player in board.players)

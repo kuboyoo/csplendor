@@ -72,6 +72,16 @@ void bind_rules(py::module_ &m) {
           "waiting_noble", [](const Board &b) { return b.waiting_noble; },
           &state::editor::set_waiting_noble)
       .def_property(
+          "waiting_return", [](const Board &b) { return b.waiting_return; },
+          &state::editor::set_waiting_return,
+          "True while the player to move must return a token after a deck "
+          "reservation (legal actions are RETURN_GEM only)")
+      .def_property_readonly(
+          "pending_decision",
+          [](const Board &b) { return static_cast<int>(b.pending_decision()); },
+          "0: none, 1: return a token (waiting_return), 2: choose a noble "
+          "(waiting_noble)")
+      .def_property(
           "winner", [](const Board &b) { return (int)b.winner; },
           &state::editor::set_winner)
       .def_property_readonly("players", [](const Board &b) {
@@ -125,6 +135,19 @@ void bind_rules(py::module_ &m) {
           },
           py::arg("snapshot"),
           "Restore a versioned lightweight game-state snapshot")
+      .def_static(
+          "upgrade_snapshot_v1",
+          [](py::bytes snapshot) {
+            char *data = nullptr;
+            Py_ssize_t size = 0;
+            if (PyBytes_AsStringAndSize(snapshot.ptr(), &data, &size) != 0)
+              throw py::error_already_set();
+            return py::bytes(csplendor::snapshot::upgrade_v1(
+                std::string_view(data, static_cast<size_t>(size))));
+          },
+          py::arg("snapshot"),
+          "One-off migration of a version 1 snapshot to the current version "
+          "(version 1 positions never have a pending token return)")
       .def_static(
           "snapshot_format_version",
           []() {

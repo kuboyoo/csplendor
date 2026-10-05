@@ -55,6 +55,7 @@ void bind_mcts_v3(py::module_ &m) {
       .def_readwrite("draw_value", &Config::draw_value)
       .def_readwrite("public_card_features", &Config::public_card_features)
       .def_readwrite("physical_seat_feature", &Config::physical_seat_feature)
+      .def_readwrite("return_phase_feature", &Config::return_phase_feature)
       .def_readwrite("dirichlet_alpha", &Config::dirichlet_alpha)
       .def_readwrite("dirichlet_epsilon", &Config::dirichlet_epsilon)
       .def_readwrite("unseen_action_prior", &Config::unseen_action_prior)
@@ -284,9 +285,13 @@ void bind_mcts_v3(py::module_ &m) {
         return result;
       });
 
-  m.def("v3_semantic_group_id", &csplendor::v3search::semantic_group_id,
+  m.def("v3_semantic_group_id", &csplendor::v3search::semantic_group_id_v3,
         py::arg("action_id"),
         "Decision group of a V3 action id before payment/return details");
+  m.def("v4_semantic_group_id", &csplendor::v3search::semantic_group_id,
+        py::arg("action_id"),
+        "Decision group of a V4 action id (groups 0..132 as for V3, returns "
+        "133..138); the groups used by V3SearchSession");
 }
 
 } // namespace csplendor::python

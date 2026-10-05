@@ -519,7 +519,7 @@ def _build_mate_kifu_text(
     timestamp = (_now_iso or now_iso)()
     return build_kifu_text(
         headers={
-            "Format": "Splendor KIFU v1.0",
+            "Format": "Splendor KIFU v1.1",
             "Players": "2",
             "Player0": "DFPN Attacker" if attacker == 0 else "Defender",
             "Player1": "DFPN Attacker" if attacker == 1 else "Defender",

@@ -41,6 +41,7 @@ struct UndoRecord {
   uint16_t turn = 0;
   bool final_round = false;
   bool waiting_noble = false;
+  bool waiting_return = false;
   int8_t winner = -1;
   uint64_t cached_hash = 0;
   bool hash_valid = false;
@@ -74,6 +75,7 @@ struct UndoRecord {
     record.turn = board.turn;
     record.final_round = board.final_round;
     record.waiting_noble = board.waiting_noble;
+    record.waiting_return = board.waiting_return;
     record.winner = board.winner;
     record.cached_hash = board.cached_hash;
     record.hash_valid = board.hash_valid;
@@ -126,6 +128,7 @@ struct UndoRecord {
     board.turn = turn;
     board.final_round = final_round;
     board.waiting_noble = waiting_noble;
+    board.waiting_return = waiting_return;
     board.winner = winner;
     board.cached_hash = cached_hash;
     board.hash_valid = hash_valid;
@@ -183,6 +186,7 @@ struct UndoRecord {
     return lhs.current_player == rhs.current_player &&
            lhs.turn == rhs.turn && lhs.final_round == rhs.final_round &&
            lhs.waiting_noble == rhs.waiting_noble &&
+           lhs.waiting_return == rhs.waiting_return &&
            lhs.winner == rhs.winner &&
            lhs.cached_hash == rhs.cached_hash &&
            lhs.hash_valid == rhs.hash_valid;

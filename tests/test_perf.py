@@ -12,7 +12,10 @@ MIN_PLAYOUT_MOVES_PER_SEC = 10_000
 MIN_CPP_PLAYOUT_MOVES_PER_SEC = 50_000
 
 
-def _make_midgame(seed=42, plies=12):
+# Rules version 2 (deck reservations return afterwards) changed the random
+# walk; seed 74 / 12 plies gives 251 legal actions, close to the 250-action
+# position (seed 42) the historical measurements used.
+def _make_midgame(seed=74, plies=12):
     rng = random.Random(seed)
     game = Game(seed=seed)
     for _ in range(plies):

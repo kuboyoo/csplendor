@@ -24,6 +24,7 @@ struct RevealVerifiedFrontierResult {
   int player = -1;
   int winner = -1;
   bool waiting_noble = false;
+  bool waiting_return = false;
   std::string kind = "state";
   std::string resolution;
   std::string reason = "unknown";

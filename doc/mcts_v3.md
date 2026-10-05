@@ -2,8 +2,10 @@
 
 [README](../README.md) / [ドキュメント索引](index.md)
 
-`src/mcts_v3.h` は、`ActionEncoderV3`（3,133 ID。全支払い・全返却を別の枝として保持）
-の上で動く PUCT 探索です。既存の内蔵 MCTS（48 枠固定）とは独立した実装で、
+`src/mcts_v3.h` は、`ActionEncoderV4`（3,121 ID。全支払い・全返却を別の枝として保持。
+[V4仕様](action_space_v4.md)）の上で動く PUCT 探索です。名前は V3 のままですが、2026-10-05 から
+`collect()` の合法手 ID、`apply()` の事前確率、`root_visits()` などが返す ID はすべて V4 ID です。
+山札予約後の返却フェーズでは `RETURN_GEM`（3114..3119）が合法手になります。既存の内蔵 MCTS（48 枠固定）とは独立した実装で、
 複数の対局を 1 つの session に登録して同時に進め、葉の評価要求を 1 つのバッチにまとめます。
 学習用の自己対局・大量評価が目的で、探索の枝刈りやルール判断は増やしていません。
 
@@ -28,14 +30,14 @@
   `chance_control_variate = true` では、その後の逆伝播で chance 節点とその上の節点に
   v − v0(めくれ) + mean(v0) を渡し、めくれの抽選による分散を除きます（下の部分木には v のまま）。
   `stats()` の `chance_enumerations` / `chance_rows` で回数と評価行数を確認できます。
-- **二段階選択（任意）**: `semantic_groups=true` で「支払い・返却を畳んだ主判断」（133 群）で
+- **二段階選択（任意）**: `semantic_groups=true` で「支払い・返却を畳んだ主判断」（139 群）で
   PUCT を行い、選んだ群の中でもう一度 PUCT を行います。既定は平坦な PUCT です。
 - **virtual loss**: 1 バッチ内の葉が重ならないように、収集中の経路に仮訪問を加えます。
   評価待ちの節点を再び選んだ場合、その対局はそのラウンドの収集を終えます。
 - **未展開時に見えなかった合法手**: 世界によって合法手集合が異なる場合、展開時に事前確率を
   持たなかった手には `unseen_action_prior`（既定 1e-3）を与えます。
 - **終局・深さ上限**: 終局は勝敗（±1、引き分け 0）、`max_depth` 到達は `draw_value` で逆伝播します。
-  強制パスは PASS（3132）を唯一の合法手として扱います。
+  強制パスは PASS（3120）を唯一の合法手として扱います。
 - **対局単位のマルチスレッド（任意、2026-10-04 追加）**: `num_threads`（既定 1）を 2 以上にすると、
   `collect()` / `apply()` が対局ごとに独立したスレッドで処理されます。各対局は自分の木・乱数・作業領域だけを
   使い、葉は slot 順に連結され、`apply()` も対局ごとに行の順序を保ちます。そのため、バッチの並び・乱数列・
@@ -50,7 +52,9 @@
 
 葉の特徴量は `StateEncoder::encode_canonical(world, player, observer=player)`（196）に、
 `public_card_features` で `encode_public_card_statistics`（117）、`physical_seat_feature` で
-座席符号（先手 −1／後手 +1）を連結したもので、既定は 314 次元です。
+座席符号（先手 −1／後手 +1）、`return_phase_feature`（既定 `True`）で返却フェーズ符号
+（`waiting_return` のとき 1.0、それ以外 0.0）をこの順に連結したもので、既定は 315 次元です。
+従来の 314 次元を維持する場合は `return_phase_feature = False` にします。次元は `config.state_dim` で確認できます。
 
 ## Python API
 
@@ -63,7 +67,7 @@ config.num_threads = 4              # 任意。既定 1（結果はスレッド�
 session = cs.V3SearchSession(config)
 slot = session.add_game(game, observer=game.current_player, seed=1, root_noise=False)
 while not session.all_done():
-    features, legal_ids, offsets, slots = session.collect()   # features: (N, 314)
+    features, legal_ids, offsets, slots = session.collect()   # features: (N, 315)、legal_ids は V4 ID
     if len(slots) == 0:
         break
     priors, values = evaluate(features, legal_ids, offsets)    # priors は legal_ids と同じ並び
@@ -73,7 +77,9 @@ q = session.root_action_values(slot)        # {action_id: root 視点の Q}
 session.reset_game(slot, next_game, observer, seed)
 ```
 
-`v3_semantic_group_id(action_id)` は主判断の群番号を返します。
+`v4_semantic_group_id(action_id)` は V4 ID の主判断の群番号（139 群）を返し、探索の二段階選択はこれを使います。
+0..132 は V3 と同じ配置（PASS は 132）で、`RETURN_GEM` は 133..138（白・青・緑・赤・黒・金）です。
+`v3_semantic_group_id(action_id)` は V3 ID 用（133 群）で、意味は変わりません。
 
 ## 検証
 

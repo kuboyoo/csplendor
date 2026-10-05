@@ -15,7 +15,7 @@ from .game_service import GameSessionService
 from .kifu_codec import parse_kifu_text
 from .spn_codec import game_to_spn
 from .stores import KifuStore
-from .usi_resolver import find_legal_action_index_by_usi
+from .usi_resolver import expand_usi_move, find_legal_action_index_by_usi
 from .usi_serializer import action_to_usi
 
 
@@ -106,8 +106,13 @@ class KifuApplicationService:
         game.simple_payment_mode = simple_payment_mode
         states = [self._state_serializer(game)]
         normalized_moves: List[Dict[str, Any]] = []
-        for move in moves:
-            usi_move = str(move.get("usi", "pass"))
+        plies = [
+            dict(move, usi=ply)
+            for move in moves
+            for ply in expand_usi_move(str(move.get("usi", "pass")))
+        ]
+        for move in plies:
+            usi_move = str(move["usi"])
             action_index = find_legal_action_index_by_usi(game, usi_move)
             if action_index < 0:
                 raise ValueError("pass move is not supported in replay")

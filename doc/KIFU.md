@@ -1,7 +1,7 @@
 # Splendor 棋譜ファイル仕様 (.kifu)
 
-**Version:** 1.0 Draft  
-**Date:** 2026-02-11  
+**Version:** 1.1 Draft  
+**Date:** 2026-10-05  
 **依存仕様:** [USI.md](USI.md) — アクション記法・SPN盤面記法・宝石色記号
 
 ---
@@ -45,10 +45,20 @@
 
 | キー | 説明 | 例 |
 |------|------|----|
-| `Format` | ファイルフォーマット識別子 | `Splendor KIFU v1.0` |
+| `Format` | ファイルフォーマット識別子 | `Splendor KIFU v1.1` |
 | `Players` | プレイヤー数 | `2` |
 | `Player0` | 先手プレイヤー名 | `Genbu v2.0` |
 | `Player1` | 後手プレイヤー名 | `DeepSets v1.0` |
+
+#### Format のバージョン
+
+| 値 | 内容 |
+|----|------|
+| `Splendor KIFU v1.1` | 現行。山札予約後の返却は、同じプレイヤーの独立した `return:<C>` 手として記録する。csplendorの書き出しはこの値を使う |
+| `Splendor KIFU v1.0` | 旧形式。山札予約の返却を `reserve:L2/return:W` の1手で記録する |
+
+csplendorはv1.0も読み込める。読み込み時に旧来の1手表記 `reserve:L<n>/return:<C>`
+（返却色1文字）を `reserve:L<n>` と `return:<C>` の2手に展開する。
 
 ### 3.2 省略可能ヘッダ
 
@@ -138,13 +148,25 @@ player section の `nobles:[<id>,...]` は取得済み貴族ID、`bought:[<id>,.
 > 候補が1つの場合は `[0]`（0ミリ秒 = 自動選択）で記録する。
 > 複数候補から選択した場合はその思考時間を記載する。
 
-### 5.3 パスの記録
+### 5.3 山札予約後の返却の記録
+
+山札予約で所持トークンが11枚になった場合、同じプレイヤーがめくれたカードを見てから
+1枚返す。返却は予約とは別の手として、同じプレイヤー番号で記録する。
+
+```
+21. P1 reserve:L2 [1800]
+22. P1 return:W [400]
+```
+
+公開予約・宝石取得の返却は従来どおり同じ手に含める（例: `reserve:C10/return:U`）。
+
+### 5.4 パスの記録
 
 ```
 20. P0 pass [0]
 ```
 
-### 5.4 コメント専用行
+### 5.5 コメント専用行
 
 手順とは独立して、コメント行を挿入できる。
 
@@ -190,7 +212,7 @@ TotalTurns: 54
 ## 7. 完全なファイル例
 
 ```kifu
-Format: Splendor KIFU v1.0
+Format: Splendor KIFU v1.1
 Players: 2
 Player0: Genbu v2.0
 Player1: DeepSets v1.0
@@ -219,14 +241,15 @@ Position: bank:W4U4G4R4K4D5 | visible:L1[2,11,18,27]L2[41,49,53,60]L3[71,75,79,8
 12. P1 buy:C53/gold:R1 [2100]
 
 # === 終盤 ===
-13. P0 buy:C60 [3500]
-14. P1 buy:C71/gold:W2U1 [4200]
-15. P0 buy:C84 [2900]
-16. P0 noble:N5 [0]
+13. P0 reserve:L3 [1500]
+14. P0 return:R [300] # めくれたカードを見て赤を1枚返却
+15. P1 buy:C71/gold:W2U1 [4200]
+16. P0 buy:C84 [2900]
+17. P0 noble:N5 [0]
 
 Result: P0_WIN
 FinalScores: P0=16 P1=12
-TotalTurns: 16
+TotalTurns: 17
 ```
 
 ---

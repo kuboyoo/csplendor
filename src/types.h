@@ -41,7 +41,10 @@ enum ActionType : uint8_t {
   PURCHASE = 4,
   VISIT_NOBLE = 5,
   PASS = 6,
-  ACTION_TYPE_COUNT = 7
+  // Return one token while the deck-reservation return is pending
+  // (Board::waiting_return); return_gems holds a single 1 at the colour.
+  RETURN_GEM = 7,
+  ACTION_TYPE_COUNT = 8
 };
 
 #endif // CSPLENDOR_TYPES_H

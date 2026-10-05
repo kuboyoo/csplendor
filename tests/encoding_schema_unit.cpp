@@ -133,7 +133,8 @@ void test_state_schema_and_reachable_golden() {
     }
   }
   check(states == 768);
-  check(digest == 0xcde3bf1dd313ae48ULL);
+  // Rules version 2 (deck-reservation return phase) changes the walk.
+  check(digest == 0xd4995d01579b5067ULL);
 }
 
 } // namespace

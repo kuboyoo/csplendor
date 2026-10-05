@@ -33,7 +33,7 @@ python scripts/dfpn_mate_solver.py \
 
 証明 DAG は `proof_tree.verification.proof_dag` に返ります。攻撃側は証明に採用した手、守備側は全合法応手、山札予約は全ドロー結果を保持します。既定の `compact` 形式では、同じ action/child に進む複数の具体めくれカードをカードID bitset の reveal group としてまとめ、edge は action template と reveal group への参照で保存します。具体カード集合は保持するため、全めくれに対する応手情報は失いません。従来の辞書型 DAG が必要な場合は `--proof-dag-format v1`、比較用に両方出す場合は `--proof-dag-format both` を指定します。complete DAG は返却前に全 edge を合法手として再走査し、検査済みなら `validated: true` になります。上限超過時も詰み判定結果は維持し、DAG のみ破棄して理由を返します。
 
-完全DAGが大きすぎる場合は、`csplendor.expand_mate_frontier()` で現在局面の1層だけを検証・展開できます。攻撃側ノードでは証明手1手の全めくれ、守備側ノードでは全合法手の全めくれを返します。各 edge の `child_state` は、SPNに含まれない終局・最終ラウンド・貴族選択待ちも保持する版付きスナップショットです。次の呼び出しでは `load_mate_frontier_game(state=...)` で復元します。
+完全DAGが大きすぎる場合は、`csplendor.expand_mate_frontier()` で現在局面の1層だけを検証・展開できます。攻撃側ノードでは証明手1手の全めくれ、守備側ノードでは全合法手の全めくれを返します。各 edge の `child_state` は、SPNに含まれない終局・最終ラウンド・貴族選択待ち・山札予約後の返却待ちも保持する版付きスナップショットです。山札予約後の返却は予約手の一部で、詰み深さを消費しません。次の呼び出しでは `load_mate_frontier_game(state=...)` で復元します。
 
 ```python
 import csplendor as cs

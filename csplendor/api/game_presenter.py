@@ -47,6 +47,8 @@ def get_game_state(game: Game) -> GameStateSchema:
         current_player=board.current_player,
         turn=board.turn,
         waiting_noble=board.waiting_noble,
+        waiting_return=board.waiting_return,
+        pending_decision=int(board.pending_decision),
         game_over=game.is_game_over(),
         winner=board.winner,
     )

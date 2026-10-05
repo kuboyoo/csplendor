@@ -38,6 +38,9 @@ public:
   // separate table so adding this contract does not shift legacy salts.
   uint64_t hidden_reserved_level[2][3][3]; // player, slot, level - 1
   uint64_t final_round[2];
+  // Pending token return after a deck reservation (per player to move).
+  // Drawn from an isolated stream so no existing salt changes.
+  uint64_t waiting_return[2];
   uint64_t winner[4]; // winner + 2: draw, ongoing, player 0, player 1
   uint64_t turn[65536];
 
@@ -119,6 +122,9 @@ public:
 
     final_round[0] = gen();
     final_round[1] = gen();
+    std::mt19937_64 return_phase_rng(0x52455455524e5048ULL);
+    for (auto &salt : waiting_return)
+      salt = std::uniform_int_distribution<uint64_t>()(return_phase_rng);
     for (int state = 0; state < 4; ++state)
       winner[state] = gen();
     for (int value = 0; value < 65536; ++value)

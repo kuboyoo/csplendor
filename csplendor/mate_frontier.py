@@ -61,6 +61,7 @@ def _node_kind(game: Game) -> str:
     if (
         bool(game.board.final_round)
         and not bool(game.board.waiting_noble)
+        and not bool(game.board.waiting_return)
         and int(game.current_player) == 1
     ):
         return "final_round_summary"
@@ -117,6 +118,7 @@ def expand_mate_frontier(
                 "child_player": int(child.current_player),
                 "child_winner": int(child.winner),
                 "child_waiting_noble": bool(child.board.waiting_noble),
+                "child_waiting_return": bool(child.board.waiting_return),
                 "child_kind": _node_kind(child),
                 "child_resolution": _resolution(child, attacker),
                 "child_position": _exact_spn(child),
@@ -133,6 +135,7 @@ def expand_mate_frontier(
         "player": int(native["player"]),
         "winner": int(native["winner"]),
         "waiting_noble": bool(native["waiting_noble"]),
+        "waiting_return": bool(native.get("waiting_return", False)),
         "kind": str(native["kind"]),
         "resolution": native["resolution"],
         "reason": str(native["reason"]),

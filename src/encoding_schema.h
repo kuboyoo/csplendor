@@ -160,6 +160,64 @@ struct ActionSpaceV3 {
   }
 };
 
+// V4: a deck reservation no longer carries a token return (one id per
+// level); the excess is returned afterwards by RETURN_GEM (one id per colour,
+// gold last), chosen after the player has seen the drawn card.
+struct ActionSpaceV4 {
+  static constexpr uint32_t VERSION = 4;
+  static constexpr int TAKE_DIFF_RETURN_PATTERNS = 84;
+  static constexpr int TAKE_SAME_RETURN_PATTERNS = 28;
+  static constexpr int RESERVE_RETURN_PATTERNS = 7;
+
+  static constexpr int NUM_TAKE_DIFFERENT = 10;
+  static constexpr int NUM_TAKE_SAME = 5;
+  static constexpr int NUM_RESERVE_VISIBLE = 12;
+  static constexpr int NUM_RESERVE_DECK = 3;
+  static constexpr int NUM_CARDS = 90;
+  static constexpr int NUM_NOBLES = 12;
+  static constexpr int NUM_RETURN_GEM = 6;
+  static constexpr int MAX_GOLD = 5;
+  static constexpr int TOTAL_PURCHASE = 2035;
+
+  static constexpr int OFFSET_TAKE_DIFFERENT = 0;
+  static constexpr int OFFSET_TAKE_SAME =
+      OFFSET_TAKE_DIFFERENT + NUM_TAKE_DIFFERENT * TAKE_DIFF_RETURN_PATTERNS;
+  static constexpr int OFFSET_RESERVE_VISIBLE =
+      OFFSET_TAKE_SAME + NUM_TAKE_SAME * TAKE_SAME_RETURN_PATTERNS;
+  static constexpr int OFFSET_RESERVE_DECK =
+      OFFSET_RESERVE_VISIBLE + NUM_RESERVE_VISIBLE * RESERVE_RETURN_PATTERNS;
+  static constexpr int OFFSET_PURCHASE = OFFSET_RESERVE_DECK + NUM_RESERVE_DECK;
+  static constexpr int OFFSET_VISIT_NOBLE = OFFSET_PURCHASE + TOTAL_PURCHASE;
+  static constexpr int OFFSET_RETURN_GEM = OFFSET_VISIT_NOBLE + NUM_NOBLES;
+  static constexpr int OFFSET_PASS = OFFSET_RETURN_GEM + NUM_RETURN_GEM;
+  static constexpr int SIZE = OFFSET_PASS + 1;
+
+  inline static constexpr std::array<ActionSectionDescriptor, 8> SECTIONS = {{
+      {"take_different", TAKE_DIFFERENT, OFFSET_TAKE_DIFFERENT,
+       NUM_TAKE_DIFFERENT *TAKE_DIFF_RETURN_PATTERNS},
+      {"take_same", TAKE_SAME, OFFSET_TAKE_SAME,
+       NUM_TAKE_SAME *TAKE_SAME_RETURN_PATTERNS},
+      {"reserve_visible", RESERVE_VISIBLE, OFFSET_RESERVE_VISIBLE,
+       NUM_RESERVE_VISIBLE *RESERVE_RETURN_PATTERNS},
+      {"reserve_deck", RESERVE_DECK, OFFSET_RESERVE_DECK, NUM_RESERVE_DECK},
+      {"purchase", PURCHASE, OFFSET_PURCHASE, TOTAL_PURCHASE},
+      {"visit_noble", VISIT_NOBLE, OFFSET_VISIT_NOBLE, NUM_NOBLES},
+      {"return_gem", RETURN_GEM, OFFSET_RETURN_GEM, NUM_RETURN_GEM},
+      {"pass", PASS, OFFSET_PASS, 1},
+  }};
+
+  static constexpr const char *fingerprint() noexcept {
+    return "csplendor.action.v4;size=3121;layout=840,140,84,3,2035,12,6,1";
+  }
+};
+
+static_assert(ActionSpaceV4::SIZE == 3121, "V4 action space size");
+static_assert(ActionSpaceV4::OFFSET_PURCHASE == 1067 &&
+                  ActionSpaceV4::OFFSET_VISIT_NOBLE == 3102 &&
+                  ActionSpaceV4::OFFSET_RETURN_GEM == 3114 &&
+                  ActionSpaceV4::OFFSET_PASS == 3120,
+              "V4 action layout");
+
 struct StateFeatureV1 {
   static constexpr uint32_t VERSION = 1;
   static constexpr size_t CARD_FEATURE_SIZE = 8;

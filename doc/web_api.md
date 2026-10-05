@@ -24,7 +24,9 @@ OpenAPI: `http://127.0.0.1:8000/docs`。現在のリクエスト・レスポン�
 
 `seed=0` も再現可能な固定seedです。ランダムな初期配置を作る場合は呼出し側でseedを生成します。
 
-`action_idx` は**その局面の `legal_actions` 一覧内の添字**で、V2/V3の行動IDやpacked codeではありません。局面更新後は一覧を取り直します。対局終了時の合法手は空です。`PASS`（type 6）も一覧の添字で適用できます。
+`action_idx` は**その局面の `legal_actions` 一覧内の添字**で、V2/V3/V4の行動IDやpacked codeではありません。局面更新後は一覧を取り直します。対局終了時の合法手は空です。`PASS`（type 6）・`RETURN_GEM`（type 7）も一覧の添字で適用できます。
+
+`action_usi` の `usi_move` は正規の1手（例: `reserve:L2`、続けて `return:W`）を受け付けます。旧来の1手表記 `reserve:L2/return:W`（返却色はちょうど1文字）も受け付け、山札予約と返却の2手に展開して原子的に適用します（失敗時は局面も棋譜も変更しません）。この場合、棋譜には2手が記録され、応答の `action_usi` は `"reserve:L2 return:W"` のように正規の2手を空白区切りで返します（`action_idx` は最後の手の、その時点の合法手一覧での添字）。
 
 ### 支払いモード
 
@@ -39,13 +41,13 @@ Pythonの `Game` は `False` が既定です。対局サーバー・AI・棋譜�
 
 `GameStateSchema` は次を返します。
 
-- `board`: `bank`, `visible_cards`, `deck_counts`, `nobles`, `current_player`, `turn`, `waiting_noble`, `game_over`, `winner`。
+- `board`: `bank`, `visible_cards`, `deck_counts`, `nobles`, `current_player`, `turn`, `waiting_noble`, `waiting_return`, `pending_decision`, `game_over`, `winner`。`pending_decision` は `0` なし、`1` トークン返却、`2` 貴族選択。
 - `players`: 各プレイヤーのトークン、ボーナス、点数、予約・購入カードID、獲得貴族ID。
 - `legal_actions`: 行動種別、対象、取得・返却、支払い、貴族選択、USI表記。
 
 初期銀行は `[4,4,4,4,4,5]`、公開後の初期山札残数は `[36,26,16]` です。色順は白・青・緑・赤・黒・金で、5要素の配列は金を含みません。カード・貴族の描画用データは [カタログ](card_catalog.md) または `get_all_cards()` / `get_all_nobles()` から取得できます。
 
-`waiting_noble` の間は同じプレイヤーが貴族を選びます。状態の購入Actionの `usi` は `/pay:` 拡張を含むことがあるため、外部USIエンジンの対応表記を確認してください。
+`waiting_noble` の間は同じプレイヤーが貴族を選びます。`waiting_return` の間（山札予約で11枚になった直後）は同じプレイヤーが `RETURN_GEM` で1枚返します。返却はめくれたカードを見てから選び、その後に貴族判定を行います。状態の購入Actionの `usi` は `/pay:` 拡張を含むことがあるため、外部USIエンジンの対応表記を確認してください。
 
 ## 外部AIと棋譜
 

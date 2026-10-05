@@ -12,7 +12,8 @@ namespace csplendor::solver_internal {
 // Only ordinary token holdings are eligible; editor overflow keeps the scan.
 inline std::vector<uint64_t> group_take_candidates(
     const Game &game, std::vector<uint64_t> codes) {
-  if (game.current_player() >= Board::NUM_PLAYERS || game.board.waiting_noble)
+  if (game.current_player() >= Board::NUM_PLAYERS || game.board.waiting_noble ||
+      game.board.waiting_return)
     return codes;
   int total = 0;
   for (int color = 0; color < 6; ++color) {

@@ -8,12 +8,17 @@
 - 各tierの完全なdeck order
 - 両playerのtoken、bonus、得点、予約、購入済みcard、獲得noble
 - 非公開予約flag
-- current player、turn、final round、noble待ち、winner
+- current player、turn、final round、noble待ち、返却待ち（`waiting_return`）、winner
 - `simple_payment_mode`と`blank_refill_mode`
 
 envelopeはmagic、snapshot format version、rules version、card/noble定義の
 fingerprint、payload length、checksumを持つ。整数はlittle endianであり、
 C++ objectのmemory layoutやPython pickleには依存しない。
+
+現在のformat versionとrules versionはともに2である。version 2はpayloadの
+`waiting_noble` byteの直後に`waiting_return` byteを追加し、山札予約が返却を持たず
+別の`RETURN_GEM`で返すルールに対応する。`waiting_noble`と`waiting_return`が両方立つ
+snapshotは拒否する。
 
 ```python
 snapshot = game.serialize_snapshot()
@@ -29,8 +34,18 @@ assert restored.board_hash() == game.board_hash()
 
 formatを変更する場合は`GAME_SNAPSHOT_FORMAT_VERSION`を、同じbinary layoutで
 rule transitionの意味を変更する場合は`GAME_SNAPSHOT_RULES_VERSION`を必ず
-更新する。学習アーカイブで既存snapshotを維持する期間は、旧version decoder
-も明示的に保持するか、対応する旧engineを固定して使用する。
+更新する。実行時の旧version互換は持たない。
+
+version 1のsnapshotは`Game.deserialize_snapshot()`で
+`csplendor game snapshot version 1 must be converted with Game.upgrade_snapshot_v1 first`
+として拒否される。保存済みのversion 1は一度だけ変換する。
+
+```python
+upgraded = csplendor.Game.upgrade_snapshot_v1(old_snapshot)  # bytes -> bytes
+game = csplendor.Game.deserialize_snapshot(upgraded)
+```
+
+version 1の局面は返却待ちを持たないため、変換後の`waiting_return`は常に`False`である。
 
 snapshotはauthoritativeな完全情報であり、山札順と相手の非公開予約も含む。
 不完全情報ゲームのMCTSで直接読むと情報漏洩になるため、root observer視点の

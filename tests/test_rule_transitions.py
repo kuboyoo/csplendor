@@ -208,7 +208,9 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
         ),
         (
             "purchase_dag",
-            "a79c4e195b0d6c0d08049369ef21fedf8a39950f4675be1c4237f6adc59e53ff",
+            # Proof-DAG nodes gained "waiting_return" (2026-10-05); without it
+            # the digest is a79c4e195b0d6c0d08049369ef21fedf8a39950f4675be1c4237f6adc59e53ff.
+            "df6b13364b59ba3826ad566c1530e0a86405498cb392511f1a94e00bd2f0b097",
         ),
         (
             "oracle_blank",

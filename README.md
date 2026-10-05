@@ -83,7 +83,7 @@ restored = cs.Game.deserialize_snapshot(snapshot)
 assert restored.serialize_snapshot() == snapshot
 ```
 
-`legal_actions` はPythonの `Action` 一覧、`legal_action_codes` はpacked整数一覧、`legal_action_count` は件数だけを返します。**一覧内の添字、packed整数、後述のV3行動IDは別物**です。外部入力には検証付きの `apply()` / `apply_action_code()` を使い、`*_trusted()` は同じ局面で生成済みの合法手に限定してください。
+`legal_actions` はPythonの `Action` 一覧、`legal_action_codes` はpacked整数一覧、`legal_action_count` は件数だけを返します。**一覧内の添字、packed整数、後述のV3/V4行動IDは別物**です。外部入力には検証付きの `apply()` / `apply_action_code()` を使い、`*_trusted()` は同じ局面で生成済みの合法手に限定してください。
 
 ### ランダム対局
 
@@ -106,7 +106,7 @@ print("終了:", game.is_game_over(), "勝者:", game.winner, "得点:", game.sc
 
 貴族選択待ちでは同じプレイヤーが続けて行動します。通常手がない場合の `PASS` も合法手一覧に含まれるため、このループで処理できます。
 
-### AI入力とV3行動マスク
+### AI入力とV4行動マスク
 
 ```python
 import numpy as np
@@ -116,17 +116,17 @@ game = cs.Game(seed=42)
 game.simple_payment_mode = False
 observer = game.current_player
 features = cs.StateFeaturizer().featurize(game, observer=observer)
-mask = cs.ActionEncoderV3.get_action_mask(game)
+mask = cs.ActionEncoderV4.get_action_mask(game)
 assert features.shape == (196,)
-assert mask.shape == (3133,)
+assert mask.shape == (3121,)
 
 # ここをモデルのマスク付きpolicy選択に置き換える
 action_id = int(np.flatnonzero(mask)[0])
-action = cs.ActionEncoderV3.decode(action_id, game)
+action = cs.ActionEncoderV4.decode(action_id, game)
 assert game.apply(action)
 ```
 
-合法手のV3 IDを `game.legal_actions` と同じ順で並べたものは、`cs.ActionEncoderV3.legal_action_ids(game)` で一括取得できます。戻り値は int32 の NumPy 配列で、`[cs.ActionEncoderV3.encode(a, game) for a in game.legal_actions]` と同じ内容をネイティブ側で1回の列挙により作ります。
+合法手のV4 IDを `game.legal_actions` と同じ順で並べたものは、`cs.ActionEncoderV4.legal_action_ids(game)` で一括取得できます（V3は `cs.ActionEncoderV3.legal_action_ids(game)`）。戻り値は int32 の NumPy 配列で、`[cs.ActionEncoderV4.encode(a, game) for a in game.legal_actions]` と同じ内容をネイティブ側で1回の列挙により作ります。
 
 ## 速度ベンチマーク
 
@@ -191,7 +191,7 @@ assert game.apply(action)
 | 勝敗 | 得点が高い方。同点なら購入枚数が少ない方。それも同じなら引き分け |
 | `winner` | `-1`: 継続中、`0` / `1`: 勝者、`-2`: 引き分け |
 
-異色取得は銀行にある色から最大3色を1個ずつ、同色2個取得は銀行にその色が4個以上ある場合に可能です。金は通常取得できず、予約時に銀行にあれば1個得ます。取得・予約で10個を超える場合、超過分の返却までを1個の `Action` に含めます。
+異色取得は銀行にある色から最大3色を1個ずつ、同色2個取得は銀行にその色が4個以上ある場合に可能です。金は通常取得できず、予約時に銀行にあれば1個得ます。取得・公開予約で10個を超える場合、超過分の返却までを1個の `Action` に含めます。山札予約は返却を含まず、11個になった場合は同じ手番のまま返却フェーズ（`waiting_return=True`）に入り、めくれたカードを見てから `RETURN_GEM` で1個返します。返却後に貴族判定を行います。
 
 通常行動後に条件を満たす貴族が1枚なら自動取得、複数なら `waiting_noble=True` となり、同じ手番で `VISIT_NOBLE` を選びます。条件判定は購入済みカードのボーナスで行い、トークンは消費しません。通常の合法手がない場合だけ `PASS` を生成し、相手も行動不能なら引き分けにします。詳細は [エンジン仕様](doc/engine_specs.md)。
 
@@ -212,7 +212,7 @@ BGAでいう支払い方の選択に対応する設定は `Game.simple_payment_m
 
 | フィールド | 意味 |
 |---|---|
-| `type` | `0`: 異色取得、`1`: 同色取得、`2`: 公開予約、`3`: 山札予約、`4`: 購入、`5`: 貴族選択、`6`: パス |
+| `type` | `0`: 異色取得、`1`: 同色取得、`2`: 公開予約、`3`: 山札予約、`4`: 購入、`5`: 貴族選択、`6`: パス、`7`: 山札予約後の返却（`RETURN_GEM`） |
 | `take`, `return_gems` | 色順に6要素。取得数・返却数 |
 | `card_id`, `from_reserved` | 対象カードID、予約からの購入か |
 | `deck_level` | 山札予約のレベル添字 `0..2`。USIの `L1..L3` とは1ずれる |
@@ -240,7 +240,7 @@ BGAでいう支払い方の選択に対応する設定は `Game.simple_payment_m
 
 カードのIDは静的データのIDで、場のスロットや行動IDではありません。カードの `level` は `1..3`、場の配列は `board.visible[level - 1][slot]` です。空きスロットは `-1`。
 
-各行が1色（上から白・青・緑・赤・黒）で、表示サイズはレベル間でそろえています。カードの見方: 左上のラベルが勝利点（0点は非表示）、右上の宝石が購入後に得るボーナスの色、左下の丸が購入コスト（数の大きい順）です。右下の `ID` がカードID（0〜89）、`V3 a–b` はV3行動空間でこのカードを購入する行動IDの範囲です（支払いパターンごとに1つ）。枠の色と◆の数がレベルを表します。
+各行が1色（上から白・青・緑・赤・黒）で、表示サイズはレベル間でそろえています。カードの見方: 左上のラベルが勝利点（0点は非表示）、右上の宝石が購入後に得るボーナスの色、左下の丸が購入コスト（数の大きい順）です。右下の `ID` がカードID（0〜89）、`V3 a–b` はV3行動空間でこのカードを購入する行動IDの範囲です（支払いパターンごとに1つ。V4では各値から18を引きます）。枠の色と◆の数がレベルを表します。
 
 **レベル1（40枚）**
 
@@ -270,7 +270,7 @@ assert len(cs.get_all_nobles()) == 12
 
 ### 貴族12種類
 
-このエンジンが採用するカタログは12種類です。すべて3点で、タイル下部のボーナス枚数（購入済みカードの色）を要求します。右上の `ID` が貴族ID、`V3` はV3行動空間でその貴族を選ぶ行動IDです。外部サービスのIDと同一とは限らないため、連携時は要求色・枚数で対応を確認してください。
+このエンジンが採用するカタログは12種類です。すべて3点で、タイル下部のボーナス枚数（購入済みカードの色）を要求します。右上の `ID` が貴族ID、`V3` はV3行動空間でその貴族を選ぶ行動IDです（V4では18を引きます）。外部サービスのIDと同一とは限らないため、連携時は要求色・枚数で対応を確認してください。
 
 <img src="assets/nobles/nobles.svg" alt="貴族タイル12枚" width="100%">
 
@@ -287,17 +287,18 @@ assert len(cs.get_all_nobles()) == 12
 | `StateFeaturizer` / `StateEncoder` | 196 | 状態特徴量V1。推論時は `observer` を明示 |
 | `ActionEncoder` / `ActionEncoderCpp` | 48 | 基本行動。返却・支払いの全選択肢を区別しない。内蔵MCTSの契約 |
 | `ActionEncoderV2` | 4869 | スロット基準。返却・支払い・パスを含む互換用 |
-| `ActionEncoderV3` | 3133 | 購入をカードID、貴族選択を貴族IDで表す全行動用 |
+| `ActionEncoderV3` | 3133 | 購入をカードID、貴族選択を貴族IDで表す。返却フェーズは表現できない |
+| `ActionEncoderV4` | 3121 | V3の山札予約返却を分離し `RETURN_GEM` 6枠を追加した全行動用 |
 
-新しい全行動policyにはV3が使えますが、**内蔵C++ MCTSのpolicyは48枠固定**で、V3をそのまま渡すことはできません。V2/V3のマスクは終局時に全ゼロです。48枠にはパスがないため、MCTSのrootが `requires_forced_pass` なら先に `apply_forced_pass()` を呼びます。
+新しい全行動policyにはV4を使います。**内蔵C++ MCTSのpolicyは48枠固定**で、V3/V4をそのまま渡すことはできません（48枠は返却フェーズ中だけslot 0..5を返却色に再利用）。V2/V3/V4のマスクは終局時に全ゼロです。48枠にはパスがないため、MCTSのrootが `requires_forced_pass` なら先に `apply_forced_pass()` を呼びます。
 
-V3の区分は、異色取得 `0..839`、同色取得 `840..979`、公開予約 `980..1063`、山札予約 `1064..1084`、購入 `1085..3119`、貴族 `3120..3131`、パス `3132` です。詳細は [V2](doc/action_space_v2.md) / [V3](doc/action_space_v3.md)。モデルと一緒にschema version・fingerprint・支払いモードを保存してください。
+V3の区分は、異色取得 `0..839`、同色取得 `840..979`、公開予約 `980..1063`、山札予約 `1064..1084`、購入 `1085..3119`、貴族 `3120..3131`、パス `3132` です。V4はV3の山札予約 `1064..1084` を `1064..1066` に畳み、購入 `1067..3101`、貴族 `3102..3113`、返却 `3114..3119`、パス `3120` です。V3からの移行（`v3_to_v4_table()`、`return_phase_feature`、snapshot変換）は [V4](doc/action_space_v4.md) を参照してください。詳細は [V2](doc/action_space_v2.md) / [V3](doc/action_space_v3.md) / [V4](doc/action_space_v4.md)。モデルと一緒にschema version・fingerprint・支払いモードを保存してください。
 
 `StateEncoder.encode_canonical(game, player, observer)` はプレイヤー視点を入れ替えます。`observer` の既定値 `-1` は完全情報なので、対戦AIには観測者 `0` / `1` を明示します。未知カード集合や将来の公開確率には `Board.observable_card_pool()` と `StateEncoder.encode_public_card_statistics()` を利用できます。
 
 ### MCTS
 
-V3行動（3,133 ID、全支払い・返却分岐）を扱う多対局探索 `V3SearchSession` は
+全支払い・返却分岐を扱う多対局探索 `V3SearchSession`（行動IDはV4の3,121 ID）は
 [V3探索の設計](doc/mcts_v3.md) を参照してください。48枠の内蔵MCTSとは別実装です。
 `V3SearchConfig.num_threads`（既定1）を2以上にすると、対局単位で `collect()` / `apply()` を並列に処理します。結果はスレッド数によらず同一です。
 
@@ -351,6 +352,7 @@ SPNの復元は未知カードを補完するため、元の山札順や終局ph
 | 異色・同色取得 | `take:WUG`、`take:RR` |
 | 取得と返却 | `take:WUG/return:KK` |
 | 公開予約・山札予約 | `reserve:C42`、`reserve:L2` |
+| 山札予約後の返却（別の手） | `return:W`（入力に限り旧表記 `reserve:L2/return:W` も2手に展開） |
 | 購入 | `buy:C3`、`buy:C71/gold:W2U1` |
 | 貴族選択・パス | `noble:N7`、`pass` |
 

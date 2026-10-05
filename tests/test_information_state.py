@@ -59,8 +59,8 @@ def test_information_state_is_versioned_and_changes_with_public_semantics():
     game = csplendor.Game(seed=3)
     key = game.serialize_information_state(0)
 
-    assert csplendor.Game.information_state_format_version() == 2
-    assert csplendor.Game.information_state_rules_version() == 1
+    assert csplendor.Game.information_state_format_version() == 3
+    assert csplendor.Game.information_state_rules_version() == 2
     assert key[:8] == b"CSPLINFO"
     assert key != game.serialize_information_state(1)
 
@@ -71,6 +71,12 @@ def test_information_state_is_versioned_and_changes_with_public_semantics():
     changed = game.clone_light()
     changed.simple_payment_mode = True
     assert changed.serialize_information_state(0) != key
+
+    # The pending post-deck-reservation return is public.
+    changed = game.clone_light()
+    changed.board.waiting_return = True
+    assert changed.serialize_information_state(0) != key
+    assert changed.serialize_information_state(1) != game.serialize_information_state(1)
 
     with pytest.raises(ValueError, match="observer"):
         game.serialize_information_state(2)
@@ -96,5 +102,5 @@ def test_information_state_has_a_golden_encoding():
     key = csplendor.Game(seed=42).serialize_information_state(0)
     assert len(key) < 256
     assert hashlib.sha256(key).hexdigest() == (
-        "29f4c45faef7ab9b64f5ab39b0cdb80acc195df32a53bf2d1b4c35670d30c446"
+        "c4780c9d77023658374681c8ec7777115b7c4be8899427a524925d16608f2805"
     )

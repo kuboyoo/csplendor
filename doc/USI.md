@@ -75,17 +75,19 @@ take:RR/return:D             → 赤2枚取得、金1枚返却
 
 ```
 reserve:C<card_id>[/return:<ret_colors>]
-reserve:L<level>[/return:<ret_colors>]
+reserve:L<level>
 ```
 
-- `C<card_id>`: 場のカードを指定（カードID 0-89）
-- `L<level>`: デッキからの予約（レベル 1-3）
+- `C<card_id>`: 場のカードを指定（カードID 0-89）。10枚超え時の返却は同じ手に `/return:` で付ける。
+- `L<level>`: デッキからの予約（レベル 1-3）。返却は付けない。11枚になった場合は、同じプレイヤーが
+  めくれたカードを見てから次の手 `return:<C>` で1枚返す（[3.5](#35-山札予約後の返却-return)）。
 
 **例:**
 ```
 reserve:C42                  → カードID42を予約（金トークン獲得）
 reserve:L2                   → レベル2デッキから予約
 reserve:C10/return:U         → カード10を予約、青を1枚返却
+reserve:L2 return:W          → レベル2デッキから予約し、続く手で白を1枚返却（2手）
 ```
 
 ### 3.3 カード購入 (Purchase)
@@ -126,7 +128,24 @@ noble:N7                     → 貴族ID7を獲得
 > 貴族訪問は購入後に自動的に発生するが、複数候補がある場合はプレイヤーが選択する必要がある。
 > エンジンは `bestmove buy:C42 noble:N3` のように購入と貴族を同一行で返すことができる。
 
-### 3.5 パス (Pass)
+### 3.5 山札予約後の返却 (Return)
+
+```
+return:<C>
+```
+
+- `<C>`: 返却する色1文字（`W` `U` `G` `R` `K` `D` のいずれか）。1手で返すのは常に1枚。
+- 山札予約で所持トークンが11枚になった直後の返却フェーズでだけ合法。手番は予約したプレイヤーのまま。
+- 返却後に貴族判定と手番終了処理を行う（順序は「返却 → 貴族」）。
+
+山札予約の正規形は `reserve:L2` → `return:W` の2手である。csplendorは入力に限り、旧来の1手表記
+`reserve:L2/return:W`（返却色はちょうど1文字）を受け付け、2手に展開する
+（`csplendor.api.usi_resolver.expand_usi_move`）。`position ... moves ...` の再生、KIFUの読み込み、
+`GameSessionService.apply_usi` / Web API `POST /game/{id}/action_usi` が展開に対応する。
+展開せずに `reserve:L<n>/return:...` を合法手照合（`find_legal_action_index_by_usi`）へ渡すと
+`deck reservation returns are a separate ply` として拒否する。出力は常に正規の2手である。
+
+### 3.6 パス (Pass)
 
 ```
 pass
@@ -136,15 +155,15 @@ pass
 `csplendor`では双方に通常の合法手がないことを確認した時点で引き分けとし、
 無限のパス往復を防ぐ。
 
-### 3.6 記法のBNF（簡略版）
+### 3.7 記法のBNF（簡略版）
 
 ```bnf
-<move>        ::= <take> | <reserve> | <buy> | <noble> | "pass"
+<move>        ::= <take> | <reserve> | <buy> | <noble> | <return> | "pass"
 <take>        ::= "take:" <colors> [ "/return:" <ret> ]
-<reserve>     ::= "reserve:" <card_or_deck> [ "/return:" <ret> ]
+<reserve>     ::= "reserve:" "C" <card_id> [ "/return:" <ret> ] | "reserve:" "L" <level>
+<return>      ::= "return:" <color>
 <buy>         ::= "buy:" <card_ref> [ "/gold:" <gold_assign> ] [ " " <noble> ]
 <noble>       ::= "noble:" "N" <noble_id>
-<card_or_deck>::= "C" <card_id> | "L" <level>
 <card_ref>    ::= "C" <card_id>
 <colors>      ::= <color>+
 <ret>         ::= <color>+
@@ -211,6 +230,9 @@ P<n>:gems:W<n>U<n>G<n>R<n>K<n>D<n>;bonuses:W<n>U<n>G<n>R<n>K<n>;points:<n>;reser
 ```
 P0:gems:W1U2G0R0K1D0;bonuses:W0U1G0R0K0;points:0;reserved:[42,?L3];bought:[1]
 ```
+
+SPNは返却フェーズのフィールドを持たない。csplendorの `spn_to_game` は、手番プレイヤーの
+所持トークンが10枚を超える局面を山札予約直後の返却フェーズ（`waiting_return`）として復元する。
 
 #### Current Player
 末尾に現在の手番プレイヤー番号を記載: `0`, `1`, `2`, `3`
@@ -417,7 +439,7 @@ info string <任意の文字列>
 ### 11.1 エンジン開発者向け
 
 1. **最小実装**: `usi`, `isready`, `position`, `go`, `bestmove`, `quit` の6コマンドを実装すれば対局が可能。
-2. **アクション文字列のパース**: `take:`, `reserve:`, `buy:`, `noble:`, `pass` の5種類を認識するだけでよい。
+2. **アクション文字列のパース**: `take:`, `reserve:`, `buy:`, `noble:`, `return:`, `pass` の6種類を認識するだけでよい。返却フェーズの局面では `bestmove return:<C>` を返す。
 3. **SPN パーサー**: `position` コマンドの SPN を受信して内部盤面を構築する。
 4. **`/gold:` 省略時のデフォルト**: 最小金使用（csplendor の `_compute_gold_as` 相当）で自動決定。
 5. **`info` は任意**: 探索情報の送信はオプショナルだが、GUIでの可視化に有用。

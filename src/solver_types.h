@@ -92,6 +92,7 @@ struct RevealVerifiedProofNode {
   std::array<int, 2> scores = {0, 0};
   int winner = -1;
   bool waiting_noble = false;
+  bool waiting_return = false;
   std::vector<int> nobles;
   std::array<std::vector<int>, 2> acquired_nobles;
   std::string kind = "state";

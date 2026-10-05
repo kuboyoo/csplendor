@@ -1,5 +1,30 @@
 # 変更履歴 / Changelog
 
+## 未出荷：山札予約後の返却フェーズと行動空間V4（2026-10-05）
+
+- 山札予約（`RESERVE_DECK`）は返却を持たなくなった。予約で11枚になると同じ手番のまま返却フェーズ
+  （`Board.waiting_return`、`Board.pending_decision == 1`）に入り、めくれたカードを見てから
+  `RETURN_GEM`（`ActionType` 7）で1枚返す。順序は「返却 → 貴族」。取得・公開予約の返却と購入は変更なし。
+- `cs.ActionEncoderV4`（3121枠）を追加した。V3の山札予約21枠を3枠に畳み、`RETURN_GEM` 6枠を加えた。
+  `v3_to_v4_table()` でV3のpolicyを移行できる。V2/V3は返却フェーズを表現できない（マスク空、`encode` は -1）。
+  48枠の `ActionEncoderCpp` は返却フェーズ中だけslot 0..5を返却色に使う。
+- `V3SearchSession` の行動IDをV4にした。`V3SearchConfig.return_phase_feature`（既定 True）で特徴量が1次元増える。
+  `cs.v4_semantic_group_id` を追加した（139群）。
+- Game snapshotをformat/rules version 2、情報集合をformat 3 / rules 2にした。version 1のsnapshotは
+  拒否し、`Game.upgrade_snapshot_v1()` で一度だけ変換する。
+- USIに `return:<C>` を追加した。山札予約の正規形は `reserve:L2` → `return:W` の2手。入力に限り旧表記
+  `reserve:L2/return:W` を2手に展開する。棋譜の書き出しは `Splendor KIFU v1.1`（v1.0も読込可）。
+  Web APIの盤面に `waiting_return`・`pending_decision` を追加した。
+- 詰み探索では返却を予約手の一部として扱い、深さを消費しない。
+- 詳細は `doc/action_space_v4.md` を参照。
+
+English: Deck reservations no longer carry token returns; an 11-token
+reservation enters a same-player return phase resolved by `RETURN_GEM` after
+the drawn card is seen. New `ActionEncoderV4` (3121 ids) with a V3 migration
+table; `V3SearchSession` now uses V4 ids and one extra return-phase feature by
+default. Snapshot v2 (convert v1 with `Game.upgrade_snapshot_v1`),
+information state v3, USI `return:<C>` and KIFU v1.1.
+
 ## 未出荷：ホットスポット高速化（2026-10-04）
 
 - 探索結果・特徴量・行動IDを変えずに（mainとビット一致を確認）、エンジンのホットパスを高速化した。

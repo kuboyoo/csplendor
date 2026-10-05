@@ -2,6 +2,7 @@
 #include "action_encoder.h"
 #include "action_encoder_v2.h"
 #include "action_encoder_v3.h"
+#include "action_encoder_v4.h"
 #include "bindings.h"
 #include "bindings_array.h"
 #include "encoding_schema.h"
@@ -317,6 +318,92 @@ void bind_encoding(py::module_ &m) {
             return (int)ActionEncoderV3::CARD_PATTERN_COUNT[card_id];
           },
           py::arg("card_id"), "Get the stored pattern count for a card");
+
+  // ActionEncoderV4 bindings (3121 ids: V3 with the deck-reservation return
+  // split into RETURN_GEM decisions)
+  py::class_<ActionEncoderV4>(m, "ActionEncoderV4")
+      .def_readonly_static("ACTION_SIZE", &ActionEncoderV4::ACTION_SIZE)
+      .def_readonly_static("OFFSET_TAKE_DIFFERENT",
+                           &ActionEncoderV4::OFFSET_TAKE_DIFFERENT)
+      .def_readonly_static("OFFSET_TAKE_SAME", &ActionEncoderV4::OFFSET_TAKE_SAME)
+      .def_readonly_static("OFFSET_RESERVE_VISIBLE",
+                           &ActionEncoderV4::OFFSET_RESERVE_VISIBLE)
+      .def_readonly_static("OFFSET_RESERVE_DECK",
+                           &ActionEncoderV4::OFFSET_RESERVE_DECK)
+      .def_readonly_static("OFFSET_PURCHASE", &ActionEncoderV4::OFFSET_PURCHASE)
+      .def_readonly_static("TOTAL_PURCHASE", &ActionEncoderV4::TOTAL_PURCHASE)
+      .def_readonly_static("OFFSET_VISIT_NOBLE",
+                           &ActionEncoderV4::OFFSET_VISIT_NOBLE)
+      .def_readonly_static("OFFSET_RETURN_GEM",
+                           &ActionEncoderV4::OFFSET_RETURN_GEM)
+      .def_readonly_static("OFFSET_PASS", &ActionEncoderV4::OFFSET_PASS)
+      .def_static("schema_version",
+                  []() { return ActionEncoderV4::Schema::VERSION; })
+      .def_static("schema_fingerprint",
+                  []() { return ActionEncoderV4::Schema::fingerprint(); })
+      .def_static(
+          "schema_sections",
+          []() { return action_schema_sections<ActionEncoderV4::Schema>(); })
+      .def_static("v3_to_v4_id", &ActionEncoderV4::v3_to_v4_id,
+                  py::arg("v3_id"),
+                  "Deterministic V3 -> V4 id map (-1 outside the V3 space). A V3 "
+                  "deck reservation with any return maps to the V4 reservation "
+                  "of the same level")
+      .def_static("v4_to_v3_id", &ActionEncoderV4::v4_to_v3_id, py::arg("v4_id"),
+                  "V3 id of a V4 id that exists in V3 (-1 for RETURN_GEM)")
+      .def_static(
+          "v3_to_v4_table",
+          []() {
+            py::array_t<int32_t> table(ActionEncoderV3::ACTION_SIZE);
+            auto *data = table.mutable_data();
+            for (int id = 0; id < ActionEncoderV3::ACTION_SIZE; ++id)
+              data[id] = ActionEncoderV4::v3_to_v4_id(id);
+            return table;
+          },
+          "int32 array t of length 3133 with t[v3_id] = v4_id, for migrating "
+          "V3 policy targets (np.add.at(v4, t, v3))")
+      .def_static(
+          "legal_action_ids",
+          [](const Game &game) {
+            const std::vector<int32_t> ids =
+                ActionEncoderV4::legal_action_ids(game);
+            py::array_t<int32_t> result(static_cast<py::ssize_t>(ids.size()));
+            if (!ids.empty())
+              std::memcpy(result.mutable_data(), ids.data(),
+                          ids.size() * sizeof(int32_t));
+            return result;
+          },
+          py::arg("game"),
+          "V4 ids of game.legal_actions in order, as an int32 array")
+      .def_static(
+          "encode",
+          [](const Action &action, const Game &game) {
+            return ActionEncoderV4::encode(action, game);
+          },
+          py::arg("action"), py::arg("game"),
+          "Encode an action to action space index [0, 3120] (-1 if none)")
+      .def_static(
+          "decode",
+          [](int index, const Game &game) {
+            return ActionEncoderV4::decode(index, game);
+          },
+          py::arg("index"), py::arg("game"),
+          "Decode an action index to Action template")
+      .def_static(
+          "decode_and_match",
+          [](int index, const Game &game) {
+            return ActionEncoderV4::decode_and_match(index, game);
+          },
+          py::arg("index"), py::arg("game"),
+          "Decode action and match to actual legal action with correct details")
+      .def_static(
+          "get_action_mask",
+          [](const Game &game) {
+            auto mask = ActionEncoderV4::get_action_mask(game);
+            return owning_array_copy(mask);
+          },
+          py::arg("game"),
+          "Get a mask of size 3121 where 1 means legal");
 }
 
 } // namespace csplendor::python

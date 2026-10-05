@@ -470,6 +470,12 @@ def spn_to_game(spn: str, seed: int = 0) -> Game:
         player.acquired_nobles = pdata["nobles"]
         board.set_player(idx, player)
 
+    # SPN has no pending-decision field.  A side to move holding more than
+    # ten tokens can only arise right after a deck reservation, so the
+    # position is the return phase of that reservation.
+    if sum(players[current_player]["gems"]) > 10:
+        board.waiting_return = True
+
     return game
 
 
@@ -487,7 +493,7 @@ def position_to_game(position: str, seed: int = 0) -> Game:
     else:
         game = spn_to_game(base, seed=seed)
 
-    for move in moves:
+    for move in (ply for text in moves for ply in expand_usi_move(text)):
         idx = find_legal_action_index_by_usi(game, move)
         if idx < 0:
             raise ValueError(f"no legal action matches USI move: {move}")
@@ -884,6 +890,7 @@ from .kifu_codec import (  # noqa: E402,F811
 )
 from .usi_parser import parse_usi_move as parse_usi_move  # noqa: E402,F811
 from .usi_resolver import (  # noqa: E402,F811
+    expand_usi_move as expand_usi_move,
     find_legal_action_index_by_usi as find_legal_action_index_by_usi,
 )
 from .usi_serializer import (  # noqa: E402,F811

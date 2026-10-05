@@ -7,6 +7,7 @@ from ._csplendor import (
     ActionEncoderCpp,
     ActionEncoderV2,
     ActionEncoderV3,
+    ActionEncoderV4,
     ActionType,
     Board,
     Card,
@@ -42,6 +43,7 @@ from ._csplendor import (
     solve_reveal_verified_mate_cpp,
     solve_visible_only_winner_cpp,
     v3_semantic_group_id,
+    v4_semantic_group_id,
 )
 from .action_space import ActionEncoder
 from .features import StateFeaturizer
@@ -80,9 +82,11 @@ __all__ = [
     "GemType", "ActionType", "Card", "Noble", "Action",
     "PlayerState", "Board", "Game",
     "get_card", "get_noble", "get_all_cards", "get_all_nobles",
-    "StateFeaturizer", "ActionEncoder", "ActionEncoderCpp", "ActionEncoderV2", "ActionEncoderV3", "StateEncoder",
+    "StateFeaturizer", "ActionEncoder", "ActionEncoderCpp", "ActionEncoderV2", "ActionEncoderV3",
+    "ActionEncoderV4", "StateEncoder",
     "MCTSConfig", "MCTSNode", "MCTS",
     "V3SearchConfig", "V3SearchSession", "v3_semantic_group_id",
+    "v4_semantic_group_id",
     "MateOrderHints",
     "near_mate_probability_cpp",
     "NEAR_MATE_FORMAT",

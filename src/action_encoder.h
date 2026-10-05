@@ -150,6 +150,12 @@ public:
       return -1;
     }
 
+    case RETURN_GEM: {
+      // Slots 0..5 carry the returned colour only during the return phase.
+      const int color = action.returned_color();
+      return board.waiting_return && color < 6 ? color : -1;
+    }
+
     default:
       return -1;
     }
@@ -170,6 +176,8 @@ public:
         return get_action_mask_reference_bits(game);
       return get_noble_mask_bits(board);
     }
+    if (board.waiting_return)
+      return get_return_mask_bits(board);
 
     // Keep the public editor-state exception contract. The direct path does
     // not otherwise need to dereference every purchase source.
@@ -188,7 +196,31 @@ public:
       return 0;
     if (board.waiting_noble)
       return get_noble_mask_bits(board);
+    if (board.waiting_return)
+      return get_return_mask_bits(board);
     return get_action_mask_bits_direct(game);
+  }
+
+  // While a deck-reservation return is pending the 48 slots are reused like
+  // the noble slots during a noble choice: slot c (0..5) returns colour c
+  // (white, blue, green, red, black, gold).
+  static uint64_t get_return_mask_bits(const Board &board) {
+    const PlayerState &player = board.players[board.current_player];
+    uint64_t mask = 0;
+    for (int color = 0; color < 6; ++color)
+      if (player.gems[color] != 0)
+        mask |= uint64_t{1} << color;
+    return mask;
+  }
+
+  static Action return_action(int index, const Board &board) {
+    if (index < 0 || index >= 6 ||
+        board.players[board.current_player].gems[index] == 0)
+      return Action{};
+    Action action;
+    action.type = RETURN_GEM;
+    action.return_gems[index] = 1;
+    return action;
   }
 
   static std::array<uint8_t, BASE_ACTION_COUNT>
@@ -221,6 +253,8 @@ public:
           board.nobles[static_cast<size_t>(index - OFFSET_VISIT_NOBLE)]);
       return action;
     }
+    if (board.waiting_return)
+      return return_action(index, board);
 
     MoveGenerator::validate_purchase_source_ids(board);
     if (requires_reference_scan(game))
@@ -249,6 +283,8 @@ public:
       action.noble_choice = board.nobles[static_cast<size_t>(slot)];
       return action;
     }
+    if (board.waiting_return)
+      return return_action(index, board);
     return decode_direct(index, game);
   }
 
@@ -679,7 +715,9 @@ private:
   }
 
   static void set_first_canonical_return(const Board &board, Action &action) {
+    // Deck reservations never carry a return (RETURN_GEM follows instead).
     if (action.type == PURCHASE || action.type == VISIT_NOBLE ||
+        action.type == RESERVE_DECK || action.type == RETURN_GEM ||
         action.type == ACTION_TYPE_COUNT)
       return;
     const std::array<uint8_t, 6> available =

@@ -75,4 +75,8 @@ def action_to_usi(action, game=None) -> str:
         return base + (f"/gold:{gold}" if gold else "")
     if action.type == CoreActionType.VISIT_NOBLE:
         return f"noble:N{safe_int(action.noble_choice)}"
+    if action.type == CoreActionType.RETURN_GEM:
+        return "return:" + counts_to_letters(
+            list(action.return_gems), include_gold=True
+        )
     return "pass"

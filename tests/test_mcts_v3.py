@@ -38,7 +38,7 @@ def test_session_respects_budget_legality_and_determinism():
         drive(session)
         for index, game in enumerate(games):
             visits = session.root_visits(index)
-            mask = cs.ActionEncoderV3.get_action_mask(game)
+            mask = cs.ActionEncoderV4.get_action_mask(game)
             assert all(mask[action] for action in visits)
             assert sum(visits.values()) == 95  # root evaluation consumes one
             assert session.simulations(index) == 96
@@ -77,7 +77,7 @@ def test_values_flow_back_with_the_right_sign():
     config.fpu_reduction = 0.0
     config.c_puct = 0.01
     game = cs.Game(seed=7)
-    legal = int(cs.ActionEncoderV3.get_action_mask(game).sum())
+    legal = int(cs.ActionEncoderV4.get_action_mask(game).sum())
     # Budget = root evaluation + one visit per root child. Every leaf claims
     # +0.5 for its own side to move; each child is an opponent node, so the
     # root sees -0.5 per child and +0.5 for its own evaluation.
@@ -119,6 +119,16 @@ def test_semantic_groups_follow_the_python_layout():
     assert cs.v3_semantic_group_id(3119) == 30 + 89
     assert cs.v3_semantic_group_id(3120) == 120
     assert cs.v3_semantic_group_id(3132) == 132
+    # V4 ids (used by V3SearchSession): same groups, returns are 133..138.
+    assert cs.v4_semantic_group_id(1064) == 27 and cs.v4_semantic_group_id(1066) == 29
+    assert cs.v4_semantic_group_id(1067) == 30
+    assert cs.v4_semantic_group_id(3101) == 30 + 89
+    assert cs.v4_semantic_group_id(3102) == 120
+    assert [cs.v4_semantic_group_id(i) for i in range(3114, 3120)] == list(range(133, 139))
+    assert cs.v4_semantic_group_id(3120) == 132
+    for v3_id in range(cs.ActionEncoderV3.ACTION_SIZE):
+        v4_id = cs.ActionEncoderV4.v3_to_v4_id(v3_id)
+        assert cs.v4_semantic_group_id(v4_id) == cs.v3_semantic_group_id(v3_id)
     config = cs.V3SearchConfig()
     config.num_simulations = 48
     config.semantic_groups = True
@@ -126,7 +136,7 @@ def test_semantic_groups_follow_the_python_layout():
     game = cs.Game(seed=31)
     session.add_game(game, game.current_player, seed=2)
     drive(session)
-    mask = cs.ActionEncoderV3.get_action_mask(game)
+    mask = cs.ActionEncoderV4.get_action_mask(game)
     assert all(mask[a] for a in session.root_visits(0))
 
 
@@ -169,7 +179,7 @@ def test_rollout_phase_follows_the_tree_budget_and_reports_returns():
     assert 2 <= len(candidates) <= 4 and len(set(candidates)) == len(candidates)
     visits = session.root_visits(0)
     assert candidates[0] == max(sorted(visits), key=lambda a: visits[a])
-    groups = {cs.v3_semantic_group_id(a) for a in candidates}
+    groups = {cs.v4_semantic_group_id(a) for a in candidates}
     assert len(groups) == len(candidates)
     assert result["returns"].shape == (len(candidates), 3)
     assert result["terminal"].shape == (len(candidates), 3)
@@ -215,7 +225,7 @@ def test_redeterminization_and_dynamic_cpuct_keep_results_legal_and_reproducible
         game = cs.Game(seed=71)
         session.add_game(game, game.current_player, seed=6)
         drive(session, value=0.3)
-        mask = cs.ActionEncoderV3.get_action_mask(game)
+        mask = cs.ActionEncoderV4.get_action_mask(game)
         visits = session.root_visits(0)
         assert all(mask[a] for a in visits) and sum(visits.values()) == 63
         outputs.append(visits)
@@ -234,17 +244,17 @@ def test_tree_reuse_re_roots_along_played_actions():
     first = session.root_visits(0)
     own = max(sorted(first), key=lambda a: first[a])
     # Play the observer's best move, then the opponent's most visited reply.
-    game.apply(cs.ActionEncoderV3.decode_and_match(own, game))
-    reply_mask = cs.ActionEncoderV3.get_action_mask(game)
+    game.apply(cs.ActionEncoderV4.decode_and_match(own, game))
+    reply_mask = cs.ActionEncoderV4.get_action_mask(game)
     reply = int(np.flatnonzero(reply_mask)[0])
-    game.apply(cs.ActionEncoderV3.decode_and_match(reply, game))
+    game.apply(cs.ActionEncoderV4.decode_and_match(reply, game))
     assert game.current_player == observer
     reused = session.advance_game(0, game, [own, reply], observer, seed=4)
     # The reply may or may not have been expanded; either way the search
     # must continue from a consistent root with a fresh budget.
     drive(session, value=0.2)
     visits = session.root_visits(0)
-    mask = cs.ActionEncoderV3.get_action_mask(game)
+    mask = cs.ActionEncoderV4.get_action_mask(game)
     assert all(mask[a] for a in visits)
     assert sum(visits.values()) >= 199
     if reused:
@@ -268,7 +278,7 @@ def test_root_visit_floor_forces_compulsory_comparisons():
     session.add_game(game, game.current_player, seed=2)
     features, ids, offsets, slots = session.collect()  # root
     uniform_apply(session, features, ids, offsets, slots)
-    legal = np.flatnonzero(cs.ActionEncoderV3.get_action_mask(game)).tolist()
+    legal = np.flatnonzero(cs.ActionEncoderV4.get_action_mask(game)).tolist()
     forced = [legal[-1], legal[-2]]
     session.set_root_visit_floor(0, forced, [15, 10])
     with pytest.raises(ValueError):

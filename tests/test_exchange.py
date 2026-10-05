@@ -5,11 +5,13 @@ import pytest
 
 from csplendor import ActionEncoderV2, ActionEncoderV3, ActionType, Game
 
+# Actions whose token return is part of the action itself. A deck
+# reservation never carries a return: the player returns afterwards with
+# RETURN_GEM, having seen the drawn card.
 EXCHANGE_TYPES = {
     ActionType.TAKE_DIFFERENT,
     ActionType.TAKE_SAME,
     ActionType.RESERVE_VISIBLE,
-    ActionType.RESERVE_DECK,
 }
 
 
@@ -163,7 +165,6 @@ def verify_all_return_groups(game, action_types=None):
         ([2, 2, 2, 2, 2, 0], ActionType.TAKE_SAME, 2),
         ([1, 1, 1, 1, 3, 3], ActionType.TAKE_SAME, 2),
         ([2, 2, 2, 2, 2, 0], ActionType.RESERVE_VISIBLE, 1),
-        ([2, 2, 2, 2, 2, 0], ActionType.RESERVE_DECK, 1),
         ([1, 1, 1, 1, 1, 5], ActionType.RESERVE_VISIBLE, 1),
     ],
 )
@@ -171,6 +172,41 @@ def test_exchange_generation_has_no_missing_or_duplicate_returns(
     gems, action_type, expected_excess
 ):
     verify_exchange_actions(setup_game_with_gems(gems), action_type, expected_excess)
+
+
+def test_deck_reservation_returns_after_seeing_the_card():
+    game = setup_game_with_gems([2, 2, 2, 2, 2, 0])
+    decks = [a for a in game.legal_actions if a.type == ActionType.RESERVE_DECK]
+    assert [int(a.deck_level) for a in decks] == [0, 1, 2]
+    assert all(sum(map(int, a.return_gems)) == 0 for a in decks)
+
+    reserved = Game.deserialize_snapshot(game.serialize_snapshot())
+    assert reserved.apply(decks[1], True)
+    board = reserved.board
+    assert board.waiting_return and board.pending_decision == 1
+    assert int(board.current_player) == 0
+    assert sum(map(int, board.players[0].gems)) == 11
+    returns = reserved.legal_actions
+    assert [a.type for a in returns] == [ActionType.RETURN_GEM] * 6
+    assert [tuple(map(int, a.return_gems)) for a in returns] == [
+        tuple(1 if c == color else 0 for c in range(6)) for color in range(6)
+    ]
+    assert not reserved.requires_forced_pass
+
+    assert reserved.apply(returns[5], True)  # return the new gold
+    assert not reserved.board.waiting_return
+    assert int(reserved.board.current_player) == 1
+    assert list(map(int, reserved.board.players[0].gems)) == [2, 2, 2, 2, 2, 0]
+    assert reserved.undo() and reserved.board.waiting_return
+    assert reserved.undo() and not reserved.board.waiting_return
+
+
+def test_deck_reservation_without_excess_keeps_a_single_ply():
+    game = setup_game_with_gems([2, 2, 2, 2, 1, 0])
+    deck = next(a for a in game.legal_actions if a.type == ActionType.RESERVE_DECK)
+    assert game.apply(deck, False)
+    assert not game.board.waiting_return
+    assert int(game.board.current_player) == 1
 
 
 def test_full_bank_all_player_token_distributions():

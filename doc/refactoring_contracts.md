@@ -14,7 +14,7 @@
 - `internal`: top-level Python API へ昇格させない。C++ header は同一リポジトリ内で
   利用できるが、外部互換性を保証しない。
 
-`GemType`、`ActionType`、`Action::pack()`、48/V2/V3 action ID、196 feature、
+`GemType`、`ActionType`、`Action::pack()`、48/V2/V3/V4 action ID、196 feature、
 snapshot version は分類によらず数値契約である。変更する場合は新しい version と
 移行手順を先に追加し、既存 version の意味を変更しない。
 
@@ -30,6 +30,7 @@ snapshot version は分類によらず数値契約である。変更する場合
 | hash cacheがcanonical stateを反映 | 必須 | 公開setter後は必須 | 必須 | 復元直後は未計算でよい |
 | undo history | 任意 | 任意 | `clone_light`では持たない | snapshot対象外 |
 | hidden informationの実在性 | 必須 | 緩和可 | observerから整合する世界 | snapshot payloadどおり |
+| 保留判断（`waiting_noble`と`waiting_return`は排他、`waiting_return`中の手番playerは11枚以上。`invalid_pending_decision`） | 必須 | 必須 | 必須 | deserialize時に必須 |
 
 用語は次の意味で固定する。
 
@@ -44,7 +45,7 @@ snapshot version は分類によらず数値契約である。変更する場合
 
 | 区分 | 主なフィールド | 更新責任 |
 |---|---|---|
-| canonical | `Board.bank/visible/decks/nobles/players/turn/current_player/final_round/waiting_noble/winner`、playerのpoints・slot・count | `Game` transition、editor setter、snapshot restore |
+| canonical | `Board.bank/visible/decks/nobles/players/turn/current_player/final_round/waiting_noble/waiting_return/winner`、playerのpoints・slot・count | `Game` transition、editor setter、snapshot restore |
 | derived | `PlayerState.packed_gems`、`packed_bonuses`、`noble_eligibility_mask` | gems/bonuses更新と同時に同期 |
 | provenance | `reserved_is_hidden`、Gameのaction/board history | reserve処理または履歴記録処理 |
 | cache | `Board` のposition hash cache | canonical/provenance state変更時にinvalidate |

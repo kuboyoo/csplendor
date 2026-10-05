@@ -63,7 +63,11 @@ struct Action {
   }
 
   uint64_t pack() const {
-    uint64_t code = static_cast<uint64_t>(type) & 0x7ULL;
+    // Type 7 is shared: RETURN_GEM stores colour + 1 in bits 3..5, and an
+    // invalid action (ACTION_TYPE_COUNT) keeps its historical code 7 with an
+    // empty payload.
+    uint64_t code =
+        type < RETURN_GEM ? static_cast<uint64_t>(type) : uint64_t{7};
 
     switch (type) {
     case TAKE_DIFFERENT:
@@ -100,6 +104,12 @@ struct Action {
     case VISIT_NOBLE:
       code |= (static_cast<uint64_t>(noble_choice + 1) & 0x1FULL) << 3;
       break;
+    case RETURN_GEM: {
+      const int color = returned_color();
+      if (color < 6)
+        code |= static_cast<uint64_t>(color + 1) << 3;
+      break;
+    }
     case PASS:
       break;
     default:
@@ -155,6 +165,15 @@ struct Action {
       action.noble_choice =
           static_cast<int8_t>(static_cast<int>((code >> 3) & 0x1FULL) - 1);
       break;
+    case RETURN_GEM: {
+      // Payload 0 (the historical invalid code 7) and 7 are not returns.
+      const int payload = static_cast<int>((code >> 3) & 0x7ULL);
+      if (payload >= 1 && payload <= 6)
+        action.return_gems[payload - 1] = 1;
+      else
+        action.type = ACTION_TYPE_COUNT;
+      break;
+    }
     case PASS:
       break;
     default:
@@ -163,6 +182,15 @@ struct Action {
     }
 
     return action;
+  }
+
+  // Colour of a RETURN_GEM action (first non-zero return entry), or 7 when
+  // none is set.
+  int returned_color() const {
+    for (int color = 0; color < 6; ++color)
+      if (return_gems[color] != 0)
+        return color;
+    return 7;
   }
 
   bool operator==(const Action &other) const {
@@ -217,6 +245,9 @@ struct Action {
       break;
     case PASS:
       ss << "PASS";
+      break;
+    case RETURN_GEM:
+      ss << "RETURN_GEM: " << returned_color();
       break;
     default:
       ss << "INVALID";

@@ -43,8 +43,19 @@ public:
   uint8_t current_player = 0;
   uint16_t turn = 0;
   bool final_round = false;
+  // Pending decisions of the player to move, resolved before the turn ends
+  // (at most one is set): choosing among several eligible nobles, and
+  // returning a token after a deck reservation took the player above ten.
   bool waiting_noble = false;
+  bool waiting_return = false;
   int8_t winner = -1; // -1: ongoing, 0, 1: player, -2: draw
+
+  enum class PendingDecision : uint8_t { None = 0, ReturnToken = 1, ChooseNoble = 2 };
+  PendingDecision pending_decision() const noexcept {
+    return waiting_return ? PendingDecision::ReturnToken
+           : waiting_noble ? PendingDecision::ChooseNoble
+                           : PendingDecision::None;
+  }
 
   // Incremental Zobrist hash support
   mutable uint64_t cached_hash = 0;
@@ -232,9 +243,13 @@ public:
         hash_ ^= Board::exact_current_player_salt(*zobrist_, old) ^
                  Board::exact_waiting_noble_salt(*zobrist_,
                                                  board_->waiting_noble, old) ^
+                 Board::exact_waiting_return_salt(*zobrist_,
+                                                  board_->waiting_return, old) ^
                  Board::exact_current_player_salt(*zobrist_, player) ^
                  Board::exact_waiting_noble_salt(*zobrist_,
-                                                 board_->waiting_noble, player);
+                                                 board_->waiting_noble, player) ^
+                 Board::exact_waiting_return_salt(*zobrist_,
+                                                  board_->waiting_return, player);
       }
       board_->current_player = player;
     }
@@ -272,6 +287,19 @@ public:
                                                  board_->current_player);
       }
       board_->waiting_noble = waiting;
+    }
+
+    void set_waiting_return(bool waiting) noexcept {
+      const bool old = board_->waiting_return;
+      if (old == waiting)
+        return;
+      if constexpr (MaintainExactHash) {
+        hash_ ^= Board::exact_waiting_return_salt(*zobrist_, old,
+                                                  board_->current_player) ^
+                 Board::exact_waiting_return_salt(*zobrist_, waiting,
+                                                  board_->current_player);
+      }
+      board_->waiting_return = waiting;
     }
 
     void set_winner(int8_t winner) noexcept {
@@ -380,6 +408,7 @@ public:
     turn = 0;
     final_round = false;
     waiting_noble = false;
+    waiting_return = false;
     winner = -1;
     hash_valid = false;
   }
@@ -580,6 +609,13 @@ private:
     return 0;
   }
 
+  static uint64_t exact_waiting_return_salt(const Zobrist &z, bool waiting,
+                                            uint8_t player) noexcept {
+    if (waiting && player < NUM_PLAYERS)
+      return z.waiting_return[player];
+    return 0;
+  }
+
   static uint64_t exact_final_round_salt(const Zobrist &z,
                                          bool final_round) noexcept {
     return z.final_round[final_round ? 1 : 0];
@@ -655,9 +691,10 @@ private:
     }
 
     // Current player & states
-    CSPLENDOR_PERF_HASH_FIELDS(IncludeDeckOrder, IncludeTurn ? 5 : 4);
+    CSPLENDOR_PERF_HASH_FIELDS(IncludeDeckOrder, IncludeTurn ? 6 : 5);
     h ^= exact_current_player_salt(z, current_player);
     h ^= exact_waiting_noble_salt(z, waiting_noble, current_player);
+    h ^= exact_waiting_return_salt(z, waiting_return, current_player);
     h ^= exact_final_round_salt(z, final_round);
     h ^= exact_winner_salt(z, winner);
     if constexpr (IncludeTurn)
@@ -779,11 +816,14 @@ public:
     }
 
     // Current player & states
-    CSPLENDOR_PERF_ADD(ObservableHashFieldsVisited, 5);
+    CSPLENDOR_PERF_ADD(ObservableHashFieldsVisited, 6);
     if (current_player < NUM_PLAYERS)
       h ^= z.current_player[current_player];
     if (waiting_noble && current_player < NUM_PLAYERS)
       h ^= z.waiting_noble[current_player];
+    // The pending return is public; the drawn card stays hidden.
+    if (waiting_return && current_player < NUM_PLAYERS)
+      h ^= z.waiting_return[current_player];
     h ^= z.final_round[final_round ? 1 : 0];
     if (winner >= -2 && winner <= 1)
       h ^= z.winner[winner + 2];

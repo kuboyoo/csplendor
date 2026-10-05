@@ -103,6 +103,7 @@ void bind_domain(py::module_ &m) {
       .value("PURCHASE", PURCHASE)
       .value("VISIT_NOBLE", VISIT_NOBLE)
       .value("PASS", PASS)
+      .value("RETURN_GEM", RETURN_GEM)
       .export_values();
 
   m.def("get_card", &get_card, py::arg("id"));

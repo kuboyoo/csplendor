@@ -119,8 +119,9 @@ def _assert_full_consumer_parity(game, expected_count, expected_digest):
         ),
         (
             [2, 2, 2, 2, 2, 0],
-            496,
-            "93416ba04036ce67352655c84d9bf56f6bb873c6636794f1ce39ca5fb956babe",
+            # Deck reservations carry no return (RETURN_GEM follows): 18 -> 3.
+            481,
+            "5ba6eef7e392550f36a6d56cbff103a0b8af9a70988b9d78542df7504f5fb2f3",
         ),
     ],
 )
@@ -143,21 +144,21 @@ def test_return_expansion_order_is_golden(gems, expected_count, expected_digest)
     [
         (
             False,
-            647,
-            "d1e5988132c881cd0d1a968476349347137d289dc9f6c4a26cecf9bdb18f6d8d",
+            632,
+            "c624cebfa903b1422a3d7c8f02630eec51733ecb6630abee3c1a2f001ec1fae7",
             37,
             "a50cb74b62aec86fa1ad80f2078fe0ce2454ba1651933755ea16cd67a1db94e2",
-            "3f2ed95426352755d91be0e9ce594395ed8945e6eb3ec760f9759ea3d97f3bb2",
-            "d7556294542ea00581b879d8190582462c0708feb603edb68f3d169781e24292",
+            "7d847561998983f50c2a4cbc2315729d209631114db3663d5a2e0a5a6d7166ab",
+            "b9d503ca55df46a5891a9c19b1c23136ae4b9fbb6c872c8865cd463e3eff7bc3",
         ),
         (
             True,
-            643,
-            "69d31bec388cd7699b2e67eb7bfc272c5923ad427f54478bc19312084e253ee2",
+            628,
+            "52eb8940634c20d608d2ee6e0c795de7c8515475cb9eb6d61264a68684ae9d76",
             33,
             "dabd092b2f7e6655fc640e6a2ebdfc2e81118884ce4ff54cdaf8e495246c28ac",
-            "802ee633cbf3061a0ca7645db925a1bf3bb268348550e291a462ff6ba6fedc17",
-            "db2d577e5d4ad472e3aae21af5d19a2f3c613aa364bc210431f5775394abc922",
+            "218d3b04402aae89634b86f82a4b3547630e1def347c534c6ce92c7e7211c3f2",
+            "3b6b9c50e7687414dec21d8144e695a53855299cfc9746175057541d5887f016",
         ),
     ],
 )

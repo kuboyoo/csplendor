@@ -102,6 +102,13 @@ def parse_usi_move(text: str) -> ParsedUSIMove:
             noble_id=noble_id,
         )
 
+    match = re.fullmatch(r"return:([WUGRKD])", value, flags=re.IGNORECASE)
+    if match:
+        return ParsedUSIMove(
+            kind="return",
+            return_gems=letters_to_counts(match.group(1), allow_gold=True),
+        )
+
     match = re.fullmatch(r"noble:N(\d+)", value, flags=re.IGNORECASE)
     if match:
         return ParsedUSIMove(kind="noble", noble_id=int(match.group(1)))

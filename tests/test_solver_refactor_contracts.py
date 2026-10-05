@@ -96,8 +96,11 @@ def test_reveal_solver_proof_dag_and_action_order_golden():
     # line_order_hits, probe_dropped_actions, memo_flushes; all 0 here). With
     # them removed the payload still hashes to the pre-change golden
     # 9732dd60583389a9220ae450619dcaecadc1defc73f6c9cfcbec128173fe2ba2.
+    # 2026-10-05 added "waiting_return" to every proof-DAG node and result
+    # (the post-deck-reservation return phase); without it the payload still
+    # hashes to 6b2453972ede6937b7a1d7bf0b36013d5303ca004b48f32de3ae9d2e8a29717e.
     assert _digest_without_elapsed(result) == (
-        "6b2453972ede6937b7a1d7bf0b36013d5303ca004b48f32de3ae9d2e8a29717e"
+        "c95c3c496fd8f39ea308ddf25b0b33c203f3394d63e7e23187940ed8b065fa92"
     )
 
 

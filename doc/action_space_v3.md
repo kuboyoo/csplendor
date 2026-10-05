@@ -8,6 +8,11 @@
 > **Header**: `src/action_encoder_v3.h`
 > **Python**: `csplendor.ActionEncoderV3`
 
+> **Note (2026-10-05)**: 山札予約の返却は別の `RETURN_GEM` 行動（返却フェーズ）になった。
+> V3はこれを表現できず、返却フェーズではマスクが空、`encode` は `-1` を返す。
+> 全行動policyには [ActionEncoderV4](action_space_v4.md)（3121枠）を使う。
+> V3の山札予約21枠のうち、現行ルールで合法になるのは返却なしの3枠（`1064 + level * 7`）だけである。
+
 ## Overview
 
 ActionEncoderV3 maps every distinct legal Splendor action to a unique integer ID.
@@ -169,7 +174,9 @@ action_id = 980 + slot * 7 + ret_pattern
 
 ### RESERVE_DECK (offset 1064, size 21)
 
-Same as V2. Reserve the top card from a deck.
+Same as V2. Reserve the top card from a deck. Under the current rules a deck
+reservation never carries a return, so only `ret_pattern = 0` is legal; the
+return is a separate `RETURN_GEM` action that V3 cannot encode (see V4).
 
 ```
 level = deck level (0-2)

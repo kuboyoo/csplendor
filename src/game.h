@@ -358,6 +358,10 @@ private:
     case PURCHASE:
       applied = apply_purchase(action, mutation);
       break;
+    case RETURN_GEM:
+      apply_gem_return(action, mutation);
+      applied = true;
+      break;
     case VISIT_NOBLE:
       applied = apply_noble_visit(action, mutation);
       if (!applied)
@@ -382,9 +386,19 @@ private:
     if (!applied)
       return false;
 
-    // Standard turn processing (Take Gems, Reserve, Purchase), including
-    // automatic or deferred noble visits.
-    csplendor::detail::finish_standard_action(board, mutation);
+    // A deck reservation that leaves the player above the token limit waits
+    // for RETURN_GEM decisions (the player has seen the drawn card); the
+    // turn then finishes as usual once the player is back at the limit.
+    const bool over_limit =
+        board.players[board.current_player].total_gems() > Board::MAX_TOKENS;
+    if ((action.type == RESERVE_DECK || action.type == RETURN_GEM) && over_limit) {
+      mutation.set_waiting_return(true);
+    } else {
+      mutation.set_waiting_return(false);
+      // Standard turn processing (Take Gems, Reserve, Purchase), including
+      // automatic or deferred noble visits.
+      csplendor::detail::finish_standard_action(board, mutation);
+    }
     mutation.commit();
 
     if (record_history) {
@@ -459,18 +473,28 @@ private:
     return csplendor::rules::validate_token_return(next_gems, a.return_gems);
   }
 
+  // A deck reservation never carries a return: any excess is returned in
+  // the following RETURN_GEM decision, after the player has seen the card.
   bool can_apply_reserve_deck(const Action &a) const {
-    if (!valid_current_player() || a.deck_level < 0 || a.deck_level >= 3)
+    if (!valid_current_player() || a.deck_level < 0 || a.deck_level >= 3 ||
+        !csplendor::rules::has_no_token_return(a))
       return false;
 
     const auto &p = board.players[board.current_player];
-    if (!p.can_reserve() || board.decks[a.deck_level].empty())
-      return false;
+    return p.can_reserve() && !board.decks[a.deck_level].empty();
+  }
 
-    std::array<uint8_t, 6> next_gems = p.gems;
-    if (board.bank[GOLD] > 0)
-      next_gems[GOLD]++;
-    return csplendor::rules::validate_token_return(next_gems, a.return_gems);
+  bool can_apply_return_gem(const Action &a) const {
+    if (!valid_current_player() || a.type != RETURN_GEM)
+      return false;
+    int total = 0;
+    int color = -1;
+    for (int c = 0; c < 6; ++c) {
+      total += a.return_gems[c];
+      if (a.return_gems[c] != 0)
+        color = c;
+    }
+    return total == 1 && board.players[board.current_player].gems[color] > 0;
   }
 
   bool can_apply_purchase(const Action &a) const {
@@ -512,8 +536,10 @@ private:
 
     if (board.waiting_noble)
       return can_apply_noble_visit(a);
+    if (board.waiting_return)
+      return can_apply_return_gem(a);
 
-    if (a.type == VISIT_NOBLE)
+    if (a.type == VISIT_NOBLE || a.type == RETURN_GEM)
       return false;
 
     switch (a.type) {

@@ -10,7 +10,7 @@ from .application_errors import InvalidRequest, ResourceNotFound
 from .kifu_codec import build_kifu_text, now_iso
 from .spn_codec import game_to_spn
 from .stores import KifuStore, SessionStore
-from .usi_resolver import find_legal_action_index_by_usi
+from .usi_resolver import expand_usi_move, find_legal_action_index_by_usi
 from .usi_serializer import action_to_usi
 
 Record = Dict[str, Any]
@@ -66,7 +66,7 @@ class GameSessionService:
         return {
             "session_id": session_id,
             "meta": {
-                "Format": "Splendor KIFU v1.0",
+                "Format": "Splendor KIFU v1.1",
                 "Players": "2",
                 "Player0": "Player0",
                 "Player1": "Player1",
@@ -157,19 +157,35 @@ class GameSessionService:
         comment: Optional[str] = None,
     ) -> Tuple[int, str, Game]:
         game = self.require_game(session_id)
+        plies = expand_usi_move(usi_move)
+        applied = 0
+        canonical: List[str] = []
+        action_index = -1
         try:
-            action_index = find_legal_action_index_by_usi(game, usi_move)
+            for ply in plies:
+                action_index = find_legal_action_index_by_usi(game, ply)
+                if action_index < 0:
+                    raise ValueError("pass is not legal in current state")
+                action = game.legal_actions[action_index]
+                canonical.append(action_to_usi(action, game=game))
+                game.apply(action)
+                applied += 1
         except ValueError as error:
+            for _ in range(applied):
+                game.undo()
             raise InvalidRequest(str(error)) from error
-        if action_index < 0:
-            raise InvalidRequest("pass is not legal in current state")
-        action = game.legal_actions[action_index]
-        canonical_usi = action_to_usi(action, game=game)
-        self.append_move(
-            session_id, game, action, time_ms=time_ms, comment=comment
-        )
-        game.apply(action)
-        return action_index, canonical_usi, game
+        # Record only after every ply resolved, so a rejected legacy
+        # shorthand leaves both the game and the KIFU untouched.
+        for _ in range(applied):
+            game.undo()
+        for ply in canonical:
+            action_index = find_legal_action_index_by_usi(game, ply)
+            action = game.legal_actions[action_index]
+            self.append_move(
+                session_id, game, action, time_ms=time_ms, comment=comment
+            )
+            game.apply(action)
+        return action_index, " ".join(canonical), game
 
     def undo(self, session_id: str) -> Game:
         game = self.require_game(session_id)

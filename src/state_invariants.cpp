@@ -7,7 +7,7 @@
 namespace csplendor::state {
 namespace {
 
-constexpr std::array<InvariantViolation, 22> ALL_VIOLATIONS = {
+constexpr std::array<InvariantViolation, 23> ALL_VIOLATIONS = {
     InvariantViolation::InvalidCurrentPlayer,
     InvariantViolation::InvalidWinner,
     InvariantViolation::FixedCapacityOverflow,
@@ -30,6 +30,7 @@ constexpr std::array<InvariantViolation, 22> ALL_VIOLATIONS = {
     InvariantViolation::DuplicateNoble,
     InvariantViolation::NoblePartitionMismatch,
     InvariantViolation::StaleHashCache,
+    InvariantViolation::InvalidPendingDecision,
 };
 
 uint64_t pack_colours(const std::array<uint8_t, 5> &values) noexcept {
@@ -93,6 +94,11 @@ InvariantReport validate_invariants(const Board &board,
     report.add(InvariantViolation::InvalidCurrentPlayer);
   if (board.winner < -2 || board.winner > 1)
     report.add(InvariantViolation::InvalidWinner);
+  if (board.waiting_noble && board.waiting_return)
+    report.add(InvariantViolation::InvalidPendingDecision);
+  if (board.waiting_return && board.current_player < Board::NUM_PLAYERS &&
+      board.players[board.current_player].total_gems() <= Board::MAX_TOKENS)
+    report.add(InvariantViolation::InvalidPendingDecision);
 
   bool fixed_capacities_safe = true;
   for (const auto &deck : board.decks) {
@@ -143,7 +149,13 @@ InvariantReport validate_invariants(const Board &board,
     token_totals[colour] = board.bank[colour];
 
   size_t total_nobles = safe_noble_count;
-  for (const PlayerState &player : board.players) {
+  for (size_t player_index = 0; player_index < Board::NUM_PLAYERS; ++player_index) {
+    const PlayerState &player = board.players[player_index];
+    // The player to move may hold one token above the limit while the
+    // post-deck-reservation return is pending.
+    const int token_limit =
+        Board::MAX_TOKENS +
+        (board.waiting_return && player_index == board.current_player ? 1 : 0);
     if (player.purchased_cards.size() > CARD_COUNT ||
         player.acquired_nobles.size() > NOBLE_COUNT) {
       report.add(InvariantViolation::InvalidProvenanceCapacity);
@@ -210,7 +222,7 @@ InvariantReport validate_invariants(const Board &board,
     if (strict && player.points != expected_points)
       report.add(InvariantViolation::PointProvenanceMismatch);
 
-    if (strict && player.total_gems() > Board::MAX_TOKENS)
+    if (strict && player.total_gems() > token_limit)
       report.add(InvariantViolation::PlayerTokenLimitExceeded);
     for (size_t colour = 0; colour < token_totals.size(); ++colour)
       token_totals[colour] += player.gems[colour];
@@ -282,6 +294,8 @@ const char *invariant_violation_name(InvariantViolation violation) noexcept {
     return "noble_partition_mismatch";
   case InvariantViolation::StaleHashCache:
     return "stale_hash_cache";
+  case InvariantViolation::InvalidPendingDecision:
+    return "invalid_pending_decision";
   }
   return "unknown_invariant_violation";
 }

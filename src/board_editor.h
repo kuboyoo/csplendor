@@ -98,6 +98,10 @@ inline void set_waiting_noble(Board &board, bool waiting_noble) noexcept {
   board.begin_editor_mutation().waiting_noble = waiting_noble;
 }
 
+inline void set_waiting_return(Board &board, bool waiting_return) noexcept {
+  board.begin_editor_mutation().waiting_return = waiting_return;
+}
+
 inline void set_winner(Board &board, int winner) {
   if (winner < -2 || winner > 1)
     throw std::invalid_argument("winner out of range");

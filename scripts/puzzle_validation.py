@@ -224,15 +224,14 @@ def completed_turn_children(
         game.board.current_player
     ):
         return [child]
-    if not bool(child.board.waiting_noble):
+    if not (bool(child.board.waiting_noble) or bool(child.board.waiting_return)):
         return []
 
+    # The mover still owes a token return (after a deck reservation) and/or a
+    # noble choice; each resolution completes the same turn.
     children = []
-    for noble_action in child.legal_actions:
-        noble_child = child.clone_light()
-        if not noble_child.apply(noble_action, False):
-            raise RuntimeError("engine rejected a generated noble choice")
-        children.append(noble_child)
+    for pending_action in child.legal_actions:
+        children.extend(completed_turn_children(child, pending_action))
     return children
 
 

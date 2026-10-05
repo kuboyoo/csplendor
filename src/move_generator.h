@@ -11,6 +11,7 @@ class Game;
 class ActionEncoderCpp;
 class ActionEncoderV2;
 class ActionEncoderV3;
+class ActionEncoderV4;
 
 namespace csplendor::move_generation_detail {
 
@@ -121,6 +122,8 @@ public:
       return 0;
     if (board.waiting_noble)
       return get_eligible_nobles_fixed(board, board.current_player).count;
+    if (board.waiting_return)
+      return count_return_choices(board);
 
     validate_purchase_source_ids(board);
 
@@ -144,7 +147,7 @@ public:
   static bool requires_forced_pass(const Board &board,
                                    bool simple_payment_mode = false) {
     if (board.current_player >= Board::NUM_PLAYERS || board.is_game_over() ||
-        board.waiting_noble)
+        board.waiting_noble || board.waiting_return)
       return false;
 
     validate_purchase_source_ids(board);
@@ -180,6 +183,10 @@ public:
       actions.push_back(action);
       return true;
     };
+    if (board.waiting_return) {
+      emit_return_choices(board, sink);
+      return actions;
+    }
     emit_base_actions(board, simple_payment_mode, sink);
     if (actions.empty() && !board.is_game_over() && !board.waiting_noble) {
       Action pass;
@@ -205,6 +212,7 @@ private:
   friend class ActionEncoderCpp;
   friend class ActionEncoderV2;
   friend class ActionEncoderV3;
+  friend class ActionEncoderV4;
 
   // Select within the SAME base/final capped prefix as consume_all_capped.
   // Count preceding return subtrees, then materialize just the selected one.
@@ -221,7 +229,7 @@ private:
       return false;
     int total = 0;
     for (auto gem : board.players[board.current_player].gems) total += gem;
-    if (board.waiting_noble || total > 10) {
+    if (board.waiting_noble || board.waiting_return || total > 10) {
       // Preserve noncanonical overflow, excess>3 and noble behavior verbatim.
       consume_all_capped(board, simple_payment_mode, selected_sink);
       return found;
@@ -286,6 +294,16 @@ private:
         return emit_noble_visit_choices(board, code_sink);
       } else {
         return emit_noble_visit_choices(board, final_sink);
+      }
+    }
+    if (board.waiting_return) {
+      if constexpr (PackedCodes) {
+        auto code_sink = [&final_sink](const Action &action) {
+          return final_sink(action.pack());
+        };
+        return emit_return_choices(board, code_sink);
+      } else {
+        return emit_return_choices(board, final_sink);
       }
     }
 
@@ -534,7 +552,9 @@ private:
     // Purchases can only spend gems; unlike take/reserve actions they never
     // permit an explicit token return.  This also keeps generator/apply
     // parity for public editor states that start above the ten-token limit.
-    if (action.type == PURCHASE) {
+    // A deck reservation never carries a return either: the player sees the
+    // drawn card first and returns in the following RETURN_GEM decision.
+    if (action.type == PURCHASE || action.type == RESERVE_DECK) {
       if constexpr (PackedCodes)
         return sink(base_code);
       else
@@ -588,7 +608,7 @@ private:
 
   static uint16_t count_with_returns(const Board &board, const Action &action,
                                      uint16_t limit) {
-    if (action.type == PURCHASE)
+    if (action.type == PURCHASE || action.type == RESERVE_DECK)
       return std::min<uint16_t>(1, limit);
 
     const int excess =
@@ -657,6 +677,30 @@ private:
       }
     }
     return true;
+  }
+
+  // One RETURN_GEM per colour (gold included) the player still holds.
+  template <typename Sink>
+  static bool emit_return_choices(const Board &board, Sink &sink) {
+    const PlayerState &player = board.players[board.current_player];
+    for (int color = 0; color < 6; ++color) {
+      if (player.gems[color] == 0)
+        continue;
+      Action action;
+      action.type = RETURN_GEM;
+      action.return_gems[color] = 1;
+      if (!sink(action))
+        return false;
+    }
+    return true;
+  }
+
+  static uint16_t count_return_choices(const Board &board) {
+    const PlayerState &player = board.players[board.current_player];
+    uint16_t count = 0;
+    for (int color = 0; color < 6; ++color)
+      count += player.gems[color] != 0;
+    return count;
   }
 
   template <typename Sink>

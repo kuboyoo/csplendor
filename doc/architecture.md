@@ -41,7 +41,7 @@ pybind11 subsystem registrations
   `move_generator.h`をallocation-freeな合法手列挙の正本とする。
 - state safety: `state_invariants.*`がreachable/editor/search/serializedの4 profileを診断し、
   editor更新とtrusted hot pathは別のmutation gatewayを通る。
-- encoding: `encoding_schema.h`がaction V1/V2/V3とstate feature V1のversion、size、offset、
+- encoding: `encoding_schema.h`がaction V1/V2/V3/V4とstate feature V1のversion、size、offset、
   色順序を定義し、各encoderとPython helperが参照する。
 - search: 逐次`MCTS`は公開の安定経路である。共有tree/root-parallel探索は
   experimental opt-inで、scheduler/session/treeの所有権を独立componentに閉じ込める。

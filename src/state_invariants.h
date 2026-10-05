@@ -35,6 +35,8 @@ enum class InvariantViolation : uint64_t {
   DuplicateNoble = 1ULL << 19U,
   NoblePartitionMismatch = 1ULL << 20U,
   StaleHashCache = 1ULL << 21U,
+  // Both pending decisions set, or a pending return without excess tokens.
+  InvalidPendingDecision = 1ULL << 22U,
 };
 
 struct InvariantReport {

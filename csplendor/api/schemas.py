@@ -23,6 +23,7 @@ class ActionType(IntEnum):
     PURCHASE = 4
     VISIT_NOBLE = 5
     PASS = 6
+    RETURN_GEM = 7
 
 
 class CardSchema(BaseModel):
@@ -69,6 +70,9 @@ class BoardSchema(BaseModel):
     current_player: int
     turn: int
     waiting_noble: bool
+    waiting_return: bool = False
+    # 0 = none, 1 = return a token, 2 = choose a noble
+    pending_decision: int = 0
     game_over: bool
     winner: int
 

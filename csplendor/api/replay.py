@@ -509,6 +509,8 @@ def _decode_board_ori(
             "current_player": current_p,
             "turn": turn,
             "waiting_noble": False,
+            "waiting_return": False,
+            "pending_decision": 0,
             "game_over": game_over,
             "winner": winner,
         },

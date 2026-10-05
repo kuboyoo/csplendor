@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import csplendor as cs
 from csplendor.api.usi_kifu import (
     action_to_usi,
+    expand_usi_move,
     find_legal_action_index_by_usi,
     position_to_game,
     spn_to_game,
@@ -162,7 +163,7 @@ class MateSolver:
                 return _NodeResult(True, proof=node if self.options.include_proof else None)
             return _NodeResult(False, refutation=node if self.options.include_proof else None)
 
-        if bool(board.waiting_noble):
+        if bool(board.waiting_return) or bool(board.waiting_noble):
             return self._solve_waiting_noble(state, depth)
 
         if int(board.current_player) == self.attacker:
@@ -203,7 +204,7 @@ class MateSolver:
             cached = {"cached": True, "depth": depth} if self.options.include_proof else None
             return _NodeResult(winning, proof=cached if winning else None, refutation=None if winning else cached)
 
-        if bool(board.waiting_noble):
+        if bool(board.waiting_return) or bool(board.waiting_noble):
             result = self._solve_waiting_noble(state, depth)
         elif int(board.current_player) == self.attacker:
             if depth <= 0:
@@ -220,10 +221,9 @@ class MateSolver:
         return result
 
     def _solve_waiting_noble(self, state: SolverState, depth: int) -> _NodeResult:
-        choices = [
-            action for action in state.game.legal_actions
-            if int(action.type) == int(cs.ActionType.VISIT_NOBLE)
-        ]
+        # Pending token returns and noble choices belong to the move that
+        # created them, so neither consumes attacker depth.
+        choices = list(self._pending_choices(state))
         self.stats.legal_moves += len(choices)
         attacker_choice = int(state.game.board.current_player) == self.attacker
 
@@ -446,7 +446,7 @@ class MateSolver:
         actions = []
         for action in state.game.legal_actions:
             action_type = int(action.type)
-            if action_type == int(cs.ActionType.VISIT_NOBLE):
+            if action_type in (int(cs.ActionType.VISIT_NOBLE), int(cs.ActionType.RETURN_GEM)):
                 continue
             if action_type == int(cs.ActionType.RESERVE_DECK) and not self.options.allow_deck_reserve:
                 continue
@@ -548,21 +548,39 @@ class MateSolver:
             decks.append(cards)
         return decks
 
+    def _pending_choices(self, state: SolverState) -> List[cs.Action]:
+        board = state.game.board
+        if bool(board.waiting_return):
+            pending = int(cs.ActionType.RETURN_GEM)
+        elif bool(board.waiting_noble):
+            pending = int(cs.ActionType.VISIT_NOBLE)
+        else:
+            return []
+        return [
+            action for action in self._ordered_actions(state.game.legal_actions)
+            if int(action.type) == pending
+        ]
+
     def _finalize_noble_choices(self, state: SolverState) -> Tuple[SolverState, ...]:
-        if not bool(state.game.board.waiting_noble):
+        """Expand the mover's pending token return and noble choice.
+
+        A deck reservation may leave a token return pending, and the return
+        may in turn leave a noble choice pending; both are decided by the
+        player who moved, so every resolution becomes a sibling child.
+        """
+        choices = self._pending_choices(state)
+        if not choices:
             return (state,)
 
         children: List[SolverState] = []
-        for action in self._ordered_actions(state.game.legal_actions):
-            if int(action.type) != int(cs.ActionType.VISIT_NOBLE):
-                continue
-            children.append(self._apply_noble_choice(state, action))
+        for action in choices:
+            children.extend(self._finalize_noble_choices(self._apply_noble_choice(state, action)))
         return tuple(self._dedupe_states(children))
 
     def _apply_noble_choice(self, state: SolverState, action: cs.Action) -> SolverState:
         game = state.game.clone_light()
         if not game.apply(action, False):
-            raise RuntimeError("engine rejected a legal noble action during mate transition")
+            raise RuntimeError("engine rejected a legal pending-decision action during mate transition")
         return SolverState(game=game, unseen_by_level=state.unseen_by_level)
 
     def _dedupe_states(self, states: Sequence[SolverState]) -> List[SolverState]:
@@ -599,6 +617,7 @@ class MateSolver:
             int(board.current_player),
             bool(board.final_round),
             bool(board.waiting_noble),
+            bool(board.waiting_return),
             int(board.winner),
             tuple(int(v) for v in board.bank),
             tuple(tuple(int(card_id) for card_id in row) for row in board.visible),
@@ -619,6 +638,7 @@ class MateSolver:
             "winner": int(board.winner),
             "final_round": bool(board.final_round),
             "waiting_noble": bool(board.waiting_noble),
+            "waiting_return": bool(board.waiting_return),
             "unseen_counts": [len(level) for level in state.unseen_by_level],
         }
 
@@ -771,6 +791,7 @@ def _game_to_payload(game: cs.Game) -> Dict[str, Any]:
             "nobles": [int(noble_id) for noble_id in board.nobles],
             "final_round": bool(board.final_round),
             "waiting_noble": bool(board.waiting_noble),
+            "waiting_return": bool(board.waiting_return),
             "winner": int(board.winner),
             "players": players,
         },
@@ -792,6 +813,7 @@ def _game_from_payload(payload: Dict[str, Any]) -> cs.Game:
     board.nobles = board_payload["nobles"]
     board.final_round = bool(board_payload["final_round"])
     board.waiting_noble = bool(board_payload["waiting_noble"])
+    board.waiting_return = bool(board_payload.get("waiting_return", False))
     board.winner = int(board_payload["winner"])
 
     for player_idx, player_payload in enumerate(board_payload["players"]):
@@ -848,6 +870,8 @@ def load_game_from_json(path: str) -> cs.Game:
         board.final_round = bool(data["final_round"])
     if "waiting_noble" in data:
         board.waiting_noble = bool(data["waiting_noble"])
+    if "waiting_return" in data:
+        board.waiting_return = bool(data["waiting_return"])
     if "winner" in data:
         board.winner = int(data["winner"])
 
@@ -894,16 +918,17 @@ def load_game_from_usi_file(path: str, seed: int = 0) -> cs.Game:
 
 
 def apply_usi_moves(game: cs.Game, moves: Sequence[str]) -> None:
-    for move in moves:
-        move = move.strip()
-        if not move:
+    for text in moves:
+        text = text.strip()
+        if not text:
             continue
-        index = find_legal_action_index_by_usi(game, move)
-        if index < 0:
-            raise ValueError(f"no legal action matches move: {move}")
-        action = game.legal_actions[index]
-        if not game.apply(action, False):
-            raise RuntimeError(f"engine rejected move: {move}")
+        for move in expand_usi_move(text):
+            index = find_legal_action_index_by_usi(game, move)
+            if index < 0:
+                raise ValueError(f"no legal action matches move: {move}")
+            action = game.legal_actions[index]
+            if not game.apply(action, False):
+                raise RuntimeError(f"engine rejected move: {move}")
 
 
 def _fixed_int_list(values: Sequence[Any], length: int, name: str) -> List[int]:

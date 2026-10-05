@@ -99,6 +99,14 @@ void masks_and_ids(const Oracle &oracle) {
     Game game(seed);
     for (int ply = 0; ply < 128 && !game.is_game_over(); ++ply) {
       const auto legal = MoveGenerator::generate_all(game.board, false);
+      if (game.board.waiting_return) {
+        // V3 has no id for the post-deck-reservation return (V4 does): the
+        // mask is empty and the walk continues with the first return.
+        check(Encoder::get_action_mask(game) == std::array<uint8_t, Encoder::ACTION_SIZE>{});
+        for (const Action &action : legal) check(Encoder::encode(action, game) == -1);
+        check(!legal.empty() && game.apply(legal.front(), false));
+        continue;
+      }
       std::array<uint8_t, Encoder::ACTION_SIZE> expected{};
       for (const Action &action : legal) {
         int id = Encoder::encode(action, game);

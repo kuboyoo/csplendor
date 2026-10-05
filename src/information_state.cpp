@@ -112,6 +112,7 @@ std::string serialize(const Game &game, uint8_t observer) {
   payload.u16(board.turn);
   payload.u8(static_cast<uint8_t>(board.final_round));
   payload.u8(static_cast<uint8_t>(board.waiting_noble));
+  payload.u8(static_cast<uint8_t>(board.waiting_return));
   payload.i8(board.winner);
 
   for (const uint8_t value : board.bank)

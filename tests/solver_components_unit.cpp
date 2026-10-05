@@ -250,8 +250,10 @@ void test_defender_reserve_order_depends_on_return_colour() {
         if (action.return_gems[colour])
           return_colours.insert(colour);
     }
-    require(last.size() >= 18 && return_colours.size() == 6,
-            "defender reserve oracle did not cover every return colour/level");
+    // Deck reservations carry no return: one action per level, and the
+    // excess token is returned by a following RETURN_GEM decision.
+    require(last.size() == 3 && return_colours.empty(),
+            "defender reserve oracle did not cover every level");
     require(game.board.hash() == input_hash && game.simple_payment_mode == simple,
             "sorting a frontier mutated its input game");
   }

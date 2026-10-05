@@ -126,6 +126,7 @@ py::dict proof_dag_to_py_v1(const RevealVerifiedProofDag &dag) {
     item["scores"] = node.scores;
     item["winner"] = node.winner;
     item["waiting_noble"] = node.waiting_noble;
+    item["waiting_return"] = node.waiting_return;
     item["nobles"] = node.nobles;
     item["acquired_nobles"] = node.acquired_nobles;
     item["resolution"] =
@@ -535,6 +536,7 @@ void bind_solvers(py::module_ &m) {
         payload["player"] = result.player;
         payload["winner"] = result.winner;
         payload["waiting_noble"] = result.waiting_noble;
+        payload["waiting_return"] = result.waiting_return;
         payload["kind"] = result.kind;
         payload["resolution"] = result.resolution.empty()
                                     ? py::none()
@@ -705,6 +707,7 @@ void bind_solvers(py::module_ &m) {
         payload["player"] = result.player;
         payload["winner"] = result.winner;
         payload["waiting_noble"] = result.waiting_noble;
+        payload["waiting_return"] = result.waiting_return;
         payload["kind"] = result.kind;
         payload["resolution"] = result.resolution.empty()
                                     ? py::none()

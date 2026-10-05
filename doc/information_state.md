@@ -7,7 +7,7 @@
 
 含まれる情報は次のとおり。
 
-- observer、Game mode、手番、turn、終局phase
+- observer、Game mode、手番、turn、終局phase、貴族選択待ち・返却待ち（`waiting_return`）
 - bank、公開カード、山札枚数、貴族
 - observer-safeなtier別未知card pool
 - 両playerのtoken、bonus、点数、購入枚数
@@ -40,7 +40,11 @@ assert isinstance(index, int)
 envelopeはmagic、format version、rules version、card/noble数、ruleset
 fingerprint、payload長、checksumを持つ。fieldの追加・削除・canonicalization変更時は
 `information_state::FORMAT_VERSION`を更新する。同じlayoutのままrule上の意味を変更する
-場合は`RULES_VERSION`を更新する。
+場合は`RULES_VERSION`を更新する。現在はformat version 3、rules version 2である
+（山札予約後の返却フェーズを追加した際に更新）。旧versionのbytesとは一致しないため、
+永続DBのキーは再生成する。
 
-色置換による対称性圧縮はversion 2では行わない。cardとnobleの実catalogueがその置換で
+山札予約でめくれたカードは相手から見て非公開のままで、返却色は公開情報である。
+
+色置換による対称性圧縮はversion 3でも行わない。cardとnobleの実catalogueがその置換で
 閉じていることを証明せずに色をcanonicalizeしてはならない。

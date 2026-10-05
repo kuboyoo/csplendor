@@ -1,7 +1,7 @@
 #ifndef CSPLENDOR_MCTS_V3_H
 #define CSPLENDOR_MCTS_V3_H
 
-// Multi-game PUCT search over ActionEncoderV3 action ids (all payment and
+// Multi-game PUCT search over ActionEncoderV4 action ids (all payment and
 // token-return variants are distinct edges).
 //
 // Design
@@ -32,7 +32,7 @@
 // Python driver adds temperature sampling and any of those on top.
 
 #include "action.h"
-#include "action_encoder_v3.h"
+#include "action_encoder_v4.h"
 #include "game.h"
 #include "state_encoder.h"
 #include <algorithm>
@@ -62,6 +62,9 @@ struct Config {
   float draw_value = 0.0f;
   bool public_card_features = true; // +117 inputs
   bool physical_seat_feature = true; // +1 input
+  // 1 while the player to move must return a token after a deck reservation
+  // (Board::waiting_return), else 0. +1 input.
+  bool return_phase_feature = true;
   float dirichlet_alpha = 0.3f;
   float dirichlet_epsilon = 0.25f;
   float unseen_action_prior = 1e-3f; // legal in this world, absent at expansion
@@ -102,13 +105,20 @@ struct Config {
   int state_dim() const {
     return TOTAL_FEATURES +
            (public_card_features ? PUBLIC_CARD_FEATURE_SIZE : 0) +
-           (physical_seat_feature ? 1 : 0);
+           (physical_seat_feature ? 1 : 0) + (return_phase_feature ? 1 : 0);
   }
 };
 
-// Decision before payment/return details; 133 groups, same layout as
-// dlsplendor.search.semantic_actions.semantic_group_id.
-inline int semantic_group_id(int action_id) {
+// Decision before payment/return details over V4 ids: 139 groups. Groups
+// 0..132 keep the layout of dlsplendor.search.semantic_actions (V3): take
+// different 0..9, take same 10..14, reserve visible 15..26, reserve deck
+// 27..29, purchase 30 + card id, noble 120 + id, pass 132. The post-deck-
+// reservation returns are groups 133..138 (white, blue, green, red, black,
+// gold).
+inline constexpr int SEMANTIC_GROUP_COUNT = 139;
+
+// The same groups over V3 ids (133 groups; kept for V3 data).
+inline int semantic_group_id_v3(int action_id) {
   using E = ActionEncoderV3;
   if (action_id < E::OFFSET_TAKE_SAME)
     return (action_id - E::OFFSET_TAKE_DIFFERENT) / E::TAKE_DIFF_RETURN_PATTERNS;
@@ -122,6 +132,25 @@ inline int semantic_group_id(int action_id) {
     return 30 + E::find_card_id(action_id - E::OFFSET_PURCHASE);
   if (action_id < E::OFFSET_PASS)
     return 120 + (action_id - E::OFFSET_VISIT_NOBLE);
+  return 132;
+}
+inline int semantic_group_id(int action_id) {
+  using E = ActionEncoderV4;
+  using V3 = ActionEncoderV3;
+  if (action_id < E::OFFSET_TAKE_SAME)
+    return (action_id - E::OFFSET_TAKE_DIFFERENT) / V3::TAKE_DIFF_RETURN_PATTERNS;
+  if (action_id < E::OFFSET_RESERVE_VISIBLE)
+    return 10 + (action_id - E::OFFSET_TAKE_SAME) / V3::TAKE_SAME_RETURN_PATTERNS;
+  if (action_id < E::OFFSET_RESERVE_DECK)
+    return 15 + (action_id - E::OFFSET_RESERVE_VISIBLE) / V3::RESERVE_RETURN_PATTERNS;
+  if (action_id < E::OFFSET_PURCHASE)
+    return 27 + (action_id - E::OFFSET_RESERVE_DECK);
+  if (action_id < E::OFFSET_VISIT_NOBLE)
+    return 30 + V3::find_card_id(action_id - E::OFFSET_PURCHASE);
+  if (action_id < E::OFFSET_RETURN_GEM)
+    return 120 + (action_id - E::OFFSET_VISIT_NOBLE);
+  if (action_id < E::OFFSET_PASS)
+    return 133 + (action_id - E::OFFSET_RETURN_GEM);
   return 132;
 }
 
@@ -263,7 +292,7 @@ public:
       throw std::invalid_argument("observer must identify a player");
     if (root_.is_game_over())
       throw std::invalid_argument("root position is already terminal");
-    // A forced-pass root is legal: its only V3 action is PASS (3132).
+    // A forced-pass root is legal: its only V4 action is PASS (3120).
     nodes_.reserve(4096);
     root_index_ = new_node(NodeKind::Decision,
                            static_cast<uint8_t>(root_.current_player()));
@@ -367,7 +396,7 @@ public:
         auto sink = [this](int id, const Action &action) {
           legal_.push_back(LegalAction{id, action});
         };
-        ActionEncoderV3::for_each_legal_with_id(world, sink);
+        ActionEncoderV4::for_each_legal_with_id(world, sink);
         if (legal_.empty()) {
           backpropagate(path, config_.draw_value, node.player);
           ++completed_;
@@ -561,7 +590,7 @@ public:
       auto sink = [&legal](int id, const Action &action) {
         legal.push_back(LegalAction{id, action});
       };
-      ActionEncoderV3::for_each_legal_with_id(replay, sink);
+      ActionEncoderV4::for_each_legal_with_id(replay, sink);
       auto it = std::find_if(legal.begin(), legal.end(),
                              [action_id](const LegalAction &e) { return e.id == action_id; });
       if (it == legal.end())
@@ -765,10 +794,12 @@ private:
     }
     if (config_.physical_seat_feature)
       batch.features.push_back(static_cast<float>(2 * player - 1));
+    if (config_.return_phase_feature)
+      batch.features.push_back(world.board.waiting_return ? 1.0f : 0.0f);
     auto sink = [&batch](int id, const Action &) {
       batch.legal_ids.push_back(id);
     };
-    ActionEncoderV3::for_each_legal_with_id(world, sink);
+    ActionEncoderV4::for_each_legal_with_id(world, sink);
     batch.offsets.push_back(static_cast<int32_t>(batch.legal_ids.size()));
   }
 
@@ -1292,7 +1323,7 @@ private:
     auto sink = [&root_legal](int id, const Action &action) {
       root_legal.push_back(LegalAction{id, action});
     };
-    ActionEncoderV3::for_each_legal_with_id(root_, sink);
+    ActionEncoderV4::for_each_legal_with_id(root_, sink);
     std::vector<Action> candidate_actions;
     for (int32_t key : rollout_candidates_) {
       auto it = std::find_if(root_legal.begin(), root_legal.end(),
@@ -1380,7 +1411,7 @@ private:
                                         : world.apply_trusted(action, false);
         }
       };
-      ActionEncoderV3::for_each_legal_with_id(world, sink);
+      ActionEncoderV4::for_each_legal_with_id(world, sink);
       if (!applied)
         throw std::logic_error("rollout policy chose an action that is not legal");
     }

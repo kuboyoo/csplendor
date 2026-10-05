@@ -595,6 +595,7 @@ class DFPNMateSolver:
                 if (
                     child_state.game.is_game_over()
                     or bool(child_state.game.board.waiting_noble)
+                    or bool(child_state.game.board.waiting_return)
                     or int(child_state.game.board.current_player) == self.attacker
                 ):
                     tasks.append(
@@ -933,6 +934,7 @@ class DFPNMateSolver:
             int(board.current_player),
             bool(board.final_round),
             bool(board.waiting_noble),
+            bool(board.waiting_return),
             int(board.winner),
             tuple(int(v) for v in board.bank),
             tuple(
@@ -1031,7 +1033,7 @@ class DFPNMateSolver:
             reason = "attacker_score_upper_bound_below_15"
             self.stats.upper_bound_prunes += 1
             proof, disproof = INF, 0
-        elif bool(board.waiting_noble):
+        elif bool(board.waiting_noble) or bool(board.waiting_return):
             node_type = "OR" if int(board.current_player) == self.attacker else "AND"
         elif int(board.current_player) == self.attacker:
             node_type = "OR"
@@ -1122,12 +1124,8 @@ class DFPNMateSolver:
                 self.stats.terminal_nodes += 1
             return
 
-        if bool(board.waiting_noble):
-            choices = [
-                action
-                for action in state.game.legal_actions
-                if int(action.type) == int(cs.ActionType.VISIT_NOBLE)
-            ]
+        if bool(board.waiting_noble) or bool(board.waiting_return):
+            choices = self._helper._pending_choices(state)
             self.stats.legal_moves += len(choices)
             for action in self._ordered_actions(state, choices, node.depth):
                 node.children.append(
@@ -1710,6 +1708,7 @@ class DFPNMateSolver:
         if (
             not bool(board.final_round)
             or bool(board.waiting_noble)
+            or bool(board.waiting_return)
             or int(board.current_player) != 1
         ):
             return None

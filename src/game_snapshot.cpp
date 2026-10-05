@@ -143,6 +143,7 @@ std::string serialize(const Game &game) {
   payload.u16(board.turn);
   payload.u8(static_cast<uint8_t>(board.final_round));
   payload.u8(static_cast<uint8_t>(board.waiting_noble));
+  payload.u8(static_cast<uint8_t>(board.waiting_return));
   payload.i8(board.winner);
 
   for (uint8_t value : board.bank)
@@ -226,7 +227,21 @@ std::string serialize(const Game &game) {
   return snapshot.take();
 }
 
+namespace {
+Game deserialize_version(std::string_view snapshot, uint16_t accepted_version);
+} // namespace
+
 Game deserialize(std::string_view snapshot) {
+  return deserialize_version(snapshot, GAME_SNAPSHOT_FORMAT_VERSION);
+}
+
+std::string upgrade_v1(std::string_view snapshot) {
+  return serialize(deserialize_version(snapshot, 1));
+}
+
+namespace {
+
+Game deserialize_version(std::string_view snapshot, uint16_t accepted_version) {
   if (snapshot.size() > GAME_SNAPSHOT_MAX_BYTES)
     throw std::invalid_argument("csplendor game snapshot is too large");
 
@@ -238,10 +253,15 @@ Game deserialize(std::string_view snapshot) {
   if (magic != expected_magic)
     throw std::invalid_argument("invalid csplendor game snapshot magic");
 
+  // Format and rules versions move together; version 1 is readable only
+  // through upgrade_v1().
   const uint16_t version = envelope.u16();
-  if (version != GAME_SNAPSHOT_FORMAT_VERSION)
-    throw std::invalid_argument("unsupported csplendor game snapshot version");
-  if (envelope.u16() != GAME_SNAPSHOT_RULES_VERSION)
+  if (version != accepted_version)
+    throw std::invalid_argument(
+        version == 1 ? "csplendor game snapshot version 1 must be converted "
+                       "with Game.upgrade_snapshot_v1 first"
+                     : "unsupported csplendor game snapshot version");
+  if (envelope.u16() != accepted_version)
     throw std::invalid_argument(
         "csplendor game snapshot rules version mismatch");
   if (envelope.u16() != CARD_COUNT || envelope.u16() != NOBLE_COUNT ||
@@ -267,10 +287,16 @@ Game deserialize(std::string_view snapshot) {
   board.turn = reader.u16();
   const uint8_t final_round = reader.u8();
   const uint8_t waiting_noble = reader.u8();
+  const uint8_t waiting_return = accepted_version >= 2 ? reader.u8() : 0;
   require_boolean(final_round, "final_round");
   require_boolean(waiting_noble, "waiting_noble");
+  require_boolean(waiting_return, "waiting_return");
+  if (waiting_noble != 0 && waiting_return != 0)
+    throw std::invalid_argument(
+        "game snapshot has both a pending noble choice and a pending return");
   board.final_round = final_round != 0;
   board.waiting_noble = waiting_noble != 0;
+  board.waiting_return = waiting_return != 0;
   board.winner = reader.i8();
   if (board.current_player >= Board::NUM_PLAYERS || board.winner < -2 ||
       board.winner > 1)
@@ -368,5 +394,7 @@ Game deserialize(std::string_view snapshot) {
   return Game::from_state(std::move(board), (mode_flags & 1U) != 0,
                          (mode_flags & 2U) != 0);
 }
+
+} // namespace
 
 } // namespace csplendor::snapshot

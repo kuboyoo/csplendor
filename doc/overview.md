@@ -18,7 +18,7 @@ pybind11によるPython API、固定長action space、state feature、逐次/実
 
 - `Game`/`Board`/`PlayerState`による局面管理、apply/undo、versioned snapshot。
 - allocation-free emitterによる合法手の列挙、count、packed code、index適用。
-- 48手のV1、4869手のV2、3133手のV3 action encodingと196要素のstate feature V1。
+- 48手のV1、4869手のV2、3133手のV3、3121手のV4 action encodingと196要素のstate feature V1。
 - hidden informationのobserver-aware determinization。
 - 安定した逐次MCTSと、experimental opt-inのshared-tree/root-parallel MCTS。
 - visible-only/reveal-verified solverとPython DFPN/puzzle tooling。

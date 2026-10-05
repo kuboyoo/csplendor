@@ -1,5 +1,6 @@
 """Resolve parsed USI DTOs against the engine's ordered legal actions."""
 
+import re
 from typing import List, Optional, Sequence, Tuple
 
 from .. import ActionType as CoreActionType
@@ -14,6 +15,24 @@ def _returns_match(
     if expected is None:
         return sum(safe_int(value) for value in actual) == 0
     return [int(value) for value in actual[:6]] == expected[:6]
+
+
+_LEGACY_DECK_RESERVE = re.compile(
+    r"\s*(reserve:L[123])/(return:[WUGRKD])\s*", flags=re.IGNORECASE
+)
+
+
+def expand_usi_move(usi_move: str) -> List[str]:
+    """Split the legacy one-ply deck reservation into its canonical plies.
+
+    ``reserve:L2/return:W`` is accepted as shorthand for ``reserve:L2``
+    followed by ``return:W``.  Only a single returned token is possible
+    because a deck reservation reaches at most eleven tokens.
+    """
+    match = _LEGACY_DECK_RESERVE.fullmatch(usi_move)
+    if match is None:
+        return [usi_move]
+    return [match.group(1), match.group(2)]
 
 
 def find_legal_action_index_by_usi(game, usi_move: str) -> int:
@@ -53,6 +72,11 @@ def find_legal_action_index_by_usi(game, usi_move: str) -> int:
             f"no legal reserve-visible action matches USI move: {value}"
         )
     if parsed.kind == "reserve_deck":
+        if parsed.return_gems is not None:
+            raise ValueError(
+                "deck reservation returns are a separate ply; "
+                f"apply it with expand_usi_move first: {value}"
+            )
         for index, action in enumerate(legal_actions):
             if action.type != CoreActionType.RESERVE_DECK:
                 continue
@@ -87,6 +111,13 @@ def find_legal_action_index_by_usi(game, usi_move: str) -> int:
             raise ValueError(f"no legal buy action matches USI move: {value}")
         candidates.sort(key=lambda item: (item[1], item[2], item[0]))
         return candidates[0][0]
+    if parsed.kind == "return":
+        for index, action in enumerate(legal_actions):
+            if action.type == CoreActionType.RETURN_GEM and _returns_match(
+                parsed.return_gems, action.return_gems
+            ):
+                return index
+        raise ValueError(f"no legal return action matches USI move: {value}")
     if parsed.kind == "noble":
         for index, action in enumerate(legal_actions):
             if action.type == CoreActionType.VISIT_NOBLE and int(

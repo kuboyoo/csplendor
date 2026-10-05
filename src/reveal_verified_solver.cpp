@@ -189,6 +189,7 @@ public:
     result.player = game.current_player();
     result.winner = game.winner();
     result.waiting_noble = game.board.waiting_noble;
+    result.waiting_return = game.board.waiting_return;
     result.kind = game.is_game_over()             ? "terminal"
                   : can_resolve_final_round(game) ? "final_round_summary"
                                                   : "state";
@@ -235,6 +236,7 @@ public:
     result.player = game.current_player();
     result.winner = game.winner();
     result.waiting_noble = game.board.waiting_noble;
+    result.waiting_return = game.board.waiting_return;
     result.kind = game.is_game_over()             ? "terminal"
                   : can_resolve_final_round(game) ? "final_round_summary"
                                                   : "state";
@@ -1211,7 +1213,7 @@ private:
   bool apply_deck_reserve_outcome(Game &game, const Action &action,
                                   int card_id) {
     Board &board = game.board;
-    if (board.is_game_over() || board.waiting_noble ||
+    if (board.is_game_over() || board.waiting_noble || board.waiting_return ||
         board.current_player >= Board::NUM_PLAYERS ||
         action.type != RESERVE_DECK || action.deck_level < 0 ||
         action.deck_level >= 3 || board.decks[action.deck_level].empty())
@@ -1241,7 +1243,7 @@ private:
 
   static bool can_resolve_final_round(const Game &game) {
     return game.board.final_round && !game.board.waiting_noble &&
-           game.current_player() == 1;
+           !game.board.waiting_return && game.current_player() == 1;
   }
 
   template <typename EntryType>
@@ -1277,8 +1279,8 @@ private:
       const int reveal_card = final_round_representative_reveal(game, action);
       if (!apply_action_tracked(game, action))
         continue;
-      const ForceStatus child = game.board.waiting_noble
-                                    ? resolve_final_round_noble(game)
+      const ForceStatus child = has_pending_decision(game)
+                                    ? resolve_final_round_pending(game)
                                     : terminal_status(game);
 
       if (!representative.has_action()) {
@@ -1304,7 +1306,13 @@ private:
     return representative;
   }
 
-  ForceStatus resolve_final_round_noble(Game &game) {
+  static bool has_pending_decision(const Game &game) {
+    return game.board.waiting_noble || game.board.waiting_return;
+  }
+
+  // Resolves the remaining same-turn decisions of the last final-round turn
+  // (a token return, then possibly a noble choice) before the game ends.
+  ForceStatus resolve_final_round_pending(Game &game) {
     const int current_player = game.current_player();
     const std::vector<OrderedAction> actions = proof_ordered_actions(game);
     stats_.legal_moves += actions.size();
@@ -1314,7 +1322,9 @@ private:
       rollback.mark_mutated();
       if (!apply_action_code_tracked(game, ordered.code))
         continue;
-      const ForceStatus child = terminal_status(game);
+      const ForceStatus child = has_pending_decision(game)
+                                    ? resolve_final_round_pending(game)
+                                    : terminal_status(game);
       if (current_player == attacker_ && child == ForceStatus::PROVEN)
         return ForceStatus::PROVEN;
       if (current_player != attacker_ && child == ForceStatus::REFUTED)
@@ -1508,7 +1518,8 @@ private:
   void fill_ordered_actions(const Game &game,
                              std::vector<OrderedAction> &actions, bool exact) {
     ordinary_ordered_actions(game, actions);
-    if (!exact && game.current_player() != attacker_ && !game.board.waiting_noble)
+    if (!exact && game.current_player() != attacker_ && !game.board.waiting_noble &&
+        !game.board.waiting_return)
       add_oracle_actions(game, actions);
     if (!exact)
       std::sort(actions.begin(), actions.end());
@@ -1566,15 +1577,9 @@ private:
             reveal_state_.is_claimed(game.board, card_id) ||
             !has_blank_slot_at_level(game.board, get_card(card_id).level - 1))
           continue;
-        const int total_gems = player.total_gems();
-        if (game.board.bank[GOLD] == 0 || total_gems < Board::MAX_TOKENS) {
-          add_oracle_reserve_action(card_id, -1, actions);
-        } else {
-          for (int color = 0; color < 6; ++color) {
-            if (player.gems[color] > 0 || color == GOLD)
-              add_oracle_reserve_action(card_id, color, actions);
-          }
-        }
+        // A return, if needed, is a separate RETURN_GEM decision chosen
+        // after the reserved card is known (Board::waiting_return).
+        add_oracle_reserve_action(card_id, -1, actions);
       }
     }
   }
@@ -1620,7 +1625,7 @@ private:
   bool apply_oracle_action_with_mutator(Game &game,
                                         const OrderedAction &ordered) const {
     Board &board = game.board;
-    if (board.is_game_over() || board.waiting_noble ||
+    if (board.is_game_over() || board.waiting_noble || board.waiting_return ||
         board.current_player >= Board::NUM_PLAYERS)
       return false;
     PlayerState &player = board.players[board.current_player];
@@ -1644,13 +1649,14 @@ private:
         return false;
       csplendor::detail::reserve_card_unchecked(
           board, mutation, ordered.oracle_reserve_card, true);
-      const bool granted_gold =
-          csplendor::detail::grant_reserve_gold(board, mutation);
-      std::array<uint8_t, 6> returned = {0};
-      if (granted_gold && ordered.oracle_return_color >= 0)
-        returned[ordered.oracle_return_color] = 1;
-      if (!csplendor::detail::return_gems_checked(board, mutation, returned))
-        return false;
+      csplendor::detail::grant_reserve_gold(board, mutation);
+      // As for a deck reservation, any excess token is returned by a
+      // following RETURN_GEM decision of the same player.
+      if (player.total_gems() > Board::MAX_TOKENS) {
+        mutation.set_waiting_return(true);
+        mutation.commit();
+        return true;
+      }
     } else {
       return false;
     }
@@ -2488,6 +2494,7 @@ private:
     if (node.depth != depth || node.player != game.current_player() ||
         node.winner != game.winner() ||
         node.waiting_noble != game.board.waiting_noble ||
+        node.waiting_return != game.board.waiting_return ||
         node.scores[0] != static_cast<int>(game.board.players[0].points) ||
         node.scores[1] != static_cast<int>(game.board.players[1].points)) {
       std::ostringstream message;
@@ -2740,6 +2747,7 @@ private:
                    static_cast<int>(game.board.players[1].points)};
     node.winner = game.winner();
     node.waiting_noble = game.board.waiting_noble;
+    node.waiting_return = game.board.waiting_return;
     for (uint8_t noble_id : game.board.nobles)
       node.nobles.push_back(static_cast<int>(noble_id));
     for (int player = 0; player < Board::NUM_PLAYERS; ++player) {
