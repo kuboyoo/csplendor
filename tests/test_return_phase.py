@@ -292,3 +292,72 @@ def test_python_solvers_do_not_count_the_return_as_a_move(solver_name):
     result = solve(_deck_mate_fixture(), 0, 2, options)
     assert result.status == MATE
     assert result.depth == 2
+
+
+def _two_noble_game(gems):
+    """Player 0 qualifies for the first two nobles, so its turn ends in a choice."""
+    game = cs.Game(seed=5)
+    nobles = [int(n) for n in game.board.nobles[:2]]
+    player = game.board.players[0]
+    player.bonuses = [
+        max(int(cs.get_noble(n).requirement[color]) for n in nobles)
+        for color in range(5)
+    ]
+    player.gems = gems
+    game.board.set_player(0, player)
+    return game, nobles
+
+
+def test_return_precedes_the_noble_choice_of_the_same_player():
+    game, nobles = _two_noble_game([2, 2, 2, 2, 2, 0])
+    assert game.apply(_deck_reserve(game), True)
+    assert game.board.pending_decision == 1 and int(game.current_player) == 0
+
+    assert game.apply(game.legal_actions[0], True)
+    assert game.board.pending_decision == 2 and int(game.current_player) == 0
+    choices = game.legal_actions
+    assert {int(a.noble_choice) for a in choices} == set(nobles)
+    assert sorted(E4.legal_action_ids(game)) == sorted(
+        E4.OFFSET_VISIT_NOBLE + n for n in nobles
+    )
+
+    assert game.apply(choices[0], True)
+    assert game.board.pending_decision == 0 and int(game.current_player) == 1
+    for expected in (2, 1, 0):
+        assert game.undo() and game.board.pending_decision == expected
+
+
+def _drive(session):
+    while not session.all_done():
+        features, ids, offsets, slots = session.collect()
+        if len(slots) == 0:
+            break
+        assert features.shape == (len(slots), session.state_dim)
+        priors = np.zeros(len(ids), dtype=np.float32)
+        for row in range(len(slots)):
+            width = offsets[row + 1] - offsets[row]
+            priors[offsets[row] : offsets[row + 1]] = 1.0 / width
+        session.apply(ids, offsets, priors, np.zeros(len(slots), dtype=np.float32))
+
+
+@pytest.mark.parametrize("phase", ["noble", "return", "before_reserve"])
+def test_search_handles_consecutive_decisions_of_one_player(phase):
+    game, nobles = _two_noble_game([2, 2, 2, 2, 2, 0])
+    if phase == "noble":
+        take = next(a for a in game.legal_actions if a.type == cs.ActionType.TAKE_DIFFERENT)
+        assert game.apply(take, True)
+        assert game.board.waiting_noble
+    elif phase == "return":
+        assert game.apply(_deck_reserve(game), True)
+    config = cs.V3SearchConfig()
+    config.num_simulations = 64
+    config.leaf_batch_size = 4
+    session = cs.V3SearchSession(config)
+    session.add_game(game, game.current_player, seed=3)
+    _drive(session)
+    visits = session.root_visits(0)
+    legal = set(E4.legal_action_ids(game))
+    assert visits and set(visits) <= legal
+    assert sum(visits.values()) == 63
+    if phase == "noble":
+        assert legal == {E4.OFFSET_VISIT_NOBLE + n for n in nobles}
