@@ -55,7 +55,7 @@ void bind_mcts_v3(py::module_ &m) {
       .def_readwrite("draw_value", &Config::draw_value)
       .def_readwrite("public_card_features", &Config::public_card_features)
       .def_readwrite("physical_seat_feature", &Config::physical_seat_feature)
-      .def_readwrite("return_phase_feature", &Config::return_phase_feature)
+      .def_readwrite("pending_decision_features", &Config::pending_decision_features)
       .def_readwrite("dirichlet_alpha", &Config::dirichlet_alpha)
       .def_readwrite("dirichlet_epsilon", &Config::dirichlet_epsilon)
       .def_readwrite("unseen_action_prior", &Config::unseen_action_prior)

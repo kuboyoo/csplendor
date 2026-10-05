@@ -140,9 +140,10 @@ V3の全IDが決定的にV4へ写る。
    `RETURN_GEM` の6枠は対応するV3出力がないため新規に初期化する。
 2. **返却フェーズの学習データ**: V3データには返却フェーズの局面がない。V4での自己対局により
    `RETURN_GEM` の局面を新たに得る必要がある。
-3. **状態特徴量**: `V3SearchSession` は `V3SearchConfig.return_phase_feature`（既定 `True`）で
-   返却フェーズを示す1次元（`waiting_return` のとき1.0）を座席特徴の後に追加する。
-   既定設定では `state_dim` が従来より1増える。従来の次元を維持する場合は `False` にする。
+3. **状態特徴量**: `V3SearchSession` は `V3SearchConfig.pending_decision_features`（既定 `True`）で
+   手番内の保留判断2次元（index 314 = `waiting_return`、index 315 = `waiting_noble`）を座席特徴の後に追加する。
+   既定設定では `state_dim` が従来の314から316になる。旧データは、末尾に `waiting_return=0` と
+   `waiting_noble`（合法手がすべて `VISIT_NOBLE` の局面なら1）を足して移行できる。2次元を付けない場合は `False` にする。
    詳細は [V3多対局探索](mcts_v3.md)。
 4. **Semantic group**: `cs.v4_semantic_group_id(v4_id)` は139群（0..132はV3と同じ配置、
    PASSは132、`RETURN_GEM` は133..138）。`v3_semantic_group_id` はV3 ID用に従来の意味を保つ。

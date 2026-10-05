@@ -8,7 +8,7 @@
 - `cs.ActionEncoderV4`（3121枠）を追加した。V3の山札予約21枠を3枠に畳み、`RETURN_GEM` 6枠を加えた。
   `v3_to_v4_table()` でV3のpolicyを移行できる。V2/V3は返却フェーズを表現できない（マスク空、`encode` は -1）。
   48枠の `ActionEncoderCpp` は返却フェーズ中だけslot 0..5を返却色に使う。
-- `V3SearchSession` の行動IDをV4にした。`V3SearchConfig.return_phase_feature`（既定 True）で特徴量が1次元増える。
+- `V3SearchSession` の行動IDをV4にした。`V3SearchConfig.pending_decision_features`（既定 True）で `waiting_return`・`waiting_noble` の2次元を末尾に足す（314→316次元）。
   `cs.v4_semantic_group_id` を追加した（139群）。
 - Game snapshotをformat/rules version 2、情報集合をformat 3 / rules 2にした。version 1のsnapshotは
   拒否し、`Game.upgrade_snapshot_v1()` で一度だけ変換する。
@@ -21,8 +21,8 @@
 English: Deck reservations no longer carry token returns; an 11-token
 reservation enters a same-player return phase resolved by `RETURN_GEM` after
 the drawn card is seen. New `ActionEncoderV4` (3121 ids) with a V3 migration
-table; `V3SearchSession` now uses V4 ids and one extra return-phase feature by
-default. Snapshot v2 (convert v1 with `Game.upgrade_snapshot_v1`),
+table; `V3SearchSession` now uses V4 ids and appends two pending-decision
+features (waiting_return, waiting_noble) by default. Snapshot v2 (convert v1 with `Game.upgrade_snapshot_v1`),
 information state v3, USI `return:<C>` and KIFU v1.1.
 
 ## 未出荷：ホットスポット高速化（2026-10-04）

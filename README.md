@@ -292,7 +292,7 @@ assert len(cs.get_all_nobles()) == 12
 
 新しい全行動policyにはV4を使います。**内蔵C++ MCTSのpolicyは48枠固定**で、V3/V4をそのまま渡すことはできません（48枠は返却フェーズ中だけslot 0..5を返却色に再利用）。V2/V3/V4のマスクは終局時に全ゼロです。48枠にはパスがないため、MCTSのrootが `requires_forced_pass` なら先に `apply_forced_pass()` を呼びます。
 
-V3の区分は、異色取得 `0..839`、同色取得 `840..979`、公開予約 `980..1063`、山札予約 `1064..1084`、購入 `1085..3119`、貴族 `3120..3131`、パス `3132` です。V4はV3の山札予約 `1064..1084` を `1064..1066` に畳み、購入 `1067..3101`、貴族 `3102..3113`、返却 `3114..3119`、パス `3120` です。V3からの移行（`v3_to_v4_table()`、`return_phase_feature`、snapshot変換）は [V4](doc/action_space_v4.md) を参照してください。詳細は [V2](doc/action_space_v2.md) / [V3](doc/action_space_v3.md) / [V4](doc/action_space_v4.md)。モデルと一緒にschema version・fingerprint・支払いモードを保存してください。
+V3の区分は、異色取得 `0..839`、同色取得 `840..979`、公開予約 `980..1063`、山札予約 `1064..1084`、購入 `1085..3119`、貴族 `3120..3131`、パス `3132` です。V4はV3の山札予約 `1064..1084` を `1064..1066` に畳み、購入 `1067..3101`、貴族 `3102..3113`、返却 `3114..3119`、パス `3120` です。V3からの移行（`v3_to_v4_table()`、`pending_decision_features`、snapshot変換）は [V4](doc/action_space_v4.md) を参照してください。詳細は [V2](doc/action_space_v2.md) / [V3](doc/action_space_v3.md) / [V4](doc/action_space_v4.md)。モデルと一緒にschema version・fingerprint・支払いモードを保存してください。
 
 `StateEncoder.encode_canonical(game, player, observer)` はプレイヤー視点を入れ替えます。`observer` の既定値 `-1` は完全情報なので、対戦AIには観測者 `0` / `1` を明示します。未知カード集合や将来の公開確率には `Board.observable_card_pool()` と `StateEncoder.encode_public_card_statistics()` を利用できます。
 

@@ -162,9 +162,10 @@ V3 cannot represent `RETURN_GEM`: during the return phase its mask is empty and
 ## Native V3 search (`V3SearchSession`, experimental)
 
 `V3SearchConfig` fields are documented in [V3 multi-game search](mcts_v3.md).
-The session works on V4 action ids. `V3SearchConfig.return_phase_feature`
-(default `True`) appends one return-phase feature, so `state_dim` is one larger
-than before; set it to `False` to keep the previous dimension.
+The session works on V4 action ids. `V3SearchConfig.pending_decision_features`
+(default `True`) appends two pending-decision features after the seat feature:
+`waiting_return` then `waiting_noble` (1.0 when set), so the default `state_dim`
+is 316 (314 + 2); set it to `False` to omit them.
 `csplendor.v4_semantic_group_id(v4_id)` gives the 139 decision groups used by
 the session; `v3_semantic_group_id` keeps its V3 meaning.
 `V3SearchConfig.num_threads` (default `1`, must be positive) runs `collect()` and
