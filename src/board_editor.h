@@ -102,6 +102,18 @@ inline void set_waiting_return(Board &board, bool waiting_return) noexcept {
   board.begin_editor_mutation().waiting_return = waiting_return;
 }
 
+inline void set_passive_streak(Board &board, int streak) {
+  if (streak < 0 || streak > Board::PASSIVE_STREAK_DRAW)
+    throw std::invalid_argument("passive_streak out of range");
+  board.begin_editor_mutation().passive_streak = static_cast<uint8_t>(streak);
+}
+
+inline void set_end_reason(Board &board, Board::EndReason reason) {
+  if (static_cast<uint8_t>(reason) > static_cast<uint8_t>(Board::EndReason::Repetition))
+    throw std::invalid_argument("end_reason out of range");
+  board.begin_editor_mutation().end_reason = reason;
+}
+
 inline void set_winner(Board &board, int winner) {
   if (winner < -2 || winner > 1)
     throw std::invalid_argument("winner out of range");

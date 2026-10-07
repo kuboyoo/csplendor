@@ -84,6 +84,15 @@ void bind_rules(py::module_ &m) {
       .def_property(
           "winner", [](const Board &b) { return (int)b.winner; },
           &state::editor::set_winner)
+      .def_property(
+          "passive_streak", [](const Board &b) { return (int)b.passive_streak; },
+          &state::editor::set_passive_streak,
+          "Consecutive passive turns (PASS or a take returning the taken "
+          "tokens); 6 draws the game by repetition")
+      .def_property(
+          "end_reason", [](const Board &b) { return b.end_reason; },
+          &state::editor::set_end_reason,
+          "Why the game ended (GameEndReason)")
       .def_property_readonly("players", [](const Board &b) {
         py::list players(Board::NUM_PLAYERS);
         for (int i = 0; i < Board::NUM_PLAYERS; ++i)

@@ -22,7 +22,7 @@ from csplendor import (
 from tests.support import reachable_state_corpus
 
 EXPECTED_PUBLIC_EXPORTS = {
-    "GemType", "ActionType", "Card", "Noble", "Action", "PlayerState",
+    "GemType", "GameEndReason", "ActionType", "Card", "Noble", "Action", "PlayerState",
     "Board", "Game", "get_card", "get_noble", "get_all_cards",
     "get_all_nobles", "StateFeaturizer", "ActionEncoder", "ActionEncoderCpp",
     "ActionEncoderV2", "ActionEncoderV3", "ActionEncoderV4", "StateEncoder", "MCTSConfig",

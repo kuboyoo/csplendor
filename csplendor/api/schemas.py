@@ -73,6 +73,10 @@ class BoardSchema(BaseModel):
     waiting_return: bool = False
     # 0 = none, 1 = return a token, 2 = choose a noble
     pending_decision: int = 0
+    # Repetition draw: consecutive passive turns (6 draws the game)
+    passive_streak: int = 0
+    # 0 = ongoing, 1 = normal, 2 = stalemate, 3 = repetition
+    end_reason: int = 0
     game_over: bool
     winner: int
 

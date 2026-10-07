@@ -49,6 +49,13 @@ public:
   bool waiting_noble = false;
   bool waiting_return = false;
   int8_t winner = -1; // -1: ongoing, 0, 1: player, -2: draw
+  // Repetition draw (doc/engine_specs.md, 千日手): consecutive turns that
+  // ended with a passive action (PASS or a take returning exactly the taken
+  // tokens). PASSIVE_STREAK_DRAW of them draw the game.
+  static constexpr uint8_t PASSIVE_STREAK_DRAW = 6;
+  uint8_t passive_streak = 0;
+  enum class EndReason : uint8_t { None = 0, Normal = 1, Stalemate = 2, Repetition = 3 };
+  EndReason end_reason = EndReason::None;
 
   enum class PendingDecision : uint8_t { None = 0, ReturnToken = 1, ChooseNoble = 2 };
   PendingDecision pending_decision() const noexcept {
@@ -302,6 +309,20 @@ public:
       board_->waiting_return = waiting;
     }
 
+    void set_passive_streak(uint8_t streak) noexcept {
+      const uint8_t old = board_->passive_streak;
+      if (old == streak)
+        return;
+      if constexpr (MaintainExactHash) {
+        hash_ ^= Board::exact_passive_streak_salt(*zobrist_, old) ^
+                 Board::exact_passive_streak_salt(*zobrist_, streak);
+      }
+      board_->passive_streak = streak;
+    }
+
+    // Terminal metadata only: not part of any hash.
+    void set_end_reason(EndReason reason) noexcept { board_->end_reason = reason; }
+
     void set_winner(int8_t winner) noexcept {
       const int8_t old = board_->winner;
       if (old == winner)
@@ -410,6 +431,8 @@ public:
     waiting_noble = false;
     waiting_return = false;
     winner = -1;
+    passive_streak = 0;
+    end_reason = EndReason::None;
     hash_valid = false;
   }
 
@@ -609,6 +632,13 @@ private:
     return 0;
   }
 
+  static uint64_t exact_passive_streak_salt(const Zobrist &z,
+                                            uint8_t streak) noexcept {
+    if (streak <= PASSIVE_STREAK_DRAW)
+      return z.passive_streak[streak];
+    return hash_out_of_range_value(0x700, streak);
+  }
+
   static uint64_t exact_waiting_return_salt(const Zobrist &z, bool waiting,
                                             uint8_t player) noexcept {
     if (waiting && player < NUM_PLAYERS)
@@ -691,8 +721,9 @@ private:
     }
 
     // Current player & states
-    CSPLENDOR_PERF_HASH_FIELDS(IncludeDeckOrder, IncludeTurn ? 6 : 5);
+    CSPLENDOR_PERF_HASH_FIELDS(IncludeDeckOrder, IncludeTurn ? 7 : 6);
     h ^= exact_current_player_salt(z, current_player);
+    h ^= exact_passive_streak_salt(z, passive_streak);
     h ^= exact_waiting_noble_salt(z, waiting_noble, current_player);
     h ^= exact_waiting_return_salt(z, waiting_return, current_player);
     h ^= exact_final_round_salt(z, final_round);
@@ -816,9 +847,11 @@ public:
     }
 
     // Current player & states
-    CSPLENDOR_PERF_ADD(ObservableHashFieldsVisited, 6);
+    CSPLENDOR_PERF_ADD(ObservableHashFieldsVisited, 7);
     if (current_player < NUM_PLAYERS)
       h ^= z.current_player[current_player];
+    // The streak is public and decides a draw, so it separates positions.
+    h ^= exact_passive_streak_salt(z, passive_streak);
     if (waiting_noble && current_player < NUM_PLAYERS)
       h ^= z.waiting_noble[current_player];
     // The pending return is public; the drawn card stays hidden.
@@ -833,12 +866,13 @@ public:
   }
 
   // Observable rule-position identity for repetition detection.  The regular
-  // observable hash intentionally includes the monotonic turn counter for
-  // MCTS tree identity; repetition logic must not treat that metadata as a
-  // material position change.
+  // observable hash intentionally includes the monotonic turn counter and the
+  // passive streak for MCTS tree identity; repetition logic must not treat
+  // that metadata as a material position change.
   uint64_t observable_repetition_hash(uint8_t observer) const {
     const auto &z = Zobrist::get_instance();
-    return observable_hash(observer) ^ z.turn[turn];
+    return observable_hash(observer) ^ z.turn[turn] ^
+           exact_passive_streak_salt(z, passive_streak);
   }
 
   std::vector<uint8_t> observable_card_pool(uint8_t observer,

@@ -43,6 +43,9 @@ public:
   uint64_t waiting_return[2];
   uint64_t winner[4]; // winner + 2: draw, ongoing, player 0, player 1
   uint64_t turn[65536];
+  // Consecutive passive turns (repetition draw). Index 0 is 0 so positions
+  // without a streak keep their hash; isolated stream, no salt changes.
+  uint64_t passive_streak[7];
 
   Zobrist() {
     std::mt19937_64 rng(42); // Fixed seed for consistency across runs
@@ -129,6 +132,10 @@ public:
       winner[state] = gen();
     for (int value = 0; value < 65536; ++value)
       turn[value] = gen();
+    std::mt19937_64 repetition_rng(0x5245504554495449ULL);
+    passive_streak[0] = 0;
+    for (int streak = 1; streak < 7; ++streak)
+      passive_streak[streak] = std::uniform_int_distribution<uint64_t>()(repetition_rng);
   }
 };
 

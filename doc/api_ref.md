@@ -74,6 +74,16 @@ analysis and book keys.
   (`waiting_return`), `2` choose a noble (`waiting_noble`). Both flags are never
   set at once (state invariant `invalid_pending_decision`).
 
+### Repetition draw and end reason
+- `Board.passive_streak` (int 0..6, editable): consecutive turns that ended
+  with a passive action (PASS, or a take returning exactly the taken tokens,
+  `Action.is_token_noop()`). Six draw the game inside `apply`/`apply_trusted`
+  (doc/engine_specs.md, 千日手). Part of the exact and observable hashes,
+  snapshots and information states; not a search feature.
+- `Board.end_reason` (`csplendor.GameEndReason`): `NONE` while the game runs,
+  `NORMAL` (final round), `STALEMATE` (neither player can act), `REPETITION`.
+  State invariant `invalid_repetition_state` rejects inconsistent values.
+
 Seed 0 is deterministic, like any other seed. The current implementation uses
 the low 32 bits to seed `mt19937`. Store the engine revision alongside seeds.
 `Board.players` and `get_player()` return copies; editor changes must be written

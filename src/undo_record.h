@@ -43,6 +43,8 @@ struct UndoRecord {
   bool waiting_noble = false;
   bool waiting_return = false;
   int8_t winner = -1;
+  uint8_t passive_streak = 0;
+  Board::EndReason end_reason = Board::EndReason::None;
   uint64_t cached_hash = 0;
   bool hash_valid = false;
 
@@ -77,6 +79,8 @@ struct UndoRecord {
     record.waiting_noble = board.waiting_noble;
     record.waiting_return = board.waiting_return;
     record.winner = board.winner;
+    record.passive_streak = board.passive_streak;
+    record.end_reason = board.end_reason;
     record.cached_hash = board.cached_hash;
     record.hash_valid = board.hash_valid;
     return record;
@@ -130,6 +134,8 @@ struct UndoRecord {
     board.waiting_noble = waiting_noble;
     board.waiting_return = waiting_return;
     board.winner = winner;
+    board.passive_streak = passive_streak;
+    board.end_reason = end_reason;
     board.cached_hash = cached_hash;
     board.hash_valid = hash_valid;
     return true;
@@ -188,6 +194,8 @@ struct UndoRecord {
            lhs.waiting_noble == rhs.waiting_noble &&
            lhs.waiting_return == rhs.waiting_return &&
            lhs.winner == rhs.winner &&
+           lhs.passive_streak == rhs.passive_streak &&
+           lhs.end_reason == rhs.end_reason &&
            lhs.cached_hash == rhs.cached_hash &&
            lhs.hash_valid == rhs.hash_valid;
   }

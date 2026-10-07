@@ -325,8 +325,11 @@ private:
       // Resolve the stalemate as a draw instead of allowing an infinite pass
       // cycle. A final-round result produced by end_turn() takes precedence.
       if (!next.is_game_over() &&
-          MoveGenerator::requires_forced_pass(next, simple_payment_mode))
+          MoveGenerator::requires_forced_pass(next, simple_payment_mode)) {
         mutation.set_winner(-2);
+        mutation.set_end_reason(Board::EndReason::Stalemate);
+      }
+      csplendor::detail::record_decision_outcome(next, mutation, true);
       mutation.commit();
       board = std::move(next);
       if (record_history) {
@@ -342,6 +345,8 @@ private:
     // Enter the successful-publication mutation boundary once for the whole
     // action. An early return leaves the exact cache invalid.
     Board::RuleMutator<MaintainExactHash> mutation(board);
+    const PlayerState &actor = board.players[board.current_player];
+    const size_t nobles_before = actor.acquired_nobles.size();
 
     bool applied = false;
     switch (action.type) {
@@ -368,6 +373,7 @@ private:
         return false;
       mutation.set_waiting_noble(false);
       csplendor::detail::end_turn(board, mutation);
+      csplendor::detail::record_decision_outcome(board, mutation, false);
       mutation.commit();
       if (record_history) {
 #ifdef CSPLENDOR_VERIFY_DELTA_UNDO
@@ -399,6 +405,9 @@ private:
       // automatic or deferred noble visits.
       csplendor::detail::finish_standard_action(board, mutation);
     }
+    csplendor::detail::record_decision_outcome(
+        board, mutation,
+        action.is_token_noop() && actor.acquired_nobles.size() == nobles_before);
     mutation.commit();
 
     if (record_history) {

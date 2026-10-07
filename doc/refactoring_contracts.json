@@ -12,6 +12,7 @@
       "Board",
       "Card",
       "Game",
+      "GameEndReason",
       "GemType",
       "InferenceResult",
       "LeafRequest",

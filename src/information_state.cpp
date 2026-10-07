@@ -114,6 +114,7 @@ std::string serialize(const Game &game, uint8_t observer) {
   payload.u8(static_cast<uint8_t>(board.waiting_noble));
   payload.u8(static_cast<uint8_t>(board.waiting_return));
   payload.i8(board.winner);
+  payload.u8(board.passive_streak); // public: it decides a repetition draw
 
   for (const uint8_t value : board.bank)
     payload.u8(value);

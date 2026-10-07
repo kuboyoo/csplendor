@@ -303,6 +303,28 @@ inline void finish_standard_action(Board &board, Mutator &mutation) {
   end_turn(board, mutation);
 }
 
+// Bookkeeping after a decision has been applied: advance or reset the
+// passive streak, then name the end of a finished game. `passive` is true for
+// a PASS or a token take returning exactly the taken tokens that gained no
+// noble. A passive take that leaves a noble choice pending counts now; the
+// following VISIT_NOBLE (progress) resets it. Six passive turns in a row
+// draw the game unless it already ended.
+template <typename Mutator>
+inline void record_decision_outcome(Board &board, Mutator &mutation, bool passive) {
+  const uint8_t streak =
+      passive ? static_cast<uint8_t>(std::min<int>(board.passive_streak + 1,
+                                                   Board::PASSIVE_STREAK_DRAW))
+              : 0;
+  mutation.set_passive_streak(streak);
+  if (!board.is_game_over() && !board.waiting_noble && !board.waiting_return &&
+      streak >= Board::PASSIVE_STREAK_DRAW) {
+    mutation.set_winner(-2);
+    mutation.set_end_reason(Board::EndReason::Repetition);
+  }
+  if (board.is_game_over() && board.end_reason == Board::EndReason::None)
+    mutation.set_end_reason(Board::EndReason::Normal);
+}
+
 } // namespace detail
 } // namespace csplendor
 

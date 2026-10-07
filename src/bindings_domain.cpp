@@ -1,5 +1,6 @@
 #include "bindings.h"
 #include "action.h"
+#include "board.h"
 #include "card_data.h"
 #include "noble_data.h"
 #include "player.h"
@@ -94,6 +95,12 @@ void bind_domain(py::module_ &m) {
       .def_static("unpack", &Action::unpack, py::arg("code"),
                   "Unpack a compact uint64 action code")
       .def("__repr__", &Action::to_string);
+
+  py::enum_<Board::EndReason>(m, "GameEndReason")
+      .value("NONE", Board::EndReason::None)
+      .value("NORMAL", Board::EndReason::Normal)
+      .value("STALEMATE", Board::EndReason::Stalemate)
+      .value("REPETITION", Board::EndReason::Repetition);
 
   py::enum_<ActionType>(m, "ActionType")
       .value("TAKE_DIFFERENT", TAKE_DIFFERENT)

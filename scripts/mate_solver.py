@@ -618,6 +618,7 @@ class MateSolver:
             bool(board.final_round),
             bool(board.waiting_noble),
             bool(board.waiting_return),
+            int(board.passive_streak),
             int(board.winner),
             tuple(int(v) for v in board.bank),
             tuple(tuple(int(card_id) for card_id in row) for row in board.visible),
@@ -792,6 +793,8 @@ def _game_to_payload(game: cs.Game) -> Dict[str, Any]:
             "final_round": bool(board.final_round),
             "waiting_noble": bool(board.waiting_noble),
             "waiting_return": bool(board.waiting_return),
+            "passive_streak": int(board.passive_streak),
+            "end_reason": int(board.end_reason),
             "winner": int(board.winner),
             "players": players,
         },
@@ -815,6 +818,8 @@ def _game_from_payload(payload: Dict[str, Any]) -> cs.Game:
     board.waiting_noble = bool(board_payload["waiting_noble"])
     board.waiting_return = bool(board_payload.get("waiting_return", False))
     board.winner = int(board_payload["winner"])
+    board.passive_streak = int(board_payload.get("passive_streak", 0))
+    board.end_reason = cs.GameEndReason(int(board_payload.get("end_reason", 0)))
 
     for player_idx, player_payload in enumerate(board_payload["players"]):
         player = board.get_player(player_idx)
@@ -874,6 +879,8 @@ def load_game_from_json(path: str) -> cs.Game:
         board.waiting_return = bool(data["waiting_return"])
     if "winner" in data:
         board.winner = int(data["winner"])
+    if "passive_streak" in data:
+        board.passive_streak = int(data["passive_streak"])
 
     for idx, player_data in enumerate(data.get("players", [])):
         if idx >= 2:

@@ -292,7 +292,9 @@ def test_inference_closure_cannot_retarget_the_in_progress_root_search(
     assert node.total_visits == 1
 
 
-def test_batch_max_depth_returns_path_and_releases_virtual_losses():
+def test_batch_repetition_terminal_returns_path_and_releases_virtual_losses():
+    # Token shuffles that return exactly the taken tokens used to cycle until
+    # MAX_DEPTH; the repetition rule now ends them as a draw after six turns.
     root = Game(seed=42)
     for player_index in (0, 1):
         player = root.board.get_player(player_index)
@@ -311,7 +313,7 @@ def test_batch_max_depth_returns_path_and_releases_virtual_losses():
     mcts = _mcts()
     state = root.clone_light()
     chosen_indices = []
-    for _ in range(300):
+    while not state.is_game_over():
         before = resources(state)
         chosen = None
         for index in np.flatnonzero(ActionEncoderCpp.get_action_mask(state)):
@@ -341,7 +343,8 @@ def test_batch_max_depth_returns_path_and_releases_virtual_losses():
     assert request["total_boards"] == 0
     assert len(request["terminals"]) == 1
     terminal_path, terminal_value = request["terminals"][0]
-    assert len(terminal_path) == 300
+    assert len(terminal_path) == 6
+    assert state.board.end_reason == core.GameEndReason.REPETITION
     assert terminal_value == [0.0, 0.0]
     assert mcts.get_node(root_hash).virtual_loss[chosen_indices[0]] == 1
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from .. import Action, Game
+from .. import Action, Game, GameEndReason
 from .application_errors import InvalidRequest, ResourceNotFound
 from .kifu_codec import build_kifu_text, now_iso
 from .spn_codec import game_to_spn
@@ -205,6 +205,16 @@ class GameSessionService:
         return "ONGOING"
 
     @staticmethod
+    def result_detail_from_game(game: Game) -> Optional[str]:
+        """KIFU result detail naming an engine-decided draw (doc/KIFU.md §6)."""
+        reason = game.board.end_reason
+        if reason == GameEndReason.STALEMATE:
+            return "STALEMATE"
+        if reason == GameEndReason.REPETITION:
+            return "REPETITION"
+        return None
+
+    @staticmethod
     def scores_from_game(game: Game) -> Optional[List[int]]:
         try:
             return [int(value) for value in game.scores()]
@@ -232,6 +242,7 @@ class GameSessionService:
             position="startpos 2",
             moves=record.get("moves", []),
             result=self.result_from_game(game),
+            result_detail=self.result_detail_from_game(game),
             final_scores=self.scores_from_game(game),
             total_turns=int(game.board.turn),
         )

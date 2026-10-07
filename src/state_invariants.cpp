@@ -7,7 +7,7 @@
 namespace csplendor::state {
 namespace {
 
-constexpr std::array<InvariantViolation, 23> ALL_VIOLATIONS = {
+constexpr std::array<InvariantViolation, 24> ALL_VIOLATIONS = {
     InvariantViolation::InvalidCurrentPlayer,
     InvariantViolation::InvalidWinner,
     InvariantViolation::FixedCapacityOverflow,
@@ -31,6 +31,7 @@ constexpr std::array<InvariantViolation, 23> ALL_VIOLATIONS = {
     InvariantViolation::NoblePartitionMismatch,
     InvariantViolation::StaleHashCache,
     InvariantViolation::InvalidPendingDecision,
+    InvariantViolation::InvalidRepetitionState,
 };
 
 uint64_t pack_colours(const std::array<uint8_t, 5> &values) noexcept {
@@ -99,6 +100,15 @@ InvariantReport validate_invariants(const Board &board,
   if (board.waiting_return && board.current_player < Board::NUM_PLAYERS &&
       board.players[board.current_player].total_gems() <= Board::MAX_TOKENS)
     report.add(InvariantViolation::InvalidPendingDecision);
+  // The streak never exceeds the draw threshold; a repetition result is a
+  // draw reached by exactly that streak, and any result names an ended game.
+  if (board.passive_streak > Board::PASSIVE_STREAK_DRAW ||
+      static_cast<uint8_t>(board.end_reason) > static_cast<uint8_t>(Board::EndReason::Repetition) ||
+      (board.end_reason != Board::EndReason::None && board.winner == -1) ||
+      (board.end_reason == Board::EndReason::Repetition &&
+       (board.winner != -2 || board.passive_streak != Board::PASSIVE_STREAK_DRAW)) ||
+      (board.end_reason == Board::EndReason::Stalemate && board.winner != -2))
+    report.add(InvariantViolation::InvalidRepetitionState);
 
   bool fixed_capacities_safe = true;
   for (const auto &deck : board.decks) {
@@ -296,6 +306,8 @@ const char *invariant_violation_name(InvariantViolation violation) noexcept {
     return "stale_hash_cache";
   case InvariantViolation::InvalidPendingDecision:
     return "invalid_pending_decision";
+  case InvariantViolation::InvalidRepetitionState:
+    return "invalid_repetition_state";
   }
   return "unknown_invariant_violation";
 }

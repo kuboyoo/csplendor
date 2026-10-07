@@ -46,9 +46,9 @@ void test_public_header_roundtrip_and_corruption_rejection() {
 } // namespace
 
 int main() {
-  static_assert(csplendor::snapshot::GAME_SNAPSHOT_FORMAT_VERSION == 2,
+  static_assert(csplendor::snapshot::GAME_SNAPSHOT_FORMAT_VERSION == 3,
                 "snapshot format version changed");
-  static_assert(csplendor::snapshot::GAME_SNAPSHOT_RULES_VERSION == 2,
+  static_assert(csplendor::snapshot::GAME_SNAPSHOT_RULES_VERSION == 3,
                 "snapshot rules version changed");
   try {
     test_public_header_roundtrip_and_corruption_rejection();

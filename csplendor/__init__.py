@@ -12,6 +12,7 @@ from ._csplendor import (
     Board,
     Card,
     Game,
+    GameEndReason,
     GemType,
     InferenceResult,
     LeafRequest,
@@ -82,6 +83,7 @@ except PackageNotFoundError:
     # from pyproject.toml through their installed metadata.
     __version__ = "0+unknown"
 __all__ = [
+    "GameEndReason",
     "GemType", "ActionType", "Card", "Noble", "Action",
     "PlayerState", "Board", "Game",
     "get_card", "get_noble", "get_all_cards", "get_all_nobles",
