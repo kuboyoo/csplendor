@@ -89,6 +89,20 @@ def test_kifu_codec_round_trips_time_control_and_time_forfeit():
     assert [move["time_ms"] for move in parsed["moves"]] == [1800, 400]
 
 
+@pytest.mark.parametrize(
+    "value", ["P0=150+30/150 P1=5s/move", "P0=150+30/150 P1=none"]
+)
+def test_kifu_codec_keeps_per_player_time_control(value):
+    text = build_kifu_text(
+        headers={"Format": "Splendor KIFU v1.1", "TimeControl": value},
+        position="startpos 2",
+        moves=[],
+        result="DRAW",
+    )
+    assert f"TimeControl: {value}\n" in text
+    assert parse_kifu_text(text)["headers"]["TimeControl"] == value
+
+
 def test_kifu_result_without_detail_parses_to_none():
     text = build_kifu_text(
         headers={"Format": "Splendor KIFU v1.0"},
