@@ -37,6 +37,7 @@ enum class InvariantViolation : uint64_t {
   StaleHashCache = 1ULL << 21U,
   // Both pending decisions set, or a pending return without excess tokens.
   InvalidPendingDecision = 1ULL << 22U,
+  InvalidRepetitionState = 1ULL << 23U,
 };
 
 struct InvariantReport {

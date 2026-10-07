@@ -31,6 +31,7 @@ snapshot version は分類によらず数値契約である。変更する場合
 | undo history | 任意 | 任意 | `clone_light`では持たない | snapshot対象外 |
 | hidden informationの実在性 | 必須 | 緩和可 | observerから整合する世界 | snapshot payloadどおり |
 | 保留判断（`waiting_noble`と`waiting_return`は排他、`waiting_return`中の手番playerは11枚以上。`invalid_pending_decision`） | 必須 | 必須 | 必須 | deserialize時に必須 |
+| 千日手（`passive_streak`は0〜6、`end_reason`は終局時だけ設定、`REPETITION`はdrawかつ連続6。`invalid_repetition_state`） | 必須 | 必須 | 必須 | deserialize時に必須 |
 
 用語は次の意味で固定する。
 

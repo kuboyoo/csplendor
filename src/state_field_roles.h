@@ -23,7 +23,7 @@ struct FieldRoleDescriptor {
 // This inventory is the machine-readable counterpart of the R2-C ownership
 // table. Keep one entry per public data member so representation changes must
 // make an explicit canonical/derived/provenance/cache decision.
-inline constexpr std::array<FieldRoleDescriptor, 13> BOARD_FIELD_ROLES = {{
+inline constexpr std::array<FieldRoleDescriptor, 15> BOARD_FIELD_ROLES = {{
     {"Board", "bank", FieldRole::Canonical},
     {"Board", "visible", FieldRole::Canonical},
     {"Board", "decks", FieldRole::Canonical},
@@ -35,6 +35,8 @@ inline constexpr std::array<FieldRoleDescriptor, 13> BOARD_FIELD_ROLES = {{
     {"Board", "waiting_noble", FieldRole::Canonical},
     {"Board", "waiting_return", FieldRole::Canonical},
     {"Board", "winner", FieldRole::Canonical},
+    {"Board", "passive_streak", FieldRole::Canonical},
+    {"Board", "end_reason", FieldRole::Canonical},
     {"Board", "cached_hash", FieldRole::Cache},
     {"Board", "hash_valid", FieldRole::Cache},
 }};

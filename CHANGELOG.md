@@ -1,5 +1,25 @@
 # 変更履歴 / Changelog
 
+## 未出荷：千日手（2026-10-07）
+
+- 両者が実質パス（`PASS`、または取ったのと同じ宝石を返す手 `Action.is_token_noop()`）を3回ずつ、
+  連続6手番続けたら、千日手として引き分け（winner `-2`）で終局する。判定は手の適用の中で行うので、
+  探索・詰みソルバー・Python・WASM が同じ終局を見る。先後を入れ替えた指し直しはしない。
+- `Board.passive_streak`（連続回数）と `Board.end_reason`（`cs.GameEndReason`: `NONE` / `NORMAL` /
+  `STALEMATE` / `REPETITION`）を追加した。回数は厳密hash・観測hash・snapshot・情報集合に含み、
+  探索の入力特徴量（316次元）は変えない。
+- Game snapshot を format/rules version 3、情報集合を format 4 / rules 3 にした。version 2 の snapshot は
+  そのまま読める（回数0、終局済みなら `NORMAL`）。
+- 棋譜の結果に `Result: DRAW STALEMATE`（両者パス）と `Result: DRAW REPETITION`（千日手）を追加した。
+  Web API の盤面に `passive_streak`・`end_reason` を追加した。
+- 詳細は `doc/engine_specs.md`「千日手」、`doc/KIFU.md` §6 を参照。
+
+English: Six consecutive passive turns (three per player: PASS or a take
+returning exactly the taken tokens) draw the game by repetition inside rule
+application. New `Board.passive_streak` and `Board.end_reason`
+(`GameEndReason`); snapshot v3 (v2 still loads), information state v4, KIFU
+results `DRAW STALEMATE` / `DRAW REPETITION`. Search features are unchanged.
+
 ## 未出荷：root の詰みの探り（root_mate_probe、2026-10-05）
 
 - AI が手を選ぶ前の root の詰み探索（発火条件、相手の非公開予約の除外、終盤予算、anytime の探り、

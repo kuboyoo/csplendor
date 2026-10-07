@@ -40,7 +40,7 @@ Pythonの `Game` は `False` が既定です。対局サーバー・AI・棋譜�
 
 `GameStateSchema` は次を返します。
 
-- `board`: `bank`, `visible_cards`, `deck_counts`, `nobles`, `current_player`, `turn`, `waiting_noble`, `waiting_return`, `pending_decision`, `game_over`, `winner`。`pending_decision` は `0` なし、`1` トークン返却、`2` 貴族選択。
+- `board`: `bank`, `visible_cards`, `deck_counts`, `nobles`, `current_player`, `turn`, `waiting_noble`, `waiting_return`, `pending_decision`, `passive_streak`, `end_reason`, `game_over`, `winner`。`pending_decision` は `0` なし、`1` トークン返却、`2` 貴族選択。`passive_streak` は千日手の連続回数（6で引き分け）、`end_reason` は終局理由（`0` 未終局、`1` 通常、`2` 両者パス、`3` 千日手）。棋譜の書き出しは両者パス・千日手の引き分けを `Result: DRAW STALEMATE` / `Result: DRAW REPETITION` と書く。
 - `players`: 各プレイヤーのトークン、ボーナス、点数、予約・購入カードID、獲得貴族ID。
 - `legal_actions`: 行動種別、対象、取得・返却、支払い、貴族選択、USI表記。
 

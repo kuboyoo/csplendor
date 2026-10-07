@@ -12,8 +12,8 @@ namespace csplendor::snapshot {
 
 // Version 2 adds the pending deck-reservation return (Board::waiting_return)
 // and the rules in which a deck reservation never carries a token return.
-static constexpr uint16_t GAME_SNAPSHOT_FORMAT_VERSION = 2;
-static constexpr uint16_t GAME_SNAPSHOT_RULES_VERSION = 2;
+static constexpr uint16_t GAME_SNAPSHOT_FORMAT_VERSION = 3;
+static constexpr uint16_t GAME_SNAPSHOT_RULES_VERSION = 3;
 static constexpr std::array<uint8_t, 8> GAME_SNAPSHOT_MAGIC = {
     {'C', 'S', 'P', 'L', 'S', 'N', 'P', '\0'}};
 static constexpr size_t GAME_SNAPSHOT_MAX_BYTES = 4096;
@@ -62,7 +62,8 @@ bool valid_noble_id(int value);
 void require_boolean(uint8_t value, const char *field);
 
 std::string serialize(const Game &game);
-// Accepts only the current format and rules versions.
+// Accepts the current version and, so that stored self-play stays usable,
+// version 2 (before the repetition rule: no passive streak).
 Game deserialize(std::string_view snapshot);
 // One-off migration: re-encodes a format/rules version 1 snapshot as the
 // current version. Version 1 positions never have a pending return.

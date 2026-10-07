@@ -12,8 +12,8 @@ namespace csplendor::information_state {
 // The bytes are an identity only: they deliberately omit the authoritative
 // hidden partition and therefore cannot be deserialized into a Game.
 // Format 3 / rules 2 add the pending deck-reservation return.
-static constexpr uint16_t FORMAT_VERSION = 3;
-static constexpr uint16_t RULES_VERSION = 2;
+static constexpr uint16_t FORMAT_VERSION = 4;
+static constexpr uint16_t RULES_VERSION = 3;
 static constexpr std::array<uint8_t, 8> MAGIC = {
     {'C', 'S', 'P', 'L', 'I', 'N', 'F', 'O'}};
 

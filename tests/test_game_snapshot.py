@@ -19,6 +19,8 @@ def assert_same_position(first, second):
     assert second.board.nobles == first.board.nobles
     assert second.board.final_round == first.board.final_round
     assert second.board.waiting_noble == first.board.waiting_noble
+    assert second.board.passive_streak == first.board.passive_streak
+    assert second.board.end_reason == first.board.end_reason
     for player_id in (0, 1):
         expected = first.board.get_player(player_id)
         actual = second.board.get_player(player_id)
@@ -85,11 +87,12 @@ def test_game_snapshot_preserves_hidden_reservation_and_future_deck_order():
 
 def test_game_snapshot_rejects_corruption_and_has_a_versioned_golden_encoding():
     snapshot = csplendor.Game(seed=42).serialize_snapshot()
-    assert csplendor.Game.snapshot_format_version() == 2
-    assert csplendor.Game.snapshot_rules_version() == 2
-    assert len(snapshot) == 191
+    assert csplendor.Game.snapshot_format_version() == 3
+    assert csplendor.Game.snapshot_rules_version() == 3
+    # Version 3 adds the passive streak and the end reason after winner.
+    assert len(snapshot) == 193
     assert hashlib.sha256(snapshot).hexdigest() == (
-        "2e79f11629cfa5a070fb55457f0332e4a2b09657d6bfceed4ccc10034f2ceb1f"
+        "a8f9ff90594710b01833ea5927087172b02f9d07daf4f70272b2989bf4edf8f6"
     )
 
     for broken in (
@@ -100,7 +103,7 @@ def test_game_snapshot_rejects_corruption_and_has_a_versioned_golden_encoding():
         with pytest.raises(ValueError):
             csplendor.Game.deserialize_snapshot(broken)
 
-    incompatible_rules = snapshot[:10] + b"\x03\x00" + snapshot[12:]
+    incompatible_rules = snapshot[:10] + b"\x04\x00" + snapshot[12:]
     with pytest.raises(ValueError, match="rules version"):
         csplendor.Game.deserialize_snapshot(incompatible_rules)
 
@@ -160,7 +163,7 @@ def test_version_1_snapshots_are_rejected_but_upgrade_exactly():
     assert int(restored.turn) == 11 and int(restored.current_player) == 1
 
     with pytest.raises(ValueError):
-        csplendor.Game.upgrade_snapshot_v1(upgraded)  # already version 2
+        csplendor.Game.upgrade_snapshot_v1(upgraded)  # already the current version
 
 
 def test_snapshot_preserves_a_pending_return():

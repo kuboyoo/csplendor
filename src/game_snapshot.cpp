@@ -145,6 +145,8 @@ std::string serialize(const Game &game) {
   payload.u8(static_cast<uint8_t>(board.waiting_noble));
   payload.u8(static_cast<uint8_t>(board.waiting_return));
   payload.i8(board.winner);
+  payload.u8(board.passive_streak);
+  payload.u8(static_cast<uint8_t>(board.end_reason));
 
   for (uint8_t value : board.bank)
     payload.u8(value);
@@ -232,7 +234,11 @@ Game deserialize_version(std::string_view snapshot, uint16_t accepted_version);
 } // namespace
 
 Game deserialize(std::string_view snapshot) {
-  return deserialize_version(snapshot, GAME_SNAPSHOT_FORMAT_VERSION);
+  const size_t at = GAME_SNAPSHOT_MAGIC.size();
+  const bool version_2 = snapshot.size() >= at + 2 &&
+                         static_cast<uint8_t>(snapshot[at]) == 2 &&
+                         static_cast<uint8_t>(snapshot[at + 1]) == 0;
+  return deserialize_version(snapshot, version_2 ? 2 : GAME_SNAPSHOT_FORMAT_VERSION);
 }
 
 std::string upgrade_v1(std::string_view snapshot) {
@@ -301,6 +307,23 @@ Game deserialize_version(std::string_view snapshot, uint16_t accepted_version) {
   if (board.current_player >= Board::NUM_PLAYERS || board.winner < -2 ||
       board.winner > 1)
     throw std::invalid_argument("invalid game status in game snapshot");
+  if (accepted_version >= 3) {
+    board.passive_streak = reader.u8();
+    const uint8_t reason = reader.u8();
+    if (board.passive_streak > Board::PASSIVE_STREAK_DRAW ||
+        reason > static_cast<uint8_t>(Board::EndReason::Repetition))
+      throw std::invalid_argument("invalid repetition state in game snapshot");
+    board.end_reason = static_cast<Board::EndReason>(reason);
+    if ((board.end_reason == Board::EndReason::None) != (board.winner == -1) ||
+        (board.end_reason == Board::EndReason::Repetition &&
+         (board.winner != -2 || board.passive_streak != Board::PASSIVE_STREAK_DRAW)))
+      throw std::invalid_argument("inconsistent game result in game snapshot");
+  } else {
+    // Before the repetition rule: no streak, and a draw by stalemate is
+    // indistinguishable from an ordinary one.
+    board.end_reason =
+        board.winner == -1 ? Board::EndReason::None : Board::EndReason::Normal;
+  }
 
   for (uint8_t &value : board.bank)
     value = reader.u8();

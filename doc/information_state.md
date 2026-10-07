@@ -40,8 +40,8 @@ assert isinstance(index, int)
 envelopeはmagic、format version、rules version、card/noble数、ruleset
 fingerprint、payload長、checksumを持つ。fieldの追加・削除・canonicalization変更時は
 `information_state::FORMAT_VERSION`を更新する。同じlayoutのままrule上の意味を変更する
-場合は`RULES_VERSION`を更新する。現在はformat version 3、rules version 2である
-（山札予約後の返却フェーズを追加した際に更新）。旧versionのbytesとは一致しないため、
+場合は`RULES_VERSION`を更新する。現在はformat version 4、rules version 3である
+（千日手の連続回数 `passive_streak` を追加した際に更新。公開情報で、引き分けを決めるため含める）。旧versionのbytesとは一致しないため、
 永続DBのキーは再生成する。
 
 山札予約でめくれたカードは相手から見て非公開のままで、返却色は公開情報である。
