@@ -5,6 +5,7 @@
 > `/pay:`・`?C<id>` などの実装拡張と接続例は [README](../README.md#usiプロトコル) を参照してください。
 > csplendorの対応人数は2人です。以下の一般的なプロトコル説明の対応人数とは区別してください。
 
+**正式名称:** USI: Universal Splendor Protocol<br>
 **Version:** 1.0 Draft<br>
 **Date:** 2026-02-11<br>
 **Inspired by:** Universal Shogi Interface (USI) / Universal Chess Interface (UCI)
