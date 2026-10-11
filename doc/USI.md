@@ -499,7 +499,7 @@ sequenceDiagram
 | `position startpos` | `position startpos 2` | プレイヤー数を指定 |
 | `position sfen ...` | `position <spn>` | SPN 文字列で盤面指定 |
 | `7g7f` (手の表記) | `take:WUG`, `buy:C42` | アクション記法 |
-| `resign` | （なし） | Splendor にリザインはない |
+| `resign` | GUI の投了（人間）。棋譜は `Result: P<相手>_WIN RESIGN`（KIFU.md §6） | エンジンは投了しない（`bestmove resign` はない） |
 | `%KACHI` (入玉宣言勝ち) | （なし） | 該当なし |
 | `btime/wtime` | `time` | プレイヤー共通の持ち時間 |
 
