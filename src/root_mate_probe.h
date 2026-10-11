@@ -13,9 +13,8 @@
 // time limit.
 
 #include "action_encoder_v4.h"
-#include "card_data.h"
+#include "exact_mate_search.h"
 #include "game.h"
-#include "noble_data.h"
 #include "reveal_verified_solver.h"
 
 #include <algorithm>
@@ -61,7 +60,6 @@ struct RootMateProbeResult {
 namespace root_mate_probe_detail {
 
 using Clock = std::chrono::steady_clock;
-constexpr int WIN_POINTS = 15;
 
 enum class Outcome { Mate, NoMate, Unknown };
 
@@ -69,28 +67,6 @@ inline Outcome outcome_of(const RevealVerifiedSearchResult &result) {
   if (result.proven)
     return Outcome::Mate;
   return result.unknown_reason.empty() ? Outcome::NoMate : Outcome::Unknown;
-}
-
-// A cheap, sound reason why the attacker can never win (empty if none).
-inline std::string permanent_no_mate(const Game &game, int attacker) {
-  const Board &board = game.board;
-  if (game.is_game_over())
-    return game.winner() == attacker ? "" : "terminal_non_attacker_result";
-  int ceiling = board.players[attacker].points;
-  for (const auto &level : board.visible)
-    for (int8_t card : level)
-      if (card >= 0)
-        ceiling += get_card(card).points;
-  for (const auto &deck : board.decks)
-    for (uint8_t card : deck)
-      ceiling += get_card(card).points;
-  // An opponent's reservation never returns to the market.
-  for (int8_t card : board.players[attacker].reserved)
-    if (card >= 0)
-      ceiling += get_card(card).points;
-  for (uint8_t noble : board.nobles)
-    ceiling += get_noble(noble).points;
-  return ceiling >= WIN_POINTS ? "" : "attacker_score_ceiling_below_win_threshold";
 }
 
 class Budget {
@@ -187,7 +163,7 @@ inline SweepResult anytime_sweep(const Game &game, int attacker,
       break;
     }
     // search_reveal_verified_mate_anytime over this single depth.
-    const std::string certificate = permanent_no_mate(game, attacker);
+    const std::string certificate = permanent_no_mate_reason(game, attacker);
     if (!certificate.empty()) {
       sweep.stop_reason = certificate;
       break;
@@ -203,32 +179,6 @@ inline SweepResult anytime_sweep(const Game &game, int attacker,
       sweep.stop_reason = "mate_proven";
       break;
     }
-  }
-  return sweep;
-}
-
-// search_reveal_verified_mate_depths (jobs=1): every attacker move and every
-// concrete reveal; a refuted depth advances, anything else stops.
-inline SweepResult exact_sweep(const Game &game, int attacker, int max_depth,
-                               uint64_t max_memo_states, Budget &budget) {
-  SweepResult sweep;
-  if (!permanent_no_mate(game, attacker).empty())
-    return sweep;
-  for (int depth = 1; depth <= max_depth; ++depth) {
-    if (budget.nodes_exhausted() || budget.time_exhausted())
-      break;
-    RevealVerifiedSolver solver(attacker, depth, budget.nodes_left(), budget.seconds_left(),
-                                {}, false, 100000, 500000, UINT64_MAX, false, 0, true, true);
-    solver.set_max_memo_states(max_memo_states);
-    const RevealVerifiedSearchResult raw = solver.solve(game);
-    budget.spend(raw.stats.nodes);
-    const Outcome outcome = outcome_of(raw);
-    if (outcome == Outcome::Mate) {
-      take_mate(sweep, depth, raw);
-      break;
-    }
-    if (outcome == Outcome::Unknown)
-      break;
   }
   return sweep;
 }
@@ -283,13 +233,21 @@ inline RootMateProbeResult root_mate_probe(const Game &game, const RootMateProbe
   result.nodes = anytime_nodes;
   // The exact sweep has its own node budget (as the Python driver) but only
   // the time left before the shared deadline; none left means no sweep.
-  if (!sweep.mate && endgame && !budget.time_exhausted()) {
-    Budget exact_budget(max_nodes, budget.seconds_left());
-    const SweepResult exact = exact_sweep(game, attacker, config.endgame_exact_depth,
-                                          std::max<uint64_t>(1, max_nodes), exact_budget);
-    result.nodes += exact_budget.used();
-    if (exact.mate) {
-      sweep = exact;
+  if (!sweep.mate && endgame && config.endgame_exact_depth >= 1 && !budget.time_exhausted()) {
+    ExactMateSearchConfig exact_config;
+    exact_config.attacker = attacker;
+    exact_config.min_depth = 1;
+    exact_config.max_depth = config.endgame_exact_depth;
+    exact_config.max_nodes = max_nodes;
+    exact_config.time_limit_seconds = budget.seconds_left();
+    exact_config.max_memo_states = std::max<uint64_t>(1, max_nodes);
+    const ExactMateSearchResult exact = exact_mate_search(game, exact_config);
+    result.nodes += exact.nodes;
+    if (exact.status == "mate") {
+      sweep.mate = true;
+      sweep.depth = exact.mate_depth;
+      sweep.has_root_action = exact.has_winning_root_action;
+      sweep.root_action = exact.winning_root_action;
       result.stop_reason = "exact_endgame_mate";
     }
   }

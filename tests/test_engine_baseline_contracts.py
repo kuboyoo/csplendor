@@ -34,6 +34,8 @@ EXPECTED_PUBLIC_EXPORTS = {
     "V3SearchConfig", "V3SearchSession", "v3_semantic_group_id", "v4_semantic_group_id",
     "MateOrderHints",
     "near_mate_probability_cpp",
+    "near_mate_search", "NearMateSearchConfig", "NearMateSearchResult",
+    "exact_mate_search", "ExactMateSearchConfig", "ExactMateSearchResult",
     "NEAR_MATE_FORMAT",
     "search_near_mate",
     "root_mate_probe", "RootMateProbeConfig", "RootMateProbeResult",

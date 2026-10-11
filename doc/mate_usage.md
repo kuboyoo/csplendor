@@ -148,6 +148,26 @@ if result.proven:
 dlsplendor の `RootMateSearch.probe` と、状態・深さ・手・停止理由・ノード数が一致します。
 時間で打ち切る条件では、5 の時間を共有の締め切りの残りにしている分だけ結果が異なり得ます。
 
+### 厳密な詰みの深さ探索（`exact_mate_search`、2026-10-11 追加）
+
+`search_reveal_verified_mate_depths(jobs=1)` の深さ探索を、C++ の `exact_mate_search`
+（`src/exact_mate_search.h`）としても公開しています。WASM から呼ぶためのもので、シングルスレッドで
+Python に依存しません。`root_mate_probe` の終盤の厳密探索もこの関数です。
+
+- 深さ `min_depth`〜`max_depth` を浅い順に、攻め方の全手と具体的なめくれで調べる。ノード数と時間は
+  全深さの累計で、各深さは残りを使う。
+- 詰みなら停止し、その深さの主手順 `line`（`action_code`、`reveal_card`、`action_count`）を返す。
+  反証できた深さは `verified_no_mate_through_depth` を進めて次の深さへ。予算切れ・未決着なら停止する。
+- 最初に、攻め方が二度と勝てないことの安価な証明（終局済みで攻め方の負け、または得点上限が15未満）を
+  確かめ、あれば `status = "permanent_no_mate"`（`stop_reason` は証明の種類）で終える。
+- 結果の `status` は `mate` / `no_mate_within_max_depth` / `unknown` / `permanent_no_mate`、
+  `stop_reason` は `mate_proven` / `max_depth_reached` / `cumulative node limit exceeded` /
+  `cumulative time limit exceeded` / ソルバーの未決着理由 / 証明の種類で、Python 版と同じ文字列。
+  `mate_depth`・`verified_no_mate_through_depth`（無ければ -1）、`winning_root_action`（pack 値）と
+  `winning_root_action_id`（V4。無ければ -1）、`nodes`、`elapsed_ms` も返す。
+- 設定 `ExactMateSearchConfig` は `attacker`、`min_depth`、`max_depth`、`max_nodes`、`time_limit_seconds`、
+  `max_memo_states` を持つ。証明DAG・`required_root_action`・順序表・並列化は扱わない（Python 版を使う）。
+
 ### 外部評価による手の順序表と探り（2026-10-02 追加）
 
 `MateOrderHints` は「局面ハッシュ → 手番側の手（pack code、良い順）」の表です。局面の
@@ -225,6 +245,17 @@ near = cs.search_near_mate(game, attacker=1, min_depth=1, max_depth=3,
 # near["lower"] = 0.9, near["upper"] = 1.0, near["lower_depth"] = 2,
 # near["losing_reveals"] = [{"card": 5, "weight": 1, "value": 0.0}, ...]
 ```
+
+挟み込みの本体は C++ の `near_mate_search`（`src/near_mate_probe.h`、2026-10-11）で、Python の
+`search_near_mate` はその薄いラッパーです（返す辞書の形式 `NEAR_MATE_FORMAT` は同じ）。シングルスレッドで
+Python に依存しないので、WASM（embind）からも同じ結果で呼べます。C++ の設定 `NearMateSearchConfig` は
+`attacker`、`min_depth`、`max_depth`、`thresholds`（既定 1.0/0.9/0.75/0.5。高い順に並べ替え、重複は除く）、
+`max_nodes`、`time_limit_seconds`（全問い合わせの累計）、`no_take_probe`、`line_transplant`、`max_memo_states`
+を持ちます。結果 `NearMateSearchResult` は `lower`/`upper`、`lower_depth`/`upper_depth`（無ければ -1）、
+深さごとの区間 `bounds`（`depth`、`lower`、`upper`、`decided`）、`best_action`（pack 値）と `best_action_id`
+（V4 の行動ID。無ければ -1）、最善手のめくれ `best_action_reveals`（Python の `losing_reveals` は値が 1 未満の
+ものだけ）、`root_actions`、`undecided`、`stop_reason`、`attempts`（`depth`、`threshold`、`verdict`、`nodes`、
+`elapsed_ms`、`unknown_reason`）、`nodes`、`elapsed_ms` です。手順・停止理由の文字列は Python 版と同じです。
 
 費用: 閾値 1.0 は詰み探索と同じ（3 手詰めの局面で約 3 秒）。閾値を下げるほど打ち切りが弱くなり、
 深さ 2 では数秒、深さ 3 では値が 1 に近い場合以外は 30 秒以内に決まらないことが多い（2026-10-01 の対局の

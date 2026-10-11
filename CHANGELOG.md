@@ -1,5 +1,19 @@
 # 変更履歴 / Changelog
 
+## 未出荷：準詰みと厳密な詰みの深さ探索の C++ 化（2026-10-11）
+
+- 準詰みの挟み込み（しきい値の問い合わせで深さごとに確率を挟む）を C++ の `near_mate_search`
+  （`src/near_mate_probe.h`）にした。Python の `search_near_mate` はその薄いラッパーで、返す辞書の形式
+  （`NEAR_MATE_FORMAT`）は変わらない。結果に最善手の V4 行動ID `best_action_id` を加えた。
+- `search_reveal_verified_mate_depths(jobs=1)` の深さ探索を C++ の `exact_mate_search`
+  （`src/exact_mate_search.h`）として公開した。`root_mate_probe` の終盤の厳密探索もこれを使う。
+- どちらもシングルスレッドで Python に依存せず、WASM では `reveal_verified_solver.cpp` と
+  `reveal_solver_components.cpp` だけでビルドできる。ノード上限の条件で旧実装と全項目一致をテストで確認した。
+
+English: The near-mate bracketing (`near_mate_search`) and the jobs=1 exact
+mate depth sweep (`exact_mate_search`) are now single-threaded C++ shared by
+Python and WASM; `search_near_mate` keeps its dict format.
+
 ## 未出荷：千日手（2026-10-07）
 
 - 両者が実質パス（`PASS`、または取ったのと同じ宝石を返す手 `Action.is_token_noop()`）を3回ずつ、

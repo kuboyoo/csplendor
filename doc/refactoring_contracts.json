@@ -55,6 +55,12 @@
       "V3SearchSession",
       "MateOrderHints",
       "near_mate_probability_cpp",
+      "near_mate_search",
+      "exact_mate_search",
+      "ExactMateSearchConfig",
+      "ExactMateSearchResult",
+      "NearMateSearchConfig",
+      "NearMateSearchResult",
       "NEAR_MATE_FORMAT",
       "search_near_mate",
       "root_mate_probe",
@@ -94,7 +100,9 @@
       "mcts_parallel_searcher.h",
       "mcts_root_parallel.h",
       "reveal_verified_solver.h",
-      "root_mate_probe.h"
+      "root_mate_probe.h",
+      "near_mate_probe.h",
+      "exact_mate_search.h"
     ],
     "internal": [
       "action_encoder_common.h",
