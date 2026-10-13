@@ -45,6 +45,9 @@
   1 プロセスで多数の対局を探索する場合に有効です。複数プロセスで並列実行している場合は、プロセス数と合わせて
   CPU コア数を超えないようにしてください。
 
+- **Gumbel root 探索（任意、2026-10-13 追加）**: `gumbel=true` で root を Gumbel top-k + 逐次半減、非 root を改善方策による
+  決定的選択にし、方策教師に改善方策 `root_improved_policy()` を返します（[gumbel_root_search.md](gumbel_root_search.md)）。
+
 含まれないもの: 詰み探索、rollout、手をまたぐ木の再利用、シミュレーション途中の相手手番での
 再決定化、反復回避。これらは呼び出し側（dlsplendor）で必要に応じて重ねます。
 

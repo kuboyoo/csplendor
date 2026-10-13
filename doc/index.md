@@ -24,6 +24,7 @@
 | [ソルバー仕様](SOLVER.md) | 深さ・証明・Unknown・予算の契約 |
 | [並列MCTS](parallel_mcts_usage.md) | サンプルと実験的APIの制約 |
 | [V3多対局探索](mcts_v3.md) | V4の3,121行動上のPUCT。多対局の葉バッチ、決定化、サンプル型chance、対局単位のマルチスレッド |
+| [Gumbel root 探索](gumbel_root_search.md) | `V3SearchConfig.gumbel`: root を Gumbel top-k + 逐次半減、非 root を改善方策で選ぶ。方策教師は改善方策 |
 | [並列探索の実装状況](parallel_search_plan/implementation_status.md) | 対応済み機能・残る検証 |
 | [速度ベンチマーク](performance_benchmarks.md) | 測定値、条件、対象commit、再現手順 |
 
