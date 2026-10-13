@@ -72,6 +72,10 @@ void bind_mcts_v3(py::module_ &m) {
       .def_readwrite("chance_risk_weight", &Config::chance_risk_weight)
       .def_readwrite("chance_control_variate", &Config::chance_control_variate)
       .def_readwrite("num_threads", &Config::num_threads)
+      .def_readwrite("gumbel", &Config::gumbel)
+      .def_readwrite("gumbel_m", &Config::gumbel_m)
+      .def_readwrite("gumbel_c_visit", &Config::gumbel_c_visit)
+      .def_readwrite("gumbel_c_scale", &Config::gumbel_c_scale)
       .def_property_readonly("state_dim", &Config::state_dim);
 
   py::class_<Session>(
@@ -231,6 +235,23 @@ void bind_mcts_v3(py::module_ &m) {
             return session.game(slot).root_value();
           },
           py::arg("slot"))
+      .def(
+          "root_improved_policy",
+          [](const Session &session, int slot) {
+            py::dict result;
+            for (const auto &[action, probability] :
+                 session.game(slot).root_improved_policy())
+              result[py::int_(action)] = probability;
+            return result;
+          },
+          py::arg("slot"),
+          "Gumbel improved policy π'(a) ∝ prior·exp(σ(q̂)) over the root actions")
+      .def(
+          "root_gumbel_action",
+          [](const Session &session, int slot) {
+            return session.game(slot).root_gumbel_action();
+          },
+          py::arg("slot"), "The action chosen by sequential halving (-1 if none)")
       .def(
           "simulations",
           [](const Session &session, int slot) {

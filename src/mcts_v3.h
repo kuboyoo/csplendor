@@ -102,6 +102,15 @@ struct Config {
   // each game's leaves are produced by one thread and concatenated in slot
   // order: rows, RNG streams and trees are identical for every thread count.
   int num_threads = 1;
+  // Gumbel AlphaZero (doc/gumbel_root_search.md): the root keeps the top
+  // `gumbel_m` actions by log prior + Gumbel noise and spends its budget by
+  // sequential halving; other decision nodes pick deterministically by the
+  // improved policy π'(a) ∝ prior·exp(σ(q̂)) minus the visit share. Root
+  // Dirichlet noise is not used. σ(q) = (gumbel_c_visit + max N)·gumbel_c_scale·q.
+  bool gumbel = false;
+  int gumbel_m = 16;
+  float gumbel_c_visit = 50.0f;
+  float gumbel_c_scale = 1.0f;
 
   int state_dim() const {
     return TOTAL_FEATURES +
@@ -406,11 +415,23 @@ public:
           break;
         }
         size_t choice = legal_.size();
-        if (current == root_index_ && !floors_.empty())
-          choice = select_floor(node, legal_);
-        if (choice == legal_.size())
-          choice = config_.semantic_groups ? select_grouped(node, legal_)
-                                           : select_flat(node, legal_);
+        if (config_.gumbel) {
+          if (current == root_index_) {
+            choice = select_gumbel_root(node, legal_);
+            if (choice == legal_.size()) {
+              ++stats.collisions;
+              return; // every candidate of this halving phase awaits evaluation
+            }
+          } else {
+            choice = select_gumbel(node, legal_);
+          }
+        } else {
+          if (current == root_index_ && !floors_.empty())
+            choice = select_floor(node, legal_);
+          if (choice == legal_.size())
+            choice = config_.semantic_groups ? select_grouped(node, legal_)
+                                             : select_flat(node, legal_);
+        }
         const int32_t chosen_id = legal_[choice].id;
         const Action chosen_action = legal_[choice].action;
         // Edge positions stay valid until this node's edge list is modified;
@@ -529,7 +550,7 @@ public:
     }
     if (!node.expanded) {
       install_priors(node, legal_ids, count, priors);
-      if (leaf.node == root_index_ && root_noise_ && !root_noised_)
+      if (leaf.node == root_index_ && root_noise_ && !root_noised_ && !config_.gumbel)
         add_root_noise(node);
       node.expanded = true;
     }
@@ -622,6 +643,7 @@ public:
     rng_.seed(seed);
     root_noise_ = root_noise;
     root_noised_ = false;
+    gumbel_ready_ = false; // candidates and Gumbel noise are drawn afresh at the new root
     reused_visits_ = static_cast<int>(candidate.visits);
     floors_.clear();
     budget_ = num_simulations > 0 ? num_simulations : config_.num_simulations;
@@ -630,7 +652,7 @@ public:
     rollout_candidates_.clear();
     rollout_worlds_.clear();
     ++generation_;
-    if (root_noise_)
+    if (root_noise_ && !config_.gumbel)
       add_root_noise(candidate);
     return true;
   }
@@ -679,10 +701,56 @@ public:
     return result;
   }
 
+  // π'(a) ∝ clean_prior(a)·exp(σ(q̂(a))) over every root action (the Policy target).
+  std::vector<std::pair<int32_t, float>> root_improved_policy() const {
+    std::vector<std::pair<int32_t, float>> result;
+    const Node &r = root();
+    if (r.edges.empty())
+      return result;
+    const double sigma = gumbel_sigma(r);
+    std::vector<double> logits;
+    double max_logit = -1e300;
+    for (const Edge &edge : r.edges) {
+      const double logit = log_prior(edge.clean_prior) + sigma * gumbel_completed_q(r, &edge);
+      logits.push_back(logit);
+      max_logit = std::max(max_logit, logit);
+    }
+    double normaliser = 0.0;
+    for (double &logit : logits) {
+      logit = std::exp(logit - max_logit);
+      normaliser += logit;
+    }
+    for (size_t index = 0; index < r.edges.size(); ++index)
+      result.emplace_back(r.edges[index].key,
+                          static_cast<float>(logits[index] / normaliser));
+    return result;
+  }
+
+  // The action sequential halving settled on: the best surviving candidate by
+  // Gumbel + log prior + σ(q̂); -1 before the root was searched.
+  int32_t root_gumbel_action() const {
+    if (!gumbel_ready_ || gumbel_candidates_.empty())
+      return -1;
+    const Node &r = root();
+    const double sigma = gumbel_sigma(r);
+    int32_t best = -1;
+    double best_score = -1e300;
+    for (int32_t key : gumbel_candidates_) {
+      const double score = gumbel_root_score(r, key, sigma);
+      if (best < 0 || score > best_score || (score == best_score && key < best)) {
+        best = key;
+        best_score = score;
+      }
+    }
+    return best;
+  }
+
   // Compulsory root comparisons: each action receives at least `visits`
   // additional root visits (on top of visits it already has) before ordinary
   // PUCT resumes. Mirrors MCTS._prepare_root_visit_floor.
   void set_root_visit_floor(const std::vector<std::pair<int32_t, int>> &requested) {
+    if (config_.gumbel && !requested.empty())
+      throw std::invalid_argument("root visit floors cannot be combined with gumbel");
     floors_.clear();
     int total = 0;
     for (const auto &[action_id, visits] : requested) {
@@ -906,6 +974,193 @@ private:
     q = q_from_parent(node, child);
     if (child.virtual_visits)
       q -= config_.virtual_loss * child.virtual_visits / std::max(1, allocated);
+  }
+
+  // --- Gumbel AlphaZero (doc/gumbel_root_search.md) ---------------------
+
+  // σ(q) scale of a node: (c_visit + max child visits)·c_scale.
+  double gumbel_sigma(const Node &node) const {
+    uint32_t max_visits = 0;
+    for (const Edge &edge : node.edges)
+      if (edge.child >= 0)
+        max_visits = std::max(max_visits, nodes_[edge.child].visits);
+    return (static_cast<double>(config_.gumbel_c_visit) + max_visits) *
+           static_cast<double>(config_.gumbel_c_scale);
+  }
+
+  // Completed Q of an edge from `node`'s view: the child's Q once visited,
+  // else the node's own value (the mixed value estimate).
+  double gumbel_completed_q(const Node &node, const Edge *edge) const {
+    if (edge != nullptr && edge->child >= 0 && nodes_[edge->child].visits)
+      return q_from_parent(node, nodes_[edge->child]);
+    return node.q();
+  }
+
+  double gumbel_noise_of(int32_t key) const {
+    auto it = std::lower_bound(
+        gumbel_noise_.begin(), gumbel_noise_.end(), key,
+        [](const std::pair<int32_t, double> &entry, int32_t value) {
+          return entry.first < value;
+        });
+    return (it != gumbel_noise_.end() && it->first == key) ? it->second : 0.0;
+  }
+
+  static double log_prior(float prior) {
+    return std::log(std::max(static_cast<double>(prior), 1e-12));
+  }
+
+  // Draw one Gumbel per root edge, keep the top-m by log prior + Gumbel and
+  // lay out the sequential-halving schedule over the child simulations.
+  void init_gumbel_root(const Node &root) {
+    gumbel_noise_.clear();
+    std::uniform_real_distribution<double> uniform(1e-12, 1.0);
+    std::vector<std::pair<double, int32_t>> scored;
+    for (const Edge &edge : root.edges) {
+      const double gumbel = -std::log(-std::log(uniform(rng_)));
+      gumbel_noise_.emplace_back(edge.key, gumbel);
+      scored.emplace_back(log_prior(edge.prior) + gumbel, edge.key);
+    }
+    std::sort(scored.begin(), scored.end(),
+              [](const auto &a, const auto &b) {
+                return a.first != b.first ? a.first > b.first : a.second < b.second;
+              });
+    const size_t m = std::min<size_t>(std::max(1, config_.gumbel_m), scored.size());
+    gumbel_candidates_.clear();
+    for (size_t index = 0; index < m; ++index)
+      gumbel_candidates_.push_back(scored[index].second);
+    gumbel_phases_ = 1;
+    while ((size_t{1} << gumbel_phases_) < m)
+      ++gumbel_phases_;
+    gumbel_phase_ = 0;
+    gumbel_quota_ = gumbel_phase_increment();
+    gumbel_ready_ = true;
+  }
+
+  // Simulations each surviving candidate receives in the current phase.
+  int gumbel_phase_increment() const {
+    const int child_budget = std::max(1, budget_ - 1);
+    const int remaining = std::max<int>(1, static_cast<int>(gumbel_candidates_.size()));
+    return std::max(1, child_budget / (gumbel_phases_ * remaining));
+  }
+
+  double gumbel_root_score(const Node &root, int32_t key, double sigma) const {
+    const Edge *edge = root.find(key);
+    const float prior = edge ? edge->prior : config_.unseen_action_prior;
+    return gumbel_noise_of(key) + log_prior(prior) +
+           sigma * gumbel_completed_q(root, edge);
+  }
+
+  // Keep the better half (by Gumbel + log prior + σ(q̂)) of the candidates.
+  void gumbel_halve(const Node &root) {
+    const double sigma = gumbel_sigma(root);
+    std::vector<std::pair<double, int32_t>> scored;
+    for (int32_t key : gumbel_candidates_)
+      scored.emplace_back(gumbel_root_score(root, key, sigma), key);
+    std::sort(scored.begin(), scored.end(),
+              [](const auto &a, const auto &b) {
+                return a.first != b.first ? a.first > b.first : a.second < b.second;
+              });
+    const size_t keep = (scored.size() + 1) / 2;
+    gumbel_candidates_.clear();
+    for (size_t index = 0; index < keep; ++index)
+      gumbel_candidates_.push_back(scored[index].second);
+  }
+
+  // Root selection under sequential halving. Returns legal.size() when every
+  // candidate of the phase has its simulations allocated but some are still
+  // pending: the caller then ends this game's collection for the round.
+  size_t select_gumbel_root(const Node &root, const std::vector<LegalAction> &legal) {
+    if (!gumbel_ready_)
+      init_gumbel_root(root);
+    while (true) {
+      int32_t pick = -1;
+      int pick_allocated = 0;
+      bool all_completed = true;
+      for (int32_t key : gumbel_candidates_) {
+        const Edge *edge = root.find(key);
+        int visits = 0, allocated = 0;
+        if (edge != nullptr && edge->child >= 0) {
+          const Node &child = nodes_[edge->child];
+          visits = static_cast<int>(child.visits);
+          allocated = visits + child.virtual_visits;
+        }
+        if (visits < gumbel_quota_)
+          all_completed = false;
+        if (allocated < gumbel_quota_ && (pick < 0 || allocated < pick_allocated)) {
+          pick = key;
+          pick_allocated = allocated;
+        }
+      }
+      if (pick >= 0) {
+        for (size_t index = 0; index < legal.size(); ++index)
+          if (legal[index].id == pick)
+            return index;
+        // Not legal in this world (should not happen at the root): drop it.
+        gumbel_candidates_.erase(
+            std::remove(gumbel_candidates_.begin(), gumbel_candidates_.end(), pick),
+            gumbel_candidates_.end());
+        if (gumbel_candidates_.empty())
+          return select_flat(root, legal);
+        continue;
+      }
+      if (!all_completed)
+        return legal.size();
+      if (gumbel_candidates_.size() > 1 && gumbel_phase_ + 1 < gumbel_phases_) {
+        gumbel_halve(root);
+        ++gumbel_phase_;
+        gumbel_quota_ += gumbel_phase_increment();
+      } else {
+        // Final phase: leftover budget keeps comparing the survivors.
+        ++gumbel_quota_;
+      }
+    }
+  }
+
+  // Non-root selection: argmax_a π'(a) − N(a)/(1 + ΣN) with N counting
+  // allocated (visited + pending) simulations so one batch spreads out.
+  size_t select_gumbel(const Node &node, const std::vector<LegalAction> &legal) {
+    edge_cache_.clear();
+    size_t cursor = 0;
+    for (const LegalAction &entry : legal)
+      edge_cache_.push_back(node.find_from(entry.id, cursor));
+    const double sigma = gumbel_sigma(node);
+    std::vector<double> &logits = gumbel_logits_;
+    logits.clear();
+    double max_logit = -1e300;
+    int total_allocated = 0;
+    for (size_t index = 0; index < legal.size(); ++index) {
+      const Edge *edge = edge_cache_[index];
+      const float prior = edge ? edge->prior : config_.unseen_action_prior;
+      const double logit = log_prior(prior) + sigma * gumbel_completed_q(node, edge);
+      logits.push_back(logit);
+      max_logit = std::max(max_logit, logit);
+      if (edge != nullptr && edge->child >= 0) {
+        const Node &child = nodes_[edge->child];
+        total_allocated += static_cast<int>(child.visits) + child.virtual_visits;
+      }
+    }
+    double normaliser = 0.0;
+    for (double &logit : logits) {
+      logit = std::exp(logit - max_logit);
+      normaliser += logit;
+    }
+    size_t best = 0;
+    double best_score = -1e300;
+    for (size_t index = 0; index < legal.size(); ++index) {
+      const Edge *edge = edge_cache_[index];
+      int allocated = 0;
+      if (edge != nullptr && edge->child >= 0) {
+        const Node &child = nodes_[edge->child];
+        allocated = static_cast<int>(child.visits) + child.virtual_visits;
+      }
+      const double score = logits[index] / normaliser -
+                           static_cast<double>(allocated) / (1.0 + total_allocated);
+      if (score > best_score) {
+        best_score = score;
+        best = index;
+      }
+    }
+    return best;
   }
 
   size_t select_flat(const Node &node, const std::vector<LegalAction> &legal) {
@@ -1444,6 +1699,15 @@ private:
   std::mt19937_64 rng_;
   bool root_noise_;
   bool root_noised_ = false;
+  // Gumbel root state (config_.gumbel): per-edge Gumbel noise keyed by action
+  // id, the surviving candidates of the current halving phase, the number of
+  // phases, the phase index and the cumulative visit quota of each candidate.
+  bool gumbel_ready_ = false;
+  std::vector<std::pair<int32_t, double>> gumbel_noise_;
+  std::vector<int32_t> gumbel_candidates_;
+  int gumbel_phases_ = 1;
+  int gumbel_phase_ = 0;
+  int gumbel_quota_ = 0;
   int budget_;
   int completed_ = 0;
   int reused_visits_ = 0;
@@ -1458,6 +1722,7 @@ private:
   std::vector<std::pair<int32_t, float>> corrections_;
   std::vector<std::pair<int32_t, ChancePending>> chance_pending_;
   std::vector<const Edge *> edge_cache_;
+  std::vector<double> gumbel_logits_; // select_gumbel scratch
   std::vector<int32_t> path_; // descent path scratch, reused per simulation
   std::vector<size_t> group_of_;
   struct GroupStat {
@@ -1479,6 +1744,13 @@ public:
       throw std::invalid_argument("max_depth must be positive");
     if (config.num_threads < 1)
       throw std::invalid_argument("num_threads must be positive");
+    if (config.gumbel) {
+      if (config.gumbel_m < 1)
+        throw std::invalid_argument("gumbel_m must be positive");
+      if (config.semantic_groups || config.rollout_samples > 0)
+        throw std::invalid_argument(
+            "gumbel cannot be combined with semantic_groups or rollouts");
+    }
   }
 
   const Config &config() const { return config_; }
