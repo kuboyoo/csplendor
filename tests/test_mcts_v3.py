@@ -394,3 +394,106 @@ def test_session_rejects_non_positive_thread_count():
     config.num_threads = 0
     with pytest.raises(ValueError):
         cs.V3SearchSession(config)
+
+
+def gumbel_config(simulations=65, m=4, batch=1):
+    config = cs.V3SearchConfig()
+    config.gumbel = True
+    config.gumbel_m = m
+    config.num_simulations = simulations
+    config.leaf_batch_size = batch
+    return config
+
+
+def test_gumbel_root_follows_sequential_halving_and_is_deterministic():
+    # n = 64 child simulations, m = 4 candidates, 2 phases: 64/(2·4) = 8 each, then 64/(2·2) = 16 more for the two survivors.
+    results = []
+    for batch in (1, 4):
+        config = gumbel_config(simulations=65, m=4, batch=batch)
+        session = cs.V3SearchSession(config)
+        game = cs.Game(seed=7)
+        session.add_game(game, game.current_player, seed=3)
+        drive(session)
+        visits = session.root_visits(0)
+        mask = cs.ActionEncoderV4.get_action_mask(game)
+        assert all(mask[action] for action in visits)
+        assert sorted(visits.values()) == [8, 8, 24, 24]
+        chosen = session.root_gumbel_action(0)
+        assert visits[chosen] == 24
+        results.append((visits, chosen))
+    # The determinization stream differs per batch size (as for PUCT), so only the schedule is compared across batches.
+    again = cs.V3SearchSession(gumbel_config(simulations=65, m=4, batch=1))
+    again.add_game(cs.Game(seed=7), 0, seed=3)
+    drive(again)
+    assert again.root_visits(0) == results[0][0] and again.root_gumbel_action(0) == results[0][1]
+
+
+def test_gumbel_with_more_candidates_than_actions_visits_every_action():
+    game = cs.Game(seed=7)
+    legal = int(cs.ActionEncoderV4.get_action_mask(game).sum())
+    session = cs.V3SearchSession(gumbel_config(simulations=8 * legal + 1, m=64, batch=8))
+    session.add_game(game, game.current_player, seed=5)
+    drive(session)
+    visits = session.root_visits(0)
+    assert len(visits) == legal and min(visits.values()) >= 1
+    assert sum(visits.values()) == 8 * legal
+
+
+def test_gumbel_improved_policy_matches_the_completed_q_formula():
+    config = gumbel_config(simulations=65, m=4, batch=4)
+    config.gumbel_c_visit = 50.0
+    config.gumbel_c_scale = 0.05  # keeps σ·q̂ within float32 range for every action
+    session = cs.V3SearchSession(config)
+    game = cs.Game(seed=9)
+    session.add_game(game, game.current_player, seed=11)
+
+    def biased_apply(session, features, ids, offsets, slots):
+        # Each leaf's value is a deterministic function of its features, so root actions get different Q.
+        priors = np.zeros(len(ids), dtype=np.float32)
+        values = np.zeros(len(slots), dtype=np.float32)
+        for row in range(len(slots)):
+            priors[offsets[row] : offsets[row + 1]] = 1.0 / (offsets[row + 1] - offsets[row])
+            values[row] = np.tanh(float(features[row].sum()) / 50.0)
+        session.apply(ids, offsets, priors, values)
+
+    while not session.all_done():
+        features, ids, offsets, slots = session.collect()
+        if len(slots) == 0:
+            break
+        biased_apply(session, features, ids, offsets, slots)
+    policy = session.root_improved_policy(0)
+    priors = session.root_clean_priors(0)
+    visits = session.root_visits(0)
+    q = session.root_action_values(0)
+    assert set(policy) == set(priors) and abs(sum(policy.values()) - 1.0) < 1e-5
+    sigma = (50.0 + max(visits.values())) * 0.05
+    root_value = session.root_value(0)
+    offsets_ = [np.log(policy[a] / priors[a]) - sigma * (q[a] if a in q else root_value) for a in priors if policy[a] > 0]
+    assert len(offsets_) == len(priors)
+    assert max(offsets_) - min(offsets_) < 1e-3  # log π'(a) − log prior(a) − σ·q̂(a) is the same constant for every action
+    assert len(set(round(v, 4) for v in q.values())) > 1  # the biased evaluator really produced different Q
+    assert session.root_gumbel_action(0) in visits
+
+
+def test_gumbel_zero_scale_reduces_the_improved_policy_to_the_priors():
+    config = gumbel_config(simulations=33, m=4, batch=4)
+    config.gumbel_c_scale = 0.0
+    session = cs.V3SearchSession(config)
+    game = cs.Game(seed=9)
+    session.add_game(game, game.current_player, seed=11)
+    drive(session, value=0.3)
+    policy = session.root_improved_policy(0)
+    priors = session.root_clean_priors(0)
+    assert all(abs(policy[a] - priors[a]) < 1e-5 for a in priors)
+
+
+def test_gumbel_rejects_incompatible_settings():
+    for attr, value in (("semantic_groups", True), ("rollout_samples", 2)):
+        config = gumbel_config()
+        setattr(config, attr, value)
+        with pytest.raises(ValueError):
+            cs.V3SearchSession(config)
+    session = cs.V3SearchSession(gumbel_config())
+    session.add_game(cs.Game(seed=7), 0, seed=3)
+    with pytest.raises(ValueError):
+        session.set_root_visit_floor(0, [0], [1])

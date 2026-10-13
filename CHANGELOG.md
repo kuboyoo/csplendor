@@ -40,6 +40,13 @@ information states format 5 / rules 4.
 English: The near-mate bracketing (`near_mate_search`) and the jobs=1 exact
 mate depth sweep (`exact_mate_search`) are now single-threaded C++ shared by
 Python and WASM; `search_near_mate` keeps its dict format.
+## 未出荷：Gumbel AlphaZero の root 探索（2026-10-13）
+
+- `V3SearchConfig.gumbel`（既定 false）で、root を Gumbel top-k（`gumbel_m`）＋逐次半減、非 root を改善方策
+  π'(a) ∝ prior·exp(σ(q̂)) による決定的選択にした（`doc/gumbel_root_search.md`）。σ = (`gumbel_c_visit` + max N)·`gumbel_c_scale`。
+- `V3SearchSession.root_improved_policy(slot)`（方策教師）と `root_gumbel_action(slot)`（逐次半減が選んだ手）を追加。
+  root の Dirichlet ノイズは Gumbel 時には使わない。`semantic_groups`・rollout・visit floor との併用は例外。
+- 既定（gumbel=false）の探索は変更なし。
 
 ## 未出荷：千日手（2026-10-07）
 
