@@ -19,7 +19,7 @@ def assert_same_position(first, second):
     assert second.board.nobles == first.board.nobles
     assert second.board.final_round == first.board.final_round
     assert second.board.waiting_noble == first.board.waiting_noble
-    assert second.board.passive_streak == first.board.passive_streak
+    assert second.board.repetition_keys == first.board.repetition_keys
     assert second.board.end_reason == first.board.end_reason
     for player_id in (0, 1):
         expected = first.board.get_player(player_id)
@@ -87,12 +87,13 @@ def test_game_snapshot_preserves_hidden_reservation_and_future_deck_order():
 
 def test_game_snapshot_rejects_corruption_and_has_a_versioned_golden_encoding():
     snapshot = csplendor.Game(seed=42).serialize_snapshot()
-    assert csplendor.Game.snapshot_format_version() == 3
-    assert csplendor.Game.snapshot_rules_version() == 3
-    # Version 3 adds the passive streak and the end reason after winner.
-    assert len(snapshot) == 193
+    assert csplendor.Game.snapshot_format_version() == 4
+    assert csplendor.Game.snapshot_rules_version() == 4
+    # Version 4 has the end reason and the repetition window (u16 count and
+    # u64 keys) after winner.
+    assert len(snapshot) == 194
     assert hashlib.sha256(snapshot).hexdigest() == (
-        "a8f9ff90594710b01833ea5927087172b02f9d07daf4f70272b2989bf4edf8f6"
+        "ee1c7c6366e3747faae5d87a6ff62ee7d6ce14bce245168242e9bbb4083e9b06"
     )
 
     for broken in (
@@ -103,7 +104,7 @@ def test_game_snapshot_rejects_corruption_and_has_a_versioned_golden_encoding():
         with pytest.raises(ValueError):
             csplendor.Game.deserialize_snapshot(broken)
 
-    incompatible_rules = snapshot[:10] + b"\x04\x00" + snapshot[12:]
+    incompatible_rules = snapshot[:10] + b"\x05\x00" + snapshot[12:]
     with pytest.raises(ValueError, match="rules version"):
         csplendor.Game.deserialize_snapshot(incompatible_rules)
 

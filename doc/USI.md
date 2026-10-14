@@ -5,6 +5,7 @@
 > `/pay:`・`?C<id>` などの実装拡張と接続例は [README](../README.md#usiプロトコル) を参照してください。
 > csplendorの対応人数は2人です。以下の一般的なプロトコル説明の対応人数とは区別してください。
 
+**正式名称:** USI: Universal Splendor Protocol<br>
 **Version:** 1.0 Draft<br>
 **Date:** 2026-02-11<br>
 **Inspired by:** Universal Shogi Interface (USI) / Universal Chess Interface (UCI)
@@ -499,7 +500,7 @@ sequenceDiagram
 | `position startpos` | `position startpos 2` | プレイヤー数を指定 |
 | `position sfen ...` | `position <spn>` | SPN 文字列で盤面指定 |
 | `7g7f` (手の表記) | `take:WUG`, `buy:C42` | アクション記法 |
-| `resign` | （なし） | Splendor にリザインはない |
+| `resign` | GUI の投了（人間）。棋譜は `Result: P<相手>_WIN RESIGN`（KIFU.md §6） | エンジンは投了しない（`bestmove resign` はない） |
 | `%KACHI` (入玉宣言勝ち) | （なし） | 該当なし |
 | `btime/wtime` | `time` | プレイヤー共通の持ち時間 |
 

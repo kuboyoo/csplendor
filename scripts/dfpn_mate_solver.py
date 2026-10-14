@@ -935,7 +935,7 @@ class DFPNMateSolver:
             bool(board.final_round),
             bool(board.waiting_noble),
             bool(board.waiting_return),
-            int(board.passive_streak),
+            tuple(sorted(int(key) for key in board.repetition_keys)),
             int(board.winner),
             tuple(int(v) for v in board.bank),
             tuple(

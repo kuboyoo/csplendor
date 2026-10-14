@@ -303,23 +303,32 @@ inline void finish_standard_action(Board &board, Mutator &mutation) {
   end_turn(board, mutation);
 }
 
-// Bookkeeping after a decision has been applied: advance or reset the
-// passive streak, then name the end of a finished game. `passive` is true for
-// a PASS or a token take returning exactly the taken tokens that gained no
-// noble. A passive take that leaves a noble choice pending counts now; the
-// following VISIT_NOBLE (progress) resets it. Six passive turns in a row
-// draw the game unless it already ended.
+// Bookkeeping after a decision has been applied: extend or restart the
+// repetition window, then name the end of a finished game. `reversible` is
+// true for a decision that only moved tokens (a take, a return or a PASS that
+// gained no noble and did not start the final round); every other decision,
+// and a token decision that changed a player's token total, restarts the
+// window at the new position (no earlier position can occur again, see
+// Board::repetition_key_totals). `previous_key` is the
+// repetition_position_key() of the position the decision was made in. The
+// REPETITION_DRAW_COUNT-th occurrence of a position draws the game unless it
+// already ended.
 template <typename Mutator>
-inline void record_decision_outcome(Board &board, Mutator &mutation, bool passive) {
-  const uint8_t streak =
-      passive ? static_cast<uint8_t>(std::min<int>(board.passive_streak + 1,
-                                                   Board::PASSIVE_STREAK_DRAW))
-              : 0;
-  mutation.set_passive_streak(streak);
-  if (!board.is_game_over() && !board.waiting_noble && !board.waiting_return &&
-      streak >= Board::PASSIVE_STREAK_DRAW) {
-    mutation.set_winner(-2);
-    mutation.set_end_reason(Board::EndReason::Repetition);
+inline void record_decision_outcome(Board &board, Mutator &mutation,
+                                    bool reversible, uint64_t previous_key) {
+  if (!reversible ||
+      Board::repetition_key_totals(previous_key) !=
+          Board::repetition_key_totals(board.repetition_position_key())) {
+    mutation.clear_repetition_keys();
+  } else {
+    if (board.repetition_keys.empty())
+      mutation.push_repetition_key(previous_key);
+    mutation.push_repetition_key(board.repetition_position_key());
+    if (!board.is_game_over() &&
+        board.repetition_count() >= Board::REPETITION_DRAW_COUNT) {
+      mutation.set_winner(-2);
+      mutation.set_end_reason(Board::EndReason::Repetition);
+    }
   }
   if (board.is_game_over() && board.end_reason == Board::EndReason::None)
     mutation.set_end_reason(Board::EndReason::Normal);

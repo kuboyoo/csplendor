@@ -89,6 +89,21 @@ def test_kifu_codec_round_trips_time_control_and_time_forfeit():
     assert [move["time_ms"] for move in parsed["moves"]] == [1800, 400]
 
 
+def test_kifu_codec_round_trips_resign():
+    text = build_kifu_text(
+        headers={"Format": "Splendor KIFU v1.1"},
+        position="startpos 2",
+        moves=[{"player": 0, "usi": "take:WUG"}],
+        result="P1_WIN",
+        result_detail="RESIGN",
+        final_scores=[0, 0],
+        total_turns=1,
+    )
+    assert "\nResult: P1_WIN RESIGN\n" in text
+    parsed = parse_kifu_text(text)
+    assert (parsed["result"], parsed["result_detail"]) == ("P1_WIN", "RESIGN")
+
+
 @pytest.mark.parametrize(
     "value", ["P0=150+30/150 P1=5s/move", "P0=150+30/150 P1=none"]
 )

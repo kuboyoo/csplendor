@@ -2,6 +2,7 @@
 #define CSPLENDOR_UNDO_RECORD_H
 
 #include "board.h"
+#include <algorithm>
 #include <array>
 #include <cstddef>
 
@@ -43,10 +44,20 @@ struct UndoRecord {
   bool waiting_noble = false;
   bool waiting_return = false;
   int8_t winner = -1;
-  uint8_t passive_streak = 0;
   Board::EndReason end_reason = Board::EndReason::None;
   uint64_t cached_hash = 0;
   bool hash_valid = false;
+
+  // An irreversible decision clears the repetition window, so the window is
+  // copied rather than truncated. Longer windows are not compact-restorable
+  // (callers keep a full Board instead, see fits_repetition_window()).
+  static constexpr size_t MAX_REPETITION_KEYS = 8;
+  std::array<uint64_t, MAX_REPETITION_KEYS> repetition_keys{};
+  size_t repetition_size = 0;
+
+  static bool fits_repetition_window(const Board &board) noexcept {
+    return board.repetition_keys.size() <= MAX_REPETITION_KEYS;
+  }
 
   static UndoRecord capture(const Board &board) noexcept {
     UndoRecord record;
@@ -79,7 +90,10 @@ struct UndoRecord {
     record.waiting_noble = board.waiting_noble;
     record.waiting_return = board.waiting_return;
     record.winner = board.winner;
-    record.passive_streak = board.passive_streak;
+    record.repetition_size = board.repetition_keys.size();
+    if (fits_repetition_window(board))
+      std::copy(board.repetition_keys.begin(), board.repetition_keys.end(),
+                record.repetition_keys.begin());
     record.end_reason = board.end_reason;
     record.cached_hash = board.cached_hash;
     record.hash_valid = board.hash_valid;
@@ -92,6 +106,11 @@ struct UndoRecord {
     const PlayerState &player = board.players[player_index];
     if (player.purchased_cards.size() < purchased_cards_size ||
         player.acquired_nobles.size() < acquired_nobles_size)
+      return false;
+    // Restoring the window must not allocate: a rule transition only clears
+    // or appends, which never lowers the capacity below the old size.
+    if (repetition_size > MAX_REPETITION_KEYS ||
+        board.repetition_keys.capacity() < repetition_size)
       return false;
     for (int level = 0; level < 3; ++level) {
       if (board.decks[level].count > deck_counts[level])
@@ -134,7 +153,8 @@ struct UndoRecord {
     board.waiting_noble = waiting_noble;
     board.waiting_return = waiting_return;
     board.winner = winner;
-    board.passive_streak = passive_streak;
+    board.repetition_keys.assign(repetition_keys.begin(),
+                                 repetition_keys.begin() + repetition_size);
     board.end_reason = end_reason;
     board.cached_hash = cached_hash;
     board.hash_valid = hash_valid;
@@ -147,6 +167,18 @@ struct UndoRecord {
   bool restores_snapshot(const Board &post_action,
                          const Board &snapshot) const {
     Board restored = post_action;
+    // A copy only has the capacity of the post-action window.
+    restored.repetition_keys.reserve(repetition_size);
+    if (repetition_size > MAX_REPETITION_KEYS) {
+      // Not compact-restorable: check every other field (callers keep a
+      // full Board for such windows).
+      UndoRecord rest = *this;
+      rest.repetition_size = 0;
+      if (!rest.restore(restored))
+        return false;
+      restored.repetition_keys = snapshot.repetition_keys;
+      return boards_equal(restored, snapshot);
+    }
     return restore(restored) && boards_equal(restored, snapshot);
   }
 
@@ -194,7 +226,7 @@ struct UndoRecord {
            lhs.waiting_noble == rhs.waiting_noble &&
            lhs.waiting_return == rhs.waiting_return &&
            lhs.winner == rhs.winner &&
-           lhs.passive_streak == rhs.passive_streak &&
+           lhs.repetition_keys == rhs.repetition_keys &&
            lhs.end_reason == rhs.end_reason &&
            lhs.cached_hash == rhs.cached_hash &&
            lhs.hash_valid == rhs.hash_valid;

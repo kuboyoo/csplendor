@@ -18,7 +18,7 @@ namespace csplendor::state::editor {
 inline void set_turn(Board &board, int turn) {
   if (turn < 0 || turn > 65535)
     throw std::invalid_argument("turn out of range");
-  board.begin_editor_mutation().turn = static_cast<uint16_t>(turn);
+  board.begin_editor_metadata_mutation().turn = static_cast<uint16_t>(turn);
 }
 
 inline void set_current_player(Board &board, int player) {
@@ -102,22 +102,38 @@ inline void set_waiting_return(Board &board, bool waiting_return) noexcept {
   board.begin_editor_mutation().waiting_return = waiting_return;
 }
 
-inline void set_passive_streak(Board &board, int streak) {
-  if (streak < 0 || streak > Board::PASSIVE_STREAK_DRAW)
-    throw std::invalid_argument("passive_streak out of range");
-  board.begin_editor_mutation().passive_streak = static_cast<uint8_t>(streak);
+// The window must end with the current position and share its token totals
+// (set it after the rest of the position: every other edit restarts the
+// window). A window holding only the current position is written as empty.
+inline void set_repetition_keys(Board &board, const std::vector<uint64_t> &keys) {
+  if (keys.size() == 1)
+    throw std::invalid_argument(
+        "repetition_keys of a single position must be empty");
+  if (!keys.empty() && keys.back() != board.repetition_position_key())
+    throw std::invalid_argument(
+        "repetition_keys must end with the current position");
+  for (uint64_t key : keys) {
+    if (key >> 63U)
+      throw std::invalid_argument("repetition_keys contains an invalid key");
+    if (Board::repetition_key_totals(key) !=
+        Board::repetition_key_totals(keys.back()))
+      throw std::invalid_argument(
+          "repetition_keys must share the current token totals");
+  }
+  std::vector<uint64_t> prepared = keys;
+  board.begin_editor_metadata_mutation().repetition_keys = std::move(prepared);
 }
 
 inline void set_end_reason(Board &board, Board::EndReason reason) {
   if (static_cast<uint8_t>(reason) > static_cast<uint8_t>(Board::EndReason::Repetition))
     throw std::invalid_argument("end_reason out of range");
-  board.begin_editor_mutation().end_reason = reason;
+  board.begin_editor_metadata_mutation().end_reason = reason;
 }
 
 inline void set_winner(Board &board, int winner) {
   if (winner < -2 || winner > 1)
     throw std::invalid_argument("winner out of range");
-  board.begin_editor_mutation().winner = static_cast<int8_t>(winner);
+  board.begin_editor_metadata_mutation().winner = static_cast<int8_t>(winner);
 }
 
 inline void set_player(Board &board, int player_index,

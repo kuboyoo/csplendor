@@ -316,10 +316,12 @@ private:
     // A pass is built on a copy because its stalemate probe may reject an
     // arbitrary editor state.  Prime the copy before opening its transaction
     // so an already-valid exact hash remains available for delta maintenance.
+    const uint64_t previous_key = board.repetition_position_key();
     if (action.type == PASS) {
       CSPLENDOR_PERF_INC(BoardSnapshotCopies);
       Board next = board;
       Board::RuleMutator<MaintainExactHash> mutation(next);
+      const bool final_round_before = next.final_round;
       csplendor::detail::end_turn(next, mutation);
       // If neither player can act, no future state change is possible.
       // Resolve the stalemate as a draw instead of allowing an infinite pass
@@ -329,7 +331,8 @@ private:
         mutation.set_winner(-2);
         mutation.set_end_reason(Board::EndReason::Stalemate);
       }
-      csplendor::detail::record_decision_outcome(next, mutation, true);
+      csplendor::detail::record_decision_outcome(
+          next, mutation, next.final_round == final_round_before, previous_key);
       mutation.commit();
       board = std::move(next);
       if (record_history) {
@@ -347,6 +350,7 @@ private:
     Board::RuleMutator<MaintainExactHash> mutation(board);
     const PlayerState &actor = board.players[board.current_player];
     const size_t nobles_before = actor.acquired_nobles.size();
+    const bool final_round_before = board.final_round;
 
     bool applied = false;
     switch (action.type) {
@@ -373,7 +377,8 @@ private:
         return false;
       mutation.set_waiting_noble(false);
       csplendor::detail::end_turn(board, mutation);
-      csplendor::detail::record_decision_outcome(board, mutation, false);
+      csplendor::detail::record_decision_outcome(board, mutation, false,
+                                                 previous_key);
       mutation.commit();
       if (record_history) {
 #ifdef CSPLENDOR_VERIFY_DELTA_UNDO
@@ -405,9 +410,15 @@ private:
       // automatic or deferred noble visits.
       csplendor::detail::finish_standard_action(board, mutation);
     }
+    // Only tokens moved: the position can come back (repetition window).
+    const bool token_decision = action.type == TAKE_DIFFERENT ||
+                                action.type == TAKE_SAME ||
+                                action.type == RETURN_GEM;
     csplendor::detail::record_decision_outcome(
         board, mutation,
-        action.is_token_noop() && actor.acquired_nobles.size() == nobles_before);
+        token_decision && actor.acquired_nobles.size() == nobles_before &&
+            board.final_round == final_round_before,
+        previous_key);
     mutation.commit();
 
     if (record_history) {

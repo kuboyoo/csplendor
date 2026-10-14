@@ -2,6 +2,8 @@
 #include "card_data.h"
 #include "game.h"
 #include "reveal_verified_solver.h"
+#include "exact_mate_search.h"
+#include "near_mate_probe.h"
 #include "root_mate_probe.h"
 #include "visible_only_solver.h"
 #include <pybind11/numpy.h>
@@ -295,6 +297,107 @@ void bind_solvers(py::module_ &m) {
       .def_readonly("elapsed_ms", &RootMateProbeResult::elapsed_ms)
       .def_readonly("stop_reason", &RootMateProbeResult::stop_reason)
       .def_readonly("value_triggered", &RootMateProbeResult::value_triggered);
+
+  py::class_<NearMateRootAction>(m, "NearMateRootAction")
+      .def_readonly("action_code", &NearMateRootAction::action_code)
+      .def_readonly("value", &NearMateRootAction::value)
+      .def_readonly("lower", &NearMateRootAction::lower)
+      .def_readonly("upper", &NearMateRootAction::upper);
+  py::class_<NearMateReveal>(m, "NearMateReveal")
+      .def_readonly("card", &NearMateReveal::card)
+      .def_readonly("weight", &NearMateReveal::weight)
+      .def_readonly("value", &NearMateReveal::value);
+  py::class_<csplendor::NearMateDepthBound>(m, "NearMateDepthBound")
+      .def_readonly("depth", &csplendor::NearMateDepthBound::depth)
+      .def_readonly("lower", &csplendor::NearMateDepthBound::lower)
+      .def_readonly("upper", &csplendor::NearMateDepthBound::upper)
+      .def_readonly("decided", &csplendor::NearMateDepthBound::decided);
+  py::class_<csplendor::NearMateAttempt>(m, "NearMateAttempt")
+      .def_readonly("depth", &csplendor::NearMateAttempt::depth)
+      .def_readonly("threshold", &csplendor::NearMateAttempt::threshold)
+      .def_readonly("verdict", &csplendor::NearMateAttempt::verdict)
+      .def_readonly("nodes", &csplendor::NearMateAttempt::nodes)
+      .def_readonly("elapsed_ms", &csplendor::NearMateAttempt::elapsed_ms)
+      .def_readonly("unknown_reason", &csplendor::NearMateAttempt::unknown_reason);
+  py::class_<csplendor::NearMateSearchConfig>(m, "NearMateSearchConfig")
+      .def(py::init<>())
+      .def_readwrite("attacker", &csplendor::NearMateSearchConfig::attacker)
+      .def_readwrite("min_depth", &csplendor::NearMateSearchConfig::min_depth)
+      .def_readwrite("max_depth", &csplendor::NearMateSearchConfig::max_depth)
+      .def_readwrite("thresholds", &csplendor::NearMateSearchConfig::thresholds)
+      .def_readwrite("max_nodes", &csplendor::NearMateSearchConfig::max_nodes)
+      .def_readwrite("time_limit_seconds", &csplendor::NearMateSearchConfig::time_limit_seconds)
+      .def_readwrite("no_take_probe", &csplendor::NearMateSearchConfig::no_take_probe)
+      .def_readwrite("line_transplant", &csplendor::NearMateSearchConfig::line_transplant)
+      .def_readwrite("max_memo_states", &csplendor::NearMateSearchConfig::max_memo_states);
+  py::class_<csplendor::NearMateSearchResult>(m, "NearMateSearchResult")
+      .def_readonly("thresholds", &csplendor::NearMateSearchResult::thresholds)
+      .def_readonly("lower", &csplendor::NearMateSearchResult::lower)
+      .def_readonly("upper", &csplendor::NearMateSearchResult::upper)
+      .def_readonly("lower_depth", &csplendor::NearMateSearchResult::lower_depth)
+      .def_readonly("upper_depth", &csplendor::NearMateSearchResult::upper_depth)
+      .def_readonly("bounds", &csplendor::NearMateSearchResult::bounds)
+      .def_readonly("has_best_action", &csplendor::NearMateSearchResult::has_best_action)
+      .def_readonly("best_action", &csplendor::NearMateSearchResult::best_action)
+      .def_readonly("best_action_id", &csplendor::NearMateSearchResult::best_action_id)
+      .def_readonly("root_actions", &csplendor::NearMateSearchResult::root_actions)
+      .def_readonly("best_action_reveals", &csplendor::NearMateSearchResult::best_action_reveals)
+      .def_readonly("undecided", &csplendor::NearMateSearchResult::undecided)
+      .def_readonly("stop_reason", &csplendor::NearMateSearchResult::stop_reason)
+      .def_readonly("attempts", &csplendor::NearMateSearchResult::attempts)
+      .def_readonly("nodes", &csplendor::NearMateSearchResult::nodes)
+      .def_readonly("elapsed_ms", &csplendor::NearMateSearchResult::elapsed_ms);
+
+  py::class_<RevealVerifiedLineEntry>(m, "MateLineEntry")
+      .def_readonly("action_code", &RevealVerifiedLineEntry::action_code)
+      .def_readonly("reveal_card", &RevealVerifiedLineEntry::reveal_card)
+      .def_readonly("action_count", &RevealVerifiedLineEntry::action_count);
+  py::class_<csplendor::ExactMateSearchConfig>(m, "ExactMateSearchConfig")
+      .def(py::init<>())
+      .def_readwrite("attacker", &csplendor::ExactMateSearchConfig::attacker)
+      .def_readwrite("min_depth", &csplendor::ExactMateSearchConfig::min_depth)
+      .def_readwrite("max_depth", &csplendor::ExactMateSearchConfig::max_depth)
+      .def_readwrite("max_nodes", &csplendor::ExactMateSearchConfig::max_nodes)
+      .def_readwrite("time_limit_seconds", &csplendor::ExactMateSearchConfig::time_limit_seconds)
+      .def_readwrite("max_memo_states", &csplendor::ExactMateSearchConfig::max_memo_states);
+  py::class_<csplendor::ExactMateSearchResult>(m, "ExactMateSearchResult")
+      .def_readonly("status", &csplendor::ExactMateSearchResult::status)
+      .def_readonly("stop_reason", &csplendor::ExactMateSearchResult::stop_reason)
+      .def_readonly("mate_depth", &csplendor::ExactMateSearchResult::mate_depth)
+      .def_readonly("verified_no_mate_through_depth",
+                    &csplendor::ExactMateSearchResult::verified_no_mate_through_depth)
+      .def_readonly("line", &csplendor::ExactMateSearchResult::line)
+      .def_readonly("has_winning_root_action",
+                    &csplendor::ExactMateSearchResult::has_winning_root_action)
+      .def_readonly("winning_root_action", &csplendor::ExactMateSearchResult::winning_root_action)
+      .def_readonly("winning_root_action_id",
+                    &csplendor::ExactMateSearchResult::winning_root_action_id)
+      .def_readonly("nodes", &csplendor::ExactMateSearchResult::nodes)
+      .def_readonly("elapsed_ms", &csplendor::ExactMateSearchResult::elapsed_ms);
+  m.def(
+      "exact_mate_search",
+      [](const Game &game, const csplendor::ExactMateSearchConfig &config) {
+        Game input_snapshot = game.clone_light();
+        py::gil_scoped_release release;
+        return csplendor::exact_mate_search(input_snapshot, config);
+      },
+      py::arg("game"), py::arg("config"));
+
+  m.def(
+      "near_mate_search",
+      [](const Game &game, const csplendor::NearMateSearchConfig &config,
+         const std::optional<MateOrderHintsHandle> &order_hints,
+         const std::shared_ptr<csplendor::solver_internal::RevealSearchCancellationToken>
+             &cancellation_token) {
+        Game input_snapshot = game.clone_light();
+        py::gil_scoped_release release;
+        return csplendor::near_mate_search(
+            input_snapshot, config,
+            order_hints ? order_hints->table : std::shared_ptr<const PositionOrderHints>{},
+            cancellation_token);
+      },
+      py::arg("game"), py::arg("config"), py::arg("order_hints") = py::none(),
+      py::arg("cancellation_token") = nullptr);
 
   m.def(
       "root_mate_probe",

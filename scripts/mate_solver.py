@@ -618,7 +618,7 @@ class MateSolver:
             bool(board.final_round),
             bool(board.waiting_noble),
             bool(board.waiting_return),
-            int(board.passive_streak),
+            tuple(sorted(int(key) for key in board.repetition_keys)),
             int(board.winner),
             tuple(int(v) for v in board.bank),
             tuple(tuple(int(card_id) for card_id in row) for row in board.visible),
@@ -793,7 +793,7 @@ def _game_to_payload(game: cs.Game) -> Dict[str, Any]:
             "final_round": bool(board.final_round),
             "waiting_noble": bool(board.waiting_noble),
             "waiting_return": bool(board.waiting_return),
-            "passive_streak": int(board.passive_streak),
+            "repetition_keys": [int(key) for key in board.repetition_keys],
             "end_reason": int(board.end_reason),
             "winner": int(board.winner),
             "players": players,
@@ -818,7 +818,6 @@ def _game_from_payload(payload: Dict[str, Any]) -> cs.Game:
     board.waiting_noble = bool(board_payload["waiting_noble"])
     board.waiting_return = bool(board_payload.get("waiting_return", False))
     board.winner = int(board_payload["winner"])
-    board.passive_streak = int(board_payload.get("passive_streak", 0))
     board.end_reason = cs.GameEndReason(int(board_payload.get("end_reason", 0)))
 
     for player_idx, player_payload in enumerate(board_payload["players"]):
@@ -833,6 +832,8 @@ def _game_from_payload(payload: Dict[str, Any]) -> cs.Game:
         player.purchased_cards = [int(v) for v in player_payload["purchased_cards"]]
         player.acquired_nobles = [int(v) for v in player_payload["acquired_nobles"]]
         board.set_player(player_idx, player)
+    # Last: every other edit restarts the repetition window.
+    board.repetition_keys = [int(key) for key in board_payload.get("repetition_keys", [])]
 
     return game
 
@@ -879,8 +880,6 @@ def load_game_from_json(path: str) -> cs.Game:
         board.waiting_return = bool(data["waiting_return"])
     if "winner" in data:
         board.winner = int(data["winner"])
-    if "passive_streak" in data:
-        board.passive_streak = int(data["passive_streak"])
 
     for idx, player_data in enumerate(data.get("players", [])):
         if idx >= 2:
@@ -908,6 +907,9 @@ def load_game_from_json(path: str) -> cs.Game:
         if "acquired_nobles" in player_data:
             player.acquired_nobles = [int(v) for v in player_data["acquired_nobles"]]
         board.set_player(idx, player)
+    # Last: every other edit restarts the repetition window.
+    if "repetition_keys" in data:
+        board.repetition_keys = [int(key) for key in data["repetition_keys"]]
 
     return game
 

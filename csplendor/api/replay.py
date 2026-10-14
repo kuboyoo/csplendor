@@ -511,7 +511,7 @@ def _decode_board_ori(
             "waiting_noble": False,
             "waiting_return": False,
             "pending_decision": 0,
-            "passive_streak": 0,
+            "repetition_count": 1,
             "end_reason": 0,
             "game_over": game_over,
             "winner": winner,

@@ -1,4 +1,5 @@
 #include "game_snapshot.h"
+#include "board_editor.h"
 #include "card_data.h"
 #include "noble_data.h"
 #include <stdexcept>
@@ -145,8 +146,12 @@ std::string serialize(const Game &game) {
   payload.u8(static_cast<uint8_t>(board.waiting_noble));
   payload.u8(static_cast<uint8_t>(board.waiting_return));
   payload.i8(board.winner);
-  payload.u8(board.passive_streak);
   payload.u8(static_cast<uint8_t>(board.end_reason));
+  if (board.repetition_keys.size() > UINT16_MAX)
+    throw std::length_error("repetition window too long for game snapshot");
+  payload.u16(static_cast<uint16_t>(board.repetition_keys.size()));
+  for (uint64_t key : board.repetition_keys)
+    payload.u64(key);
 
   for (uint8_t value : board.bank)
     payload.u8(value);
@@ -235,10 +240,13 @@ Game deserialize_version(std::string_view snapshot, uint16_t accepted_version);
 
 Game deserialize(std::string_view snapshot) {
   const size_t at = GAME_SNAPSHOT_MAGIC.size();
-  const bool version_2 = snapshot.size() >= at + 2 &&
-                         static_cast<uint8_t>(snapshot[at]) == 2 &&
-                         static_cast<uint8_t>(snapshot[at + 1]) == 0;
-  return deserialize_version(snapshot, version_2 ? 2 : GAME_SNAPSHOT_FORMAT_VERSION);
+  const bool older = snapshot.size() >= at + 2 &&
+                     (static_cast<uint8_t>(snapshot[at]) == 2 ||
+                      static_cast<uint8_t>(snapshot[at]) == 3) &&
+                     static_cast<uint8_t>(snapshot[at + 1]) == 0;
+  return deserialize_version(snapshot,
+                             older ? static_cast<uint8_t>(snapshot[at])
+                                   : GAME_SNAPSHOT_FORMAT_VERSION);
 }
 
 std::string upgrade_v1(std::string_view snapshot) {
@@ -307,20 +315,28 @@ Game deserialize_version(std::string_view snapshot, uint16_t accepted_version) {
   if (board.current_player >= Board::NUM_PLAYERS || board.winner < -2 ||
       board.winner > 1)
     throw std::invalid_argument("invalid game status in game snapshot");
+  std::vector<uint64_t> repetition_keys;
   if (accepted_version >= 3) {
-    board.passive_streak = reader.u8();
+    if (accepted_version == 3)
+      reader.u8(); // The passive streak of the old rule has no successor.
     const uint8_t reason = reader.u8();
-    if (board.passive_streak > Board::PASSIVE_STREAK_DRAW ||
-        reason > static_cast<uint8_t>(Board::EndReason::Repetition))
+    if (reason > static_cast<uint8_t>(Board::EndReason::Repetition))
       throw std::invalid_argument("invalid repetition state in game snapshot");
     board.end_reason = static_cast<Board::EndReason>(reason);
     if ((board.end_reason == Board::EndReason::None) != (board.winner == -1) ||
-        (board.end_reason == Board::EndReason::Repetition &&
-         (board.winner != -2 || board.passive_streak != Board::PASSIVE_STREAK_DRAW)))
+        ((board.end_reason == Board::EndReason::Repetition ||
+          board.end_reason == Board::EndReason::Stalemate) &&
+         board.winner != -2))
       throw std::invalid_argument("inconsistent game result in game snapshot");
+    if (accepted_version >= 4) {
+      const uint16_t count = reader.u16();
+      repetition_keys.reserve(count);
+      for (uint16_t index = 0; index < count; ++index)
+        repetition_keys.push_back(reader.u64());
+    }
   } else {
-    // Before the repetition rule: no streak, and a draw by stalemate is
-    // indistinguishable from an ordinary one.
+    // Before the repetition rule: a draw by stalemate is indistinguishable
+    // from an ordinary one.
     board.end_reason =
         board.winner == -1 ? Board::EndReason::None : Board::EndReason::Normal;
   }
@@ -413,6 +429,16 @@ Game deserialize_version(std::string_view snapshot, uint16_t accepted_version) {
   if (reader.remaining() != 0)
     throw std::invalid_argument("trailing data in csplendor game snapshot");
   board.begin_editor_mutation();
+  // The window is validated against the complete position (Board editor).
+  try {
+    csplendor::state::editor::set_repetition_keys(board, repetition_keys);
+  } catch (const std::invalid_argument &) {
+    throw std::invalid_argument("invalid repetition window in game snapshot");
+  }
+  if (board.end_reason == Board::EndReason::Repetition &&
+      accepted_version >= 4 &&
+      board.repetition_count() < Board::REPETITION_DRAW_COUNT)
+    throw std::invalid_argument("inconsistent game result in game snapshot");
 
   return Game::from_state(std::move(board), (mode_flags & 1U) != 0,
                          (mode_flags & 2U) != 0);

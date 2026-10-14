@@ -9,22 +9,26 @@
 - 両playerのtoken、bonus、得点、予約、購入済みcard、獲得noble
 - 非公開予約flag
 - current player、turn、final round、noble待ち、返却待ち（`waiting_return`）、winner
-- 千日手の連続回数（`passive_streak`）と終局理由（`end_reason`）
+- 終局理由（`end_reason`）と千日手の判定区間（`repetition_keys`）
 - `simple_payment_mode`と`blank_refill_mode`
 
 envelopeはmagic、snapshot format version、rules version、card/noble定義の
 fingerprint、payload length、checksumを持つ。整数はlittle endianであり、
 C++ objectのmemory layoutやPython pickleには依存しない。
 
-現在のformat versionとrules versionはともに3である。version 3はpayloadの
-`winner` byteの直後に`passive_streak` byte（0〜6）と`end_reason` byteを追加し、千日手の
-ルールに対応する。version 2はpayloadの`waiting_noble` byteの直後に`waiting_return` byteを
+現在のformat versionとrules versionはともに4である。version 4はpayloadの
+`winner` byteの直後に`end_reason` byte、千日手の判定区間の局面数（u16）と各局面の
+`repetition_position_key()`（u64、古い順）を持ち、「同一局面4回目で引き分け」の
+ルールに対応する。区間が長くなりうるため、snapshotの上限を64KiBに広げた。
+version 3は`winner` byteの直後に`passive_streak` byte（0〜6）と`end_reason` byteを持ち、
+旧千日手ルール（実質パスの連続）に対応した。version 2はpayloadの`waiting_noble` byteの直後に`waiting_return` byteを
 追加し、山札予約が返却を持たず別の`RETURN_GEM`で返すルールに対応した。
 `waiting_noble`と`waiting_return`が両方立つsnapshotは拒否する。
 
-version 2のsnapshotはそのまま読み込める（学習データを作り直せる状態に保つための例外）。
-`passive_streak`は0、`end_reason`は終局していれば`NORMAL`、していなければ`NONE`として
-復元する（version 2には両者パスと通常の引き分けの区別がない）。書き出しは常にversion 3である。
+version 2と3のsnapshotはそのまま読み込める（学習データを作り直せる状態に保つための例外）。
+千日手の判定区間は空（その局面から始まる）として復元し、version 3の`passive_streak`は捨てる。
+`end_reason`はversion 3ならそのまま、version 2なら終局していれば`NORMAL`、していなければ
+`NONE`とする（version 2には両者パスと通常の引き分けの区別がない）。書き出しは常にversion 4である。
 
 ```python
 snapshot = game.serialize_snapshot()

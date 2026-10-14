@@ -35,7 +35,7 @@ inline constexpr std::array<FieldRoleDescriptor, 15> BOARD_FIELD_ROLES = {{
     {"Board", "waiting_noble", FieldRole::Canonical},
     {"Board", "waiting_return", FieldRole::Canonical},
     {"Board", "winner", FieldRole::Canonical},
-    {"Board", "passive_streak", FieldRole::Canonical},
+    {"Board", "repetition_keys", FieldRole::Canonical},
     {"Board", "end_reason", FieldRole::Canonical},
     {"Board", "cached_hash", FieldRole::Cache},
     {"Board", "hash_valid", FieldRole::Cache},

@@ -75,11 +75,21 @@ analysis and book keys.
   set at once (state invariant `invalid_pending_decision`).
 
 ### Repetition draw and end reason
-- `Board.passive_streak` (int 0..6, editable): consecutive turns that ended
-  with a passive action (PASS, or a take returning exactly the taken tokens,
-  `Action.is_token_noop()`). Six draw the game inside `apply`/`apply_trusted`
-  (doc/engine_specs.md, 千日手). Part of the exact and observable hashes,
-  snapshots and information states; not a search feature.
+- A complete position occurring for the fourth time (not necessarily in a
+  row) draws the game inside `apply`/`apply_trusted` (doc/engine_specs.md,
+  千日手). `Board.REPETITION_DRAW_COUNT` is 4.
+- `Board.repetition_keys` (list of int, editable): `repetition_position_key()`
+  of the positions since the last card/noble change, start of the final
+  round or change of a player's token total, oldest first, ending with the
+  current position; empty when that stretch starts at the current position.
+  Setting it validates the window (it must end with the current position and
+  share its token totals); every other editor change clears it, so set it
+  last. Part of the exact and observable hashes (as a multiset), snapshots and
+  information states; not a search feature.
+- `Board.repetition_count` (read-only int): occurrences of the current
+  position in that window (at least 1).
+- `Board.repetition_position_key()` (int): exact identity of a position within
+  the window (both players' token counts, player to move, pending decisions).
 - `Board.end_reason` (`csplendor.GameEndReason`): `NONE` while the game runs,
   `NORMAL` (final round), `STALEMATE` (neither player can act), `REPETITION`.
   State invariant `invalid_repetition_state` rejects inconsistent values.
