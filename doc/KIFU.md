@@ -231,7 +231,7 @@ Result: <result_type> [<detail>]
 | `TIME` | 時間切れ。時計が0になったプレイヤーの相手の勝ち（例: `Result: P1_WIN TIME`） |
 | `RESIGN` | 投了。投了したプレイヤーの相手の勝ち（例: P0 が投了 → `Result: P1_WIN RESIGN`） |
 | `STALEMATE` | 両者とも行動できない引き分け（例: `Result: DRAW STALEMATE`） |
-| `REPETITION` | 千日手（両者が実質パスを3回ずつ続けた）による引き分け（例: `Result: DRAW REPETITION`） |
+| `REPETITION` | 千日手（同一局面が4回目に現れた）による引き分け（例: `Result: DRAW REPETITION`） |
 
 `STALEMATE`・`REPETITION` はエンジンの終局理由（`Board.end_reason`）をそのまま書く。同点・同枚数の
 通常の引き分けは detail なしの `DRAW` である。

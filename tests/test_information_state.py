@@ -59,8 +59,8 @@ def test_information_state_is_versioned_and_changes_with_public_semantics():
     game = csplendor.Game(seed=3)
     key = game.serialize_information_state(0)
 
-    assert csplendor.Game.information_state_format_version() == 4
-    assert csplendor.Game.information_state_rules_version() == 3
+    assert csplendor.Game.information_state_format_version() == 5
+    assert csplendor.Game.information_state_rules_version() == 4
     assert key[:8] == b"CSPLINFO"
     assert key != game.serialize_information_state(1)
 
@@ -69,7 +69,9 @@ def test_information_state_is_versioned_and_changes_with_public_semantics():
     assert changed.serialize_information_state(0) != key
 
     shuffled = game.clone_light()
-    shuffled.board.passive_streak = 2  # public: it decides a repetition draw
+    # The repetition window is public: it decides a draw.
+    current = shuffled.board.repetition_position_key()
+    shuffled.board.repetition_keys = [current, current]
     assert shuffled.serialize_information_state(0) != key
 
     changed = game.clone_light()
@@ -106,5 +108,5 @@ def test_information_state_has_a_golden_encoding():
     key = csplendor.Game(seed=42).serialize_information_state(0)
     assert len(key) < 256
     assert hashlib.sha256(key).hexdigest() == (
-        "014c363064ac6e2e06894637deb1d9e931305271a083348a9b24136f1f2b0077"
+        "040f1dcbba8de9e2caba6c2c9a45a7b6419514470b597fc215440057119407c6"
     )

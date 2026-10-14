@@ -85,10 +85,20 @@ void bind_rules(py::module_ &m) {
           "winner", [](const Board &b) { return (int)b.winner; },
           &state::editor::set_winner)
       .def_property(
-          "passive_streak", [](const Board &b) { return (int)b.passive_streak; },
-          &state::editor::set_passive_streak,
-          "Consecutive passive turns (PASS or a take returning the taken "
-          "tokens); 6 draws the game by repetition")
+          "repetition_keys",
+          [](const Board &b) { return b.repetition_keys; },
+          &state::editor::set_repetition_keys,
+          "repetition_position_key() of the positions since the last "
+          "irreversible decision, oldest first, ending with the current one "
+          "(empty: the window starts here). Set it last: other edits clear it")
+      .def_property_readonly(
+          "repetition_count", &Board::repetition_count,
+          "Occurrences of the current position in the repetition window; "
+          "the REPETITION_DRAW_COUNT-th (4th) draws the game")
+      .def("repetition_position_key", &Board::repetition_position_key,
+           "Exact position identity within a repetition window")
+      .def_readonly_static("REPETITION_DRAW_COUNT",
+                           &Board::REPETITION_DRAW_COUNT)
       .def_property(
           "end_reason", [](const Board &b) { return b.end_reason; },
           &state::editor::set_end_reason,
@@ -113,7 +123,8 @@ void bind_rules(py::module_ &m) {
            "Hash based only on information visible to observer player")
       .def("observable_repetition_hash", &Board::observable_repetition_hash,
            py::arg("observer"),
-           "Observable position hash that ignores the monotonic turn counter")
+           "Observable position hash that ignores the monotonic turn counter "
+           "and the repetition window")
       .def("observable_card_pool", &Board::observable_card_pool,
            py::arg("observer"), py::arg("level"),
            "Return the sorted observer-safe unknown pool for one tier")

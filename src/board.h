@@ -49,11 +49,15 @@ public:
   bool waiting_noble = false;
   bool waiting_return = false;
   int8_t winner = -1; // -1: ongoing, 0, 1: player, -2: draw
-  // Repetition draw (doc/engine_specs.md, 千日手): consecutive turns that
-  // ended with a passive action (PASS or a take returning exactly the taken
-  // tokens). PASSIVE_STREAK_DRAW of them draw the game.
-  static constexpr uint8_t PASSIVE_STREAK_DRAW = 6;
-  uint8_t passive_streak = 0;
+  // Repetition draw (doc/engine_specs.md, 千日手): a complete position that
+  // occurs for the REPETITION_DRAW_COUNT-th time draws the game. Only token
+  // decisions (takes, returns, passes) can bring a position back, so the
+  // history is kept since the last irreversible decision (a card or noble
+  // changed hands): repetition_position_key() of each position, oldest
+  // first, ending with the current one. Empty means the window starts at the
+  // current position (after an irreversible decision, a deal or an edit).
+  static constexpr uint8_t REPETITION_DRAW_COUNT = 4;
+  std::vector<uint64_t> repetition_keys;
   enum class EndReason : uint8_t { None = 0, Normal = 1, Stalemate = 2, Repetition = 3 };
   EndReason end_reason = EndReason::None;
 
@@ -309,15 +313,25 @@ public:
       board_->waiting_return = waiting;
     }
 
-    void set_passive_streak(uint8_t streak) noexcept {
-      const uint8_t old = board_->passive_streak;
-      if (old == streak)
+    // The window only grows by push_back or is cleared, so a rollback that
+    // restores it never needs more capacity than it had.
+    void push_repetition_key(uint64_t key) {
+      if constexpr (MaintainExactHash) {
+        const uint64_t old = Board::repetition_sum(board_->repetition_keys);
+        hash_ ^= Board::exact_repetition_salt(old) ^
+                 Board::exact_repetition_salt(old + Board::repetition_key_mix(key));
+      }
+      board_->repetition_keys.push_back(key);
+    }
+
+    void clear_repetition_keys() noexcept {
+      if (board_->repetition_keys.empty())
         return;
       if constexpr (MaintainExactHash) {
-        hash_ ^= Board::exact_passive_streak_salt(*zobrist_, old) ^
-                 Board::exact_passive_streak_salt(*zobrist_, streak);
+        hash_ ^= Board::exact_repetition_salt(
+            Board::repetition_sum(board_->repetition_keys));
       }
-      board_->passive_streak = streak;
+      board_->repetition_keys.clear();
     }
 
     // Terminal metadata only: not part of any hash.
@@ -431,7 +445,7 @@ public:
     waiting_noble = false;
     waiting_return = false;
     winner = -1;
-    passive_streak = 0;
+    repetition_keys.clear();
     end_reason = EndReason::None;
     hash_valid = false;
   }
@@ -444,7 +458,16 @@ public:
   // callers validate a complete payload before entering, while trusted rule
   // transitions validate at a higher boundary or deliberately allow partial
   // mutation for rollback-based search.
+  // An edit breaks the line of play, so the repetition window restarts at
+  // the edited position. Edits of metadata outside the position (turn,
+  // result) keep it.
   Board &begin_editor_mutation() noexcept {
+    repetition_keys.clear();
+    invalidate_hash();
+    return *this;
+  }
+
+  Board &begin_editor_metadata_mutation() noexcept {
     invalidate_hash();
     return *this;
   }
@@ -455,6 +478,49 @@ public:
   }
 
   bool is_game_over() const { return winner != -1; }
+
+  // Exact identity of a position within a repetition window. Between
+  // irreversible decisions only the tokens held, the player to move and the
+  // pending decision change (the bank is the fixed totals minus the holdings),
+  // so these fields determine the complete position there. Five bits per
+  // count cover every reachable holding.
+  uint64_t repetition_position_key() const noexcept {
+    uint64_t key = 0;
+    for (const auto &player : players)
+      for (uint8_t count : player.gems)
+        key = (key << 5U) | (count & 0x1FU);
+    key = (key << 1U) | (current_player & 1U);
+    key = (key << 1U) | static_cast<uint64_t>(waiting_noble);
+    key = (key << 1U) | static_cast<uint64_t>(waiting_return);
+    return key;
+  }
+
+  // Tokens held by each player, read back from a repetition key. Outside a
+  // pending return (which only follows a reservation) a token decision never
+  // lowers a holding: a take ends at min(held + taken, 10). A position whose
+  // holdings differ from the current ones therefore cannot occur again, and
+  // a decision that changes them restarts the window like an irreversible
+  // one (all keys in a window share these totals).
+  static uint16_t repetition_key_totals(uint64_t key) noexcept {
+    key >>= 3U;
+    uint16_t totals = 0;
+    for (int player = 1; player >= 0; --player) {
+      unsigned held = 0;
+      for (int color = 0; color < 6; ++color, key >>= 5U)
+        held += static_cast<unsigned>(key & 0x1FU);
+      totals = static_cast<uint16_t>(totals | (held << (player == 0 ? 8U : 0U)));
+    }
+    return totals;
+  }
+
+  // How many times the current position has occurred in the window.
+  int repetition_count() const noexcept {
+    if (repetition_keys.empty())
+      return 1;
+    const uint64_t key = repetition_keys.back();
+    return static_cast<int>(
+        std::count(repetition_keys.begin(), repetition_keys.end(), key));
+  }
 
   std::string to_string() const {
     std::stringstream ss;
@@ -632,11 +698,22 @@ private:
     return 0;
   }
 
-  static uint64_t exact_passive_streak_salt(const Zobrist &z,
-                                            uint8_t streak) noexcept {
-    if (streak <= PASSIVE_STREAK_DRAW)
-      return z.passive_streak[streak];
-    return hash_out_of_range_value(0x700, streak);
+  // The window enters the hashes as a multiset (the future depends on how
+  // often each position occurred, not on their order). An empty window has
+  // salt 0, so positions at the start of a window keep their old hash.
+  static uint64_t repetition_key_mix(uint64_t key) noexcept {
+    return hash_out_of_range_value(0x700, key);
+  }
+
+  static uint64_t repetition_sum(const std::vector<uint64_t> &keys) noexcept {
+    uint64_t sum = 0;
+    for (uint64_t key : keys)
+      sum += repetition_key_mix(key);
+    return sum;
+  }
+
+  static uint64_t exact_repetition_salt(uint64_t sum) noexcept {
+    return sum == 0 ? 0 : hash_out_of_range_value(0x701, sum);
   }
 
   static uint64_t exact_waiting_return_salt(const Zobrist &z, bool waiting,
@@ -723,7 +800,7 @@ private:
     // Current player & states
     CSPLENDOR_PERF_HASH_FIELDS(IncludeDeckOrder, IncludeTurn ? 7 : 6);
     h ^= exact_current_player_salt(z, current_player);
-    h ^= exact_passive_streak_salt(z, passive_streak);
+    h ^= exact_repetition_salt(repetition_sum(repetition_keys));
     h ^= exact_waiting_noble_salt(z, waiting_noble, current_player);
     h ^= exact_waiting_return_salt(z, waiting_return, current_player);
     h ^= exact_final_round_salt(z, final_round);
@@ -850,8 +927,8 @@ public:
     CSPLENDOR_PERF_ADD(ObservableHashFieldsVisited, 7);
     if (current_player < NUM_PLAYERS)
       h ^= z.current_player[current_player];
-    // The streak is public and decides a draw, so it separates positions.
-    h ^= exact_passive_streak_salt(z, passive_streak);
+    // The window is public and decides a draw, so it separates positions.
+    h ^= exact_repetition_salt(repetition_sum(repetition_keys));
     if (waiting_noble && current_player < NUM_PLAYERS)
       h ^= z.waiting_noble[current_player];
     // The pending return is public; the drawn card stays hidden.
@@ -867,12 +944,12 @@ public:
 
   // Observable rule-position identity for repetition detection.  The regular
   // observable hash intentionally includes the monotonic turn counter and the
-  // passive streak for MCTS tree identity; repetition logic must not treat
+  // repetition window for MCTS tree identity; repetition logic must not treat
   // that metadata as a material position change.
   uint64_t observable_repetition_hash(uint8_t observer) const {
     const auto &z = Zobrist::get_instance();
     return observable_hash(observer) ^ z.turn[turn] ^
-           exact_passive_streak_salt(z, passive_streak);
+           exact_repetition_salt(repetition_sum(repetition_keys));
   }
 
   std::vector<uint8_t> observable_card_pool(uint8_t observer,

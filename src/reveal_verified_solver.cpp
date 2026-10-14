@@ -1654,7 +1654,7 @@ private:
       // following RETURN_GEM decision of the same player.
       if (player.total_gems() > Board::MAX_TOKENS) {
         mutation.set_waiting_return(true);
-        csplendor::detail::record_decision_outcome(board, mutation, false);
+        csplendor::detail::record_decision_outcome(board, mutation, false, 0);
         mutation.commit();
         return true;
       }
@@ -1663,7 +1663,7 @@ private:
     }
 
     csplendor::detail::finish_standard_action(board, mutation);
-    csplendor::detail::record_decision_outcome(board, mutation, false);
+    csplendor::detail::record_decision_outcome(board, mutation, false, 0);
     mutation.commit();
     return true;
   }

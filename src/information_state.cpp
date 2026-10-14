@@ -114,7 +114,17 @@ std::string serialize(const Game &game, uint8_t observer) {
   payload.u8(static_cast<uint8_t>(board.waiting_noble));
   payload.u8(static_cast<uint8_t>(board.waiting_return));
   payload.i8(board.winner);
-  payload.u8(board.passive_streak); // public: it decides a repetition draw
+  // The repetition window is public and decides a draw. Its order does not
+  // matter for the future, only how often each position occurred.
+  {
+    std::vector<uint64_t> window = board.repetition_keys;
+    std::sort(window.begin(), window.end());
+    if (window.size() > UINT16_MAX)
+      throw std::length_error("repetition window too long for information state");
+    payload.u16(static_cast<uint16_t>(window.size()));
+    for (const uint64_t key : window)
+      payload.u64(key);
+  }
 
   for (const uint8_t value : board.bank)
     payload.u8(value);

@@ -1,5 +1,27 @@
 # 変更履歴 / Changelog
 
+## 未出荷：千日手を「同一局面4回目で引き分け」に改定（2026-10-14）
+
+- 千日手の判定を、完全な局面（bank・場札・山札・貴族・両者のtoken／bonus／点数／予約／獲得貴族・手番・
+  返却待ちなどの途中状態）が対局の中で4回目に現れたら引き分け（winner `-2`、`REPETITION`）に改めた。
+  連続でなくてよい。旧規則（実質パスを両者3回ずつ連続）はこの規則に含まれ、同じ手で終局する。
+  自己対局で、片方が組み合わせの違う返却を混ぜて旧判定をすり抜けた手詰まりの2局も千日手になる。
+- `Board.passive_streak` を廃止し、判定区間 `Board.repetition_keys`（最後にカード・貴族・最終ラウンド・
+  token総数が変わった後の局面の鍵）、`Board.repetition_count`、`Board.repetition_position_key()`、
+  `Board.REPETITION_DRAW_COUNT`（4）を追加した。token総数は返却待ちを除いて減らないので、区間は厳密で、
+  通常は空か短い。区間は厳密hash・観測hash（多重集合）・snapshot・情報集合に含み、探索の入力特徴量は変えない。
+- MCTS・厳密な詰み探索・準詰み・ソルバーのoracle手は手の適用を共有するので、同じ規則で終局を判定する。
+  10枚同士の交換が続く局面を区別するため、詰みのベンチ局面（5手詰め）のノード数は約62.5万から66万に増えた。
+- Game snapshot を format/rules version 4、情報集合を format 5 / rules 4 にした。version 2・3 の snapshot は
+  区間を空（その局面から開始）として読み込める。snapshot の上限を 64KiB に広げた。
+- Web API の盤面の `passive_streak` を `repetition_count` に置き換えた。
+
+English: A complete position occurring for the fourth time (not necessarily
+consecutively) now draws by repetition, replacing the passive-streak rule.
+`Board.passive_streak` is replaced by `Board.repetition_keys` /
+`repetition_count`; snapshots are version 4 (2 and 3 still load) and
+information states format 5 / rules 4.
+
 ## 未出荷：棋譜の結果に投了を追加（2026-10-11）
 
 - 棋譜の結果に `Result: P<勝った側>_WIN RESIGN`（投了。投了したプレイヤーの相手の勝ち）を追加した（`doc/KIFU.md` §6）。

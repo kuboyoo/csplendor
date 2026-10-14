@@ -36,7 +36,8 @@ class NormalBranchRollback {
 
   static State capture(const Game &game, bool eligible) {
 #ifdef CSPLENDOR_SOLVER_NORMAL_ROLLBACK
-    if (eligible && game.board.current_player < Board::NUM_PLAYERS)
+    if (eligible && game.board.current_player < Board::NUM_PLAYERS &&
+        csplendor::detail::UndoRecord::fits_repetition_window(game.board))
     {
       CSPLENDOR_PERF_INC(SolverCompactRollbackCaptures);
       return State(std::in_place_index<0>, game.board);
@@ -98,6 +99,8 @@ public:
         if (game_.board.players[player].purchased_cards.capacity() < parent.players[player].purchased_cards.size() ||
             game_.board.players[player].acquired_nobles.capacity() < parent.players[player].acquired_nobles.size())
           std::abort();
+      if (game_.board.repetition_keys.capacity() < parent.repetition_keys.size())
+        std::abort();
       game_.board = parent;
       CSPLENDOR_PERF_INC(SolverFullRollbackRestores);
     }

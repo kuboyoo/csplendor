@@ -100,13 +100,21 @@ InvariantReport validate_invariants(const Board &board,
   if (board.waiting_return && board.current_player < Board::NUM_PLAYERS &&
       board.players[board.current_player].total_gems() <= Board::MAX_TOKENS)
     report.add(InvariantViolation::InvalidPendingDecision);
-  // The streak never exceeds the draw threshold; a repetition result is a
-  // draw reached by exactly that streak, and any result names an ended game.
-  if (board.passive_streak > Board::PASSIVE_STREAK_DRAW ||
+  // A non-empty repetition window has the window start, ends with the
+  // current position and shares its token totals; a repetition result is a draw at a position that
+  // occurred often enough, and any result names an ended game.
+  bool window_totals_differ = false;
+  for (uint64_t key : board.repetition_keys)
+    window_totals_differ |= Board::repetition_key_totals(key) !=
+                            Board::repetition_key_totals(board.repetition_position_key());
+  if (board.repetition_keys.size() == 1 || window_totals_differ ||
+      (!board.repetition_keys.empty() &&
+       board.repetition_keys.back() != board.repetition_position_key()) ||
       static_cast<uint8_t>(board.end_reason) > static_cast<uint8_t>(Board::EndReason::Repetition) ||
       (board.end_reason != Board::EndReason::None && board.winner == -1) ||
       (board.end_reason == Board::EndReason::Repetition &&
-       (board.winner != -2 || board.passive_streak != Board::PASSIVE_STREAK_DRAW)) ||
+       (board.winner != -2 ||
+        board.repetition_count() < Board::REPETITION_DRAW_COUNT)) ||
       (board.end_reason == Board::EndReason::Stalemate && board.winner != -2))
     report.add(InvariantViolation::InvalidRepetitionState);
 

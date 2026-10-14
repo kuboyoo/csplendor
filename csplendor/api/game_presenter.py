@@ -49,7 +49,7 @@ def get_game_state(game: Game) -> GameStateSchema:
         waiting_noble=board.waiting_noble,
         waiting_return=board.waiting_return,
         pending_decision=int(board.pending_decision),
-        passive_streak=int(board.passive_streak),
+        repetition_count=int(board.repetition_count),
         end_reason=int(board.end_reason),
         game_over=game.is_game_over(),
         winner=board.winner,

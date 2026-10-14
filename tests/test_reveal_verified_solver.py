@@ -174,7 +174,9 @@ def test_reveal_verified_solver_proves_known_five_move_mate_within_node_budget()
         load_game_from_usi_text(BENCH_POSITION),
         attacker=0,
         options=SolverOptions(
-            max_nodes=650000,
+            # About 660k nodes: the repetition window keeps apart positions
+            # reached by different token exchanges (10 tokens each).
+            max_nodes=700000,
             time_limit=10.0,
             include_proof=True,
         ),
@@ -182,7 +184,7 @@ def test_reveal_verified_solver_proves_known_five_move_mate_within_node_budget()
 
     assert result.status == MATE
     assert result.depth == 5
-    assert result.stats.nodes < 650000
+    assert result.stats.nodes < 700000
     assert result.proof_tree["verification"]["all_reveals_verified"] is True
     assert result.proof_tree["verification"]["line"]
 
