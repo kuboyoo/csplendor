@@ -1,5 +1,14 @@
 # 変更履歴 / Changelog
 
+## 未出荷：V3 探索で観測者自身の山札予約を分岐させない選択肢（2026-10-17）
+
+- `V3SearchConfig.merge_own_deck_reveal`（既定 `False`）を追加した。`True` では観測者の山札予約も chance 節点を作らず、
+  その下の節点を共有する。相手の手の統計が「観測者が何を引いたか」を知る漏れが探索内で消える。chance 列挙はこの予約に
+  効かず、この予約をまたぐ木の再利用はしない。root より前の伏せ札は既知の限界として `doc/mcts_v3.md` に書いた。
+
+English: `merge_own_deck_reveal` keeps the observer's own deck reservation
+inside the information set, so opponent nodes do not split by the drawn card.
+
 ## 未出荷：千日手を「同一局面4回目で引き分け」に改定（2026-10-14）
 
 - 千日手の判定を、完全な局面（bank・場札・山札・貴族・両者のtoken／bonus／点数／予約／獲得貴族・手番・

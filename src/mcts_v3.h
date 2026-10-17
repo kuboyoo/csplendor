@@ -80,6 +80,11 @@ struct Config {
   // Reshuffle the remaining (unknown to both players) deck order whenever the
   // side to move changes inside a simulation, as the Python search does.
   bool opponent_redeterminization = false;
+  // The observer's own deck reservation creates no chance node either: the
+  // drawn card stays inside the sampled world and the nodes below are shared,
+  // so the opponent's statistics never learn which card was drawn
+  // (doc/mcts_v3.md). Trees are not reused across such a reservation.
+  bool merge_own_deck_reveal = false;
   // Scale c_puct by the visit-weighted variance of child Q at the node.
   bool dynamic_cpuct = false;
   float dynamic_cpuct_variance_floor = 0.25f;
@@ -618,6 +623,9 @@ public:
       if (it == legal.end())
         return false;
       const uint8_t actor = static_cast<uint8_t>(replay.current_player());
+      if (config_.merge_own_deck_reveal && it->action.type == RESERVE_DECK &&
+          actor == observer_)
+        return false; // the shared statistics average over the drawn card
       const int32_t revealed = apply_with_reveal(replay, it->action, actor);
       int32_t next = edge->child;
       if (nodes_[next].kind == NodeKind::Chance) {
@@ -828,8 +836,7 @@ private:
       track_slot = slot >= 0;
     }
     std::array<int8_t, 3> reserved_before{};
-    const bool track_reserve =
-        action.type == RESERVE_DECK && actor == observer_;
+    const bool track_reserve = own_deck_reveal(action, actor);
     if (track_reserve)
       reserved_before = world.board.players[actor].reserved;
     bool applied;
@@ -1311,15 +1318,13 @@ private:
     }
   }
 
-  static bool reveals_to_observer_static(const Action &action, uint8_t actor,
-                                         int observer) {
-    if ((action.type == PURCHASE && !action.from_reserved) ||
-        action.type == RESERVE_VISIBLE)
-      return true;
-    return action.type == RESERVE_DECK && actor == observer;
+  bool own_deck_reveal(const Action &action, uint8_t actor) const {
+    return action.type == RESERVE_DECK && actor == observer_ &&
+           !config_.merge_own_deck_reveal;
   }
   bool reveals_to_observer(const Action &action, uint8_t actor) const {
-    return reveals_to_observer_static(action, actor, observer_);
+    return (action.type == PURCHASE && !action.from_reserved) ||
+           action.type == RESERVE_VISIBLE || own_deck_reveal(action, actor);
   }
   bool chance_needs_enumeration(int32_t chance_index) const {
     return chance_index < 0 || !nodes_[chance_index].enumerated;

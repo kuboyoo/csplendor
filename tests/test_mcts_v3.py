@@ -497,3 +497,79 @@ def test_gumbel_rejects_incompatible_settings():
     session.add_game(cs.Game(seed=7), 0, seed=3)
     with pytest.raises(ValueError):
         session.set_root_visit_floor(0, [0], [1])
+
+
+def _deck_reserve_root(seed=81):
+    """The opening position and the observer's tier-1 deck reservation id."""
+    game = cs.Game(seed=seed)
+    deck = cs.ActionEncoderV4.OFFSET_RESERVE_DECK
+    legal = np.flatnonzero(cs.ActionEncoderV4.get_action_mask(game)).tolist()
+    reserve = next(a for a in legal if deck <= a < cs.ActionEncoderV4.OFFSET_PURCHASE)
+    return game, reserve
+
+
+def _search_through_deck_reserve(merge, enumeration_depth=0, simulations=121, max_depth=300):
+    """Every root simulation goes through the observer's deck reservation."""
+    config = cs.V3SearchConfig()
+    config.max_depth = max_depth
+    config.num_simulations = simulations
+    config.leaf_batch_size = 4
+    config.merge_own_deck_reveal = merge
+    config.chance_enumeration_depth = enumeration_depth
+    game, reserve = _deck_reserve_root()
+    session = cs.V3SearchSession(config)
+    session.add_game(game, game.current_player, seed=5)
+    features, ids, offsets, slots = session.collect()  # root
+    uniform_apply(session, features, ids, offsets, slots, 0.1)
+    session.set_root_visit_floor(0, [reserve], [simulations - 1])
+    drive(session, value=0.1)
+    assert session.root_visits(0) == {reserve: simulations - 1}
+    return session, game, reserve
+
+
+def test_merge_own_deck_reveal_shares_the_nodes_below_the_reservation():
+    # One ply deep: each simulation evaluates the opponent's node below the
+    # reservation once, then stops at the depth limit.
+    split, _, _ = _search_through_deck_reserve(merge=False, max_depth=1)
+    merged, _, _ = _search_through_deck_reserve(merge=True, max_depth=1)
+    # Split: one opponent node per drawn card (the worlds draw different cards).
+    assert split.stats()["leaves"] > 2
+    # Merged: the root and a single opponent node shared by every world.
+    assert merged.stats()["leaves"] == 2
+
+
+def test_merge_own_deck_reveal_leaves_the_reservation_out_of_chance_enumeration():
+    split, _, _ = _search_through_deck_reserve(merge=False, enumeration_depth=1)
+    merged, _, _ = _search_through_deck_reserve(merge=True, enumeration_depth=1)
+    assert split.stats()["chance_enumerations"] >= 1
+    assert merged.stats()["chance_enumerations"] == 0
+
+
+def test_merge_own_deck_reveal_does_not_reuse_a_tree_across_the_reservation():
+    session, game, reserve = _search_through_deck_reserve(merge=True)
+    observer = game.current_player
+    game.apply(cs.ActionEncoderV4.decode_and_match(reserve, game))
+    assert game.current_player != observer  # no token return in the opening
+    reply = int(np.flatnonzero(cs.ActionEncoderV4.get_action_mask(game))[0])
+    played = [reserve, reply]
+    game.apply(cs.ActionEncoderV4.decode_and_match(reply, game))
+    assert not session.advance_game(0, game, played, observer, seed=6)
+    drive(session)
+    assert session.reused_visits(0) == 0
+
+
+def test_merge_own_deck_reveal_is_off_by_default_and_keeps_the_search():
+    assert cs.V3SearchConfig().merge_own_deck_reveal is False
+    traces = []
+    for explicit in (False, True):
+        config = cs.V3SearchConfig()
+        config.num_simulations = 96
+        config.leaf_batch_size = 8
+        if explicit:
+            config.merge_own_deck_reveal = False
+        session = cs.V3SearchSession(config)
+        game = cs.Game(seed=33)
+        session.add_game(game, game.current_player, seed=9)
+        drive(session, value=0.1)
+        traces.append((session.root_visits(0), session.stats()))
+    assert traces[0] == traces[1]
