@@ -18,9 +18,10 @@
 //   keyed by the revealed card. Each simulation follows the outcome its
 //   sampled world produced, so a chance node's value is the empirical
 //   expectation over uniform reveals. With merge_own_deck_reveal the
-//   observer's deck reservation creates no chance node (doc/mcts_v3.md). Optionally (chance_enumeration_depth)
-//   the chance nodes closest to the root enumerate every card the observer
-//   cannot see in that tier, evaluate all outcomes in one batch, and start
+//   observer's deck reservation creates no chance node (doc/mcts_v3.md).
+//   Optionally (chance_enumeration_depth) the chance nodes closest to the
+//   root enumerate every card the observer cannot see in that tier,
+//   evaluate all outcomes in one batch, and start
 //   from the exact (optionally risk-weighted) expectation; later simulations
 //   can back up control-variate corrected values above such nodes.
 // - Optional two-level selection: PUCT over "semantic groups" (the decision
