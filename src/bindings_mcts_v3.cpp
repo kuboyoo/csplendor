@@ -64,6 +64,7 @@ void bind_mcts_v3(py::module_ &m) {
       .def_readwrite("rollout_horizon", &Config::rollout_horizon)
       .def_readwrite("rollout_min_visits", &Config::rollout_min_visits)
       .def_readwrite("opponent_redeterminization", &Config::opponent_redeterminization)
+      .def_readwrite("merge_own_deck_reveal", &Config::merge_own_deck_reveal)
       .def_readwrite("dynamic_cpuct", &Config::dynamic_cpuct)
       .def_readwrite("dynamic_cpuct_variance_floor", &Config::dynamic_cpuct_variance_floor)
       .def_readwrite("dynamic_cpuct_min_scale", &Config::dynamic_cpuct_min_scale)
