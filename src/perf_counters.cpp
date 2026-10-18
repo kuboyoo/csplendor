@@ -20,8 +20,6 @@ constexpr std::array<const char *, COUNTER_COUNT> COUNTER_NAMES = {{
     "board_snapshot_copies",
     "board_restores",
     "action_vector_reallocations",
-    "purchased_card_vector_reallocations",
-    "acquired_noble_vector_reallocations",
     "solver_temporary_vector_allocations",
     "solver_scratch_frame_count_max",
     "solver_scratch_payload_bytes_max",

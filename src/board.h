@@ -1,6 +1,7 @@
 #ifndef CSPLENDOR_BOARD_H
 #define CSPLENDOR_BOARD_H
 
+#include "repetition_window.h"
 #include "card_data.h"
 #include "fixed_stack.h"
 #include "noble_data.h"
@@ -57,7 +58,7 @@ public:
   // first, ending with the current one. Empty means the window starts at the
   // current position (after an irreversible decision, a deal or an edit).
   static constexpr uint8_t REPETITION_DRAW_COUNT = 4;
-  std::vector<uint64_t> repetition_keys;
+  RepetitionWindow repetition_keys;
   enum class EndReason : uint8_t { None = 0, Normal = 1, Stalemate = 2, Repetition = 3 };
   EndReason end_reason = EndReason::None;
 
@@ -705,7 +706,7 @@ private:
     return hash_out_of_range_value(0x700, key);
   }
 
-  static uint64_t repetition_sum(const std::vector<uint64_t> &keys) noexcept {
+  static uint64_t repetition_sum(const RepetitionWindow &keys) noexcept {
     uint64_t sum = 0;
     for (uint64_t key : keys)
       sum += repetition_key_mix(key);

@@ -134,6 +134,8 @@ inline EligibleNobles eligible_nobles(const Board &board,
     return result;
 
   const uint16_t mask = board.players[player_index].noble_eligibility_mask;
+  if (mask == 0)
+    return result;
   for (uint8_t noble_id : board.nobles) {
     if (is_valid_noble_id(noble_id) &&
         (mask & (uint16_t(1) << noble_id)) != 0) {

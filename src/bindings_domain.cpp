@@ -8,12 +8,33 @@
 #include <pybind11/stl.h>
 #include <algorithm>
 #include <array>
+#include <string>
+#include <vector>
 #include <cstdint>
 #include <vector>
 
 namespace py = pybind11;
 
 namespace csplendor::python {
+
+namespace {
+
+template <std::size_t N>
+std::vector<uint8_t> fixed_list(const FixedStack<uint8_t, N> &values) {
+  return std::vector<uint8_t>(values.begin(), values.end());
+}
+
+template <std::size_t N>
+void assign_fixed(FixedStack<uint8_t, N> &target,
+                  const std::vector<uint8_t> &values, const char *field) {
+  if (values.size() > N)
+    throw py::value_error(std::string(field) + " is too long");
+  target.clear();
+  for (uint8_t value : values)
+    target.push_back_unchecked(value);
+}
+
+} // namespace
 
 void bind_domain(py::module_ &m) {
   py::enum_<GemType>(m, "GemType")
@@ -76,8 +97,16 @@ void bind_domain(py::module_ &m) {
                 std::count_if(p.reserved.begin(), p.reserved.end(),
                               [](int8_t id) { return id != -1; }));
           })
-      .def_readwrite("acquired_nobles", &PlayerState::acquired_nobles)
-      .def_readwrite("purchased_cards", &PlayerState::purchased_cards);
+      .def_property("acquired_nobles",
+                    [](const PlayerState &p) { return fixed_list(p.acquired_nobles); },
+                    [](PlayerState &p, const std::vector<uint8_t> &ids) {
+                      assign_fixed(p.acquired_nobles, ids, "acquired_nobles");
+                    })
+      .def_property("purchased_cards",
+                    [](const PlayerState &p) { return fixed_list(p.purchased_cards); },
+                    [](PlayerState &p, const std::vector<uint8_t> &ids) {
+                      assign_fixed(p.purchased_cards, ids, "purchased_cards");
+                    });
 
   py::class_<Action>(m, "Action")
       .def(py::init<>())

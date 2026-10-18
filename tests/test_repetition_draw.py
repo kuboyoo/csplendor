@@ -275,3 +275,23 @@ def test_kifu_result_names_the_draw_reason():
     assert "\nResult: DRAW REPETITION\n" in service.build_kifu_text(session)
     board = get_game_state(game).board
     assert (board.repetition_count, board.end_reason) == (DRAW_COUNT, 3)
+
+
+def test_long_windows_survive_copies_snapshots_and_undo():
+    # Windows of up to eight keys live inline; longer ones move to the heap.
+    game = _shuffle_game()
+    current = game.board.repetition_position_key()
+    after = current ^ 0b100  # the player-to-move bit
+    keys = [after, current] * 6  # twelve keys, three of each in each half
+    game.board.repetition_keys = keys
+    clone = game.clone_light()
+    assert clone.board.repetition_keys == keys
+    restored = cs.Game.deserialize_snapshot(game.serialize_snapshot())
+    assert restored.board.repetition_keys == keys
+    assert restored.board_hash() == game.board_hash()
+    before = game.board_hash()
+    assert game.apply(_passive(game), True)
+    assert len(game.board.repetition_keys) == 13
+    assert game.undo()
+    assert game.board.repetition_keys == keys
+    assert game.board_hash() == before

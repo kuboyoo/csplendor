@@ -5,10 +5,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <utility>
 
-// Fixed-capacity contiguous storage used by Board decks and noble lists.
+// Fixed-capacity contiguous storage used by Board decks, noble lists and the
+// players' purchased cards and nobles.
 // data/count remain public for source and layout compatibility with existing
 // C++ consumers. New internal code should use try_push_back() when capacity is
 // data-dependent, or push_back_unchecked() after proving capacity locally.
@@ -18,6 +20,13 @@ template <typename T, std::size_t MaxSize> struct FixedStack {
 
   std::array<T, MaxSize> data;
   uint8_t count = 0;
+
+  FixedStack() = default;
+  // Keeps the first MaxSize values (as push_back() does).
+  FixedStack(std::initializer_list<T> values) {
+    for (const T &value : values)
+      push_back(value);
+  }
 
   static constexpr std::size_t capacity() noexcept { return MaxSize; }
 
@@ -72,6 +81,19 @@ template <typename T, std::size_t MaxSize> struct FixedStack {
       std::move(iterator + 1, end(), iterator);
       --count;
     }
+  }
+
+  // Keeps the first `size` elements (no-op when already shorter).
+  void truncate(std::size_t size) noexcept {
+    if (size < count)
+      count = static_cast<uint8_t>(size);
+  }
+
+  friend bool operator==(const FixedStack &lhs, const FixedStack &rhs) {
+    return std::equal(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
+  }
+  friend bool operator!=(const FixedStack &lhs, const FixedStack &rhs) {
+    return !(lhs == rhs);
   }
 
   void remove(T value) {

@@ -128,6 +128,7 @@
       "mcts_v3.h",
       "perf_counters.h",
       "portable_rng.h",
+      "repetition_window.h",
       "resource_bundle.h",
       "reveal_solver_components.h",
       "rule_query.h",

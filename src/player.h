@@ -2,6 +2,7 @@
 #define CSPLENDOR_PLAYER_H
 
 #include "card_data.h"
+#include "fixed_stack.h"
 #include "noble_data.h"
 #include "resource_bundle.h"
 #include "types.h"
@@ -33,8 +34,10 @@ struct PlayerState {
                                             false}; // Hidden from others
   uint8_t reserved_count = 0;
   uint8_t purchased_count = 0;
-  std::vector<uint8_t> purchased_cards;
-  std::vector<uint8_t> acquired_nobles; // IDs of acquired nobles
+  // Inline storage keeps PlayerState (and Board) free of heap allocation, so
+  // copying a position is a flat copy.
+  FixedStack<uint8_t, CARD_COUNT> purchased_cards;
+  FixedStack<uint8_t, NOBLE_COUNT> acquired_nobles; // IDs of acquired nobles
 
   // Noble eligibility bitmask - bit i is set if player can visit noble i
   uint16_t noble_eligibility_mask = 0;

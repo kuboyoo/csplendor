@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -302,10 +303,10 @@ private:
 
   template <bool MaintainExactHash>
   bool apply_unchecked_with_mutator(const Action &action, bool record_history) {
-    Board previous;
+    std::optional<Board> previous;
     if (record_history) {
       CSPLENDOR_PERF_INC(BoardSnapshotCopies);
-      previous = board;
+      previous.emplace(board);
     }
 #ifdef CSPLENDOR_VERIFY_DELTA_UNDO
     csplendor::detail::UndoRecord delta_previous;
@@ -316,7 +317,13 @@ private:
     // A pass is built on a copy because its stalemate probe may reject an
     // arbitrary editor state.  Prime the copy before opening its transaction
     // so an already-valid exact hash remains available for delta maintenance.
-    const uint64_t previous_key = board.repetition_position_key();
+    // Only a token decision can extend the repetition window, so only it
+    // needs the key of the position it was made in.
+    const bool token_decision =
+        action.type == TAKE_DIFFERENT || action.type == TAKE_SAME ||
+        action.type == RETURN_GEM || action.type == PASS;
+    const uint64_t previous_key =
+        token_decision ? board.repetition_position_key() : 0;
     if (action.type == PASS) {
       CSPLENDOR_PERF_INC(BoardSnapshotCopies);
       Board next = board;
@@ -337,9 +344,9 @@ private:
       board = std::move(next);
       if (record_history) {
 #ifdef CSPLENDOR_VERIFY_DELTA_UNDO
-        assert(delta_previous.restores_snapshot(board, previous));
+        assert(delta_previous.restores_snapshot(board, *previous));
 #endif
-        board_history.push_back(std::move(previous));
+        board_history.push_back(std::move(*previous));
         history.push_back(action);
       }
       return true;
@@ -382,9 +389,9 @@ private:
       mutation.commit();
       if (record_history) {
 #ifdef CSPLENDOR_VERIFY_DELTA_UNDO
-        assert(delta_previous.restores_snapshot(board, previous));
+        assert(delta_previous.restores_snapshot(board, *previous));
 #endif
-        board_history.push_back(std::move(previous));
+        board_history.push_back(std::move(*previous));
         history.push_back(action);
       }
       return true;
@@ -413,9 +420,6 @@ private:
       csplendor::detail::finish_standard_action(board, mutation);
     }
     // Only tokens moved: the position can come back (repetition window).
-    const bool token_decision = action.type == TAKE_DIFFERENT ||
-                                action.type == TAKE_SAME ||
-                                action.type == RETURN_GEM;
     csplendor::detail::record_decision_outcome(
         board, mutation,
         token_decision && actor.acquired_nobles.size() == nobles_before &&
@@ -425,9 +429,9 @@ private:
 
     if (record_history) {
 #ifdef CSPLENDOR_VERIFY_DELTA_UNDO
-      assert(delta_previous.restores_snapshot(board, previous));
+      assert(delta_previous.restores_snapshot(board, *previous));
 #endif
-      board_history.push_back(std::move(previous));
+      board_history.push_back(std::move(*previous));
       history.push_back(action);
     }
     return true;

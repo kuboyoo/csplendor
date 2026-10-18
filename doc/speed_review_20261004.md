@@ -83,6 +83,8 @@ B3（V3 合法手の cache）、M2〜M4（共有木の atomic・lock）など、
 
 ### A2. Board を trivially copyable にする（`purchased_cards`/`acquired_nobles` の固定長化）【高〜中】
 
+> 2026-10-18 実施: 購入履歴・取得貴族を固定長にし、千日手の判定区間を8局面まで inline にした（CHANGELOG）。
+
 - **場所**: `src/player.h:83-84`。`std::vector<uint8_t>` を2本持つ。
 - **現状**: `Board` は trivially copyable ではない（`std::is_trivially_copyable<Board>` = 0）。複製のたびに最大4回のヒープ確保と解放が起きる。これは次の処理すべてに影響する。
   - `clone_light`、`shuffled_clone`

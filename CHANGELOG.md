@@ -1,5 +1,20 @@
 # 変更履歴 / Changelog
 
+## 未出荷：局面の複製と手の適用の高速化（2026-10-18）
+
+- `PlayerState` の購入履歴・取得貴族を固定長（90枚・12枚）にし、千日手の判定区間を8局面まで `Board` の中に持つ
+  （`src/repetition_window.h`）。局面の複製は heap 確保を伴わなくなった。Python の `purchased_cards`・`acquired_nobles`
+  に上限を超える長さを代入すると `ValueError` になる。
+- 手の適用で千日手の局面キーを、トークンだけが動く決定のときだけ計算する。貴族の判定は資格のない手番で即座に終える。
+- 計測（300局面、同一マシン）: `clone_light` 約28ns→約12ns、複製＋`apply_trusted` 約80ns→約41ns。ルール・合法手・
+  hash・snapshot は変えていない。
+- 使われなくなった性能カウンタ `purchased_card_vector_reallocations`・`acquired_noble_vector_reallocations` を削除した。
+
+English: Board copies no longer allocate (fixed-capacity provenance lists and
+an inline repetition window), and apply computes repetition keys only for
+token decisions: clone_light about 28 ns → 12 ns, clone + apply_trusted about
+80 ns → 41 ns. Rules and outputs are unchanged.
+
 ## 未出荷：場札予約の返却も補充を見てから選ぶ（行動空間V5）（2026-10-18）
 
 - 場札の予約（`RESERVE_VISIBLE`）は返却を持たなくなった。予約（場札・山札）で11枚になったら返却フェーズ

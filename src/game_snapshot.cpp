@@ -366,7 +366,6 @@ Game deserialize(std::string_view snapshot) {
       throw std::invalid_argument(
           "invalid purchased-card list in game snapshot");
     player.purchased_cards.clear();
-    player.purchased_cards.reserve(purchased_size);
     for (uint8_t index = 0; index < purchased_size; ++index) {
       const uint8_t card_id = reader.u8();
       if (!valid_card_id(card_id))
@@ -379,7 +378,6 @@ Game deserialize(std::string_view snapshot) {
       throw std::invalid_argument(
           "invalid acquired-noble list in game snapshot");
     player.acquired_nobles.clear();
-    player.acquired_nobles.reserve(acquired_noble_size);
     for (uint8_t index = 0; index < acquired_noble_size; ++index) {
       const uint8_t noble_id = reader.u8();
       if (!valid_noble_id(noble_id))

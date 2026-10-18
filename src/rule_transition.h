@@ -141,14 +141,7 @@ inline bool purchase_card(Board &board, const Card &card,
   board.bank[GOLD] = static_cast<uint8_t>(
       static_cast<int>(board.bank[GOLD]) + gold_used);
 
-#ifdef CSPLENDOR_PERF_INSTRUMENTATION
-  const size_t purchased_capacity_before = player.purchased_cards.capacity();
-#endif
   player.purchased_cards.push_back(card.id);
-#ifdef CSPLENDOR_PERF_INSTRUMENTATION
-  if (player.purchased_cards.capacity() != purchased_capacity_before)
-    CSPLENDOR_PERF_INC(PurchasedCardVectorReallocations);
-#endif
   ++player.purchased_count;
   ++player.bonuses[card.bonus];
   player.points += card.points;
@@ -190,14 +183,7 @@ inline bool purchase_card(Board &board, Mutator &mutation, const Card &card,
   mutation.set_bank(GOLD, static_cast<uint8_t>(
                               static_cast<int>(board.bank[GOLD]) + gold_used));
 
-#ifdef CSPLENDOR_PERF_INSTRUMENTATION
-  const size_t purchased_capacity_before = player.purchased_cards.capacity();
-#endif
   player.purchased_cards.push_back(card.id);
-#ifdef CSPLENDOR_PERF_INSTRUMENTATION
-  if (player.purchased_cards.capacity() != purchased_capacity_before)
-    CSPLENDOR_PERF_INC(PurchasedCardVectorReallocations);
-#endif
   CSPLENDOR_ROLLBACK_FAULT(ProvenanceAppend);
   mutation.set_player_purchased_count(
       player_index, static_cast<uint8_t>(player.purchased_count + 1));
@@ -213,14 +199,7 @@ inline bool purchase_card(Board &board, Mutator &mutation, const Card &card,
 inline void acquire_noble_unchecked(Board &board, int noble_id) {
   PlayerState &player = board.players[board.current_player];
   player.points += get_noble(noble_id).points;
-#ifdef CSPLENDOR_PERF_INSTRUMENTATION
-  const size_t noble_capacity_before = player.acquired_nobles.capacity();
-#endif
   player.acquired_nobles.push_back(static_cast<uint8_t>(noble_id));
-#ifdef CSPLENDOR_PERF_INSTRUMENTATION
-  if (player.acquired_nobles.capacity() != noble_capacity_before)
-    CSPLENDOR_PERF_INC(AcquiredNobleVectorReallocations);
-#endif
   board.nobles.remove(static_cast<uint8_t>(noble_id));
 }
 
@@ -232,14 +211,7 @@ inline void acquire_noble_unchecked(Board &board, Mutator &mutation,
   mutation.set_player_points(
       player_index,
       static_cast<uint8_t>(player.points + get_noble(noble_id).points));
-#ifdef CSPLENDOR_PERF_INSTRUMENTATION
-  const size_t noble_capacity_before = player.acquired_nobles.capacity();
-#endif
   player.acquired_nobles.push_back(static_cast<uint8_t>(noble_id));
-#ifdef CSPLENDOR_PERF_INSTRUMENTATION
-  if (player.acquired_nobles.capacity() != noble_capacity_before)
-    CSPLENDOR_PERF_INC(AcquiredNobleVectorReallocations);
-#endif
   mutation.remove_noble(static_cast<uint8_t>(noble_id));
   CSPLENDOR_ROLLBACK_FAULT(NobleAcquired);
 }
@@ -310,20 +282,20 @@ inline void finish_standard_action(Board &board, Mutator &mutation) {
 // and a token decision that changed a player's token total, restarts the
 // window at the new position (no earlier position can occur again, see
 // Board::repetition_key_totals). `previous_key` is the
-// repetition_position_key() of the position the decision was made in. The
-// REPETITION_DRAW_COUNT-th occurrence of a position draws the game unless it
-// already ended.
+// repetition_position_key() of the position the decision was made in (only
+// read for a reversible decision). The REPETITION_DRAW_COUNT-th occurrence of
+// a position draws the game unless it already ended.
 template <typename Mutator>
 inline void record_decision_outcome(Board &board, Mutator &mutation,
                                     bool reversible, uint64_t previous_key) {
-  if (!reversible ||
-      Board::repetition_key_totals(previous_key) !=
-          Board::repetition_key_totals(board.repetition_position_key())) {
+  const uint64_t key = reversible ? board.repetition_position_key() : 0;
+  if (!reversible || Board::repetition_key_totals(previous_key) !=
+                         Board::repetition_key_totals(key)) {
     mutation.clear_repetition_keys();
   } else {
     if (board.repetition_keys.empty())
       mutation.push_repetition_key(previous_key);
-    mutation.push_repetition_key(board.repetition_position_key());
+    mutation.push_repetition_key(key);
     if (!board.is_game_over() &&
         board.repetition_count() >= Board::REPETITION_DRAW_COUNT) {
       mutation.set_winner(-2);

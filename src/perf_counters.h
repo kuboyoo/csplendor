@@ -25,8 +25,6 @@ enum class Counter : size_t {
   BoardSnapshotCopies,
   BoardRestores,
   ActionVectorReallocations,
-  PurchasedCardVectorReallocations,
-  AcquiredNobleVectorReallocations,
   SolverTemporaryVectorAllocations,
   SolverScratchFrameCountMax,
   SolverScratchPayloadBytesMax,

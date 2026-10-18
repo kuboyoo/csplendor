@@ -107,10 +107,9 @@ struct UndoRecord {
     if (player.purchased_cards.size() < purchased_cards_size ||
         player.acquired_nobles.size() < acquired_nobles_size)
       return false;
-    // Restoring the window must not allocate: a rule transition only clears
-    // or appends, which never lowers the capacity below the old size.
-    if (repetition_size > MAX_REPETITION_KEYS ||
-        board.repetition_keys.capacity() < repetition_size)
+    // A compact window fits the inline storage, so restoring never allocates.
+    static_assert(MAX_REPETITION_KEYS <= RepetitionWindow::INLINE_CAPACITY);
+    if (repetition_size > MAX_REPETITION_KEYS)
       return false;
     for (int level = 0; level < 3; ++level) {
       if (board.decks[level].count > deck_counts[level])
@@ -140,12 +139,9 @@ struct UndoRecord {
     player.reserved_count = reserved_count;
     player.purchased_count = purchased_count;
     player.noble_eligibility_mask = noble_eligibility_mask;
-    // can_restore proved these are truncations. Erasing uint8_t tails cannot
-    // allocate or throw; never grow a vector from a noexcept rollback.
-    player.purchased_cards.erase(player.purchased_cards.begin() + purchased_cards_size,
-                                 player.purchased_cards.end());
-    player.acquired_nobles.erase(player.acquired_nobles.begin() + acquired_nobles_size,
-                                 player.acquired_nobles.end());
+    // can_restore proved these are truncations.
+    player.purchased_cards.truncate(purchased_cards_size);
+    player.acquired_nobles.truncate(acquired_nobles_size);
 
     board.current_player = current_player;
     board.turn = turn;
@@ -153,8 +149,8 @@ struct UndoRecord {
     board.waiting_noble = waiting_noble;
     board.waiting_return = waiting_return;
     board.winner = winner;
-    board.repetition_keys.assign(repetition_keys.begin(),
-                                 repetition_keys.begin() + repetition_size);
+    board.repetition_keys.assign(repetition_keys.data(),
+                                 repetition_keys.data() + repetition_size);
     board.end_reason = end_reason;
     board.cached_hash = cached_hash;
     board.hash_valid = hash_valid;
@@ -167,8 +163,6 @@ struct UndoRecord {
   bool restores_snapshot(const Board &post_action,
                          const Board &snapshot) const {
     Board restored = post_action;
-    // A copy only has the capacity of the post-action window.
-    restored.repetition_keys.reserve(repetition_size);
     if (repetition_size > MAX_REPETITION_KEYS) {
       // Not compact-restorable: check every other field (callers keep a
       // full Board for such windows).

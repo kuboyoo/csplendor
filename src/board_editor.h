@@ -120,8 +120,8 @@ inline void set_repetition_keys(Board &board, const std::vector<uint64_t> &keys)
       throw std::invalid_argument(
           "repetition_keys must share the current token totals");
   }
-  std::vector<uint64_t> prepared = keys;
-  board.begin_editor_metadata_mutation().repetition_keys = std::move(prepared);
+  board.begin_editor_metadata_mutation().repetition_keys.assign(
+      keys.data(), keys.data() + keys.size());
 }
 
 inline void set_end_reason(Board &board, Board::EndReason reason) {

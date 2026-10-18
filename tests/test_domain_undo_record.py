@@ -54,7 +54,10 @@ def test_undo_record_matches_snapshot_for_all_transitions_and_is_smaller():
     assert result["invalid_player_guard"] == 1
     assert result["sizeof_record"] < result["sizeof_board"] // 2
 
-    # Allocation counts are deterministic for this fixed provenance fixture.
-    # Wall-clock values are emitted for profiling, but intentionally not used
-    # as a flaky pass/fail threshold.
-    assert result["delta_allocations"] < result["snapshot_allocations"] // 100
+    # Allocation counts are deterministic for this fixed provenance fixture:
+    # a Board keeps its provenance and short repetition windows inline, so
+    # neither a delta record nor a full snapshot allocates. Wall-clock values
+    # are emitted for profiling, but intentionally not used as a flaky
+    # pass/fail threshold.
+    assert result["delta_allocations"] == 0
+    assert result["snapshot_allocations"] == 0

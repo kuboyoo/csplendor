@@ -117,7 +117,7 @@ std::string serialize(const Game &game, uint8_t observer) {
   // The repetition window is public and decides a draw. Its order does not
   // matter for the future, only how often each position occurred.
   {
-    std::vector<uint64_t> window = board.repetition_keys;
+    std::vector<uint64_t> window = board.repetition_keys.to_vector();
     std::sort(window.begin(), window.end());
     if (window.size() > UINT16_MAX)
       throw std::length_error("repetition window too long for information state");

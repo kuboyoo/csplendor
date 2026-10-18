@@ -29,6 +29,9 @@ ID 0--5を使う。カードはID 0--89、貴族はID 0--11を静的データと
 `Board`はbank、3 level×4枚のvisible card、3 deck、場の貴族、2人のplayer、手番、
 round/終局状態を持つ。`PlayerState`はgems、bonuses、points、最大3枚の予約、購入履歴、
 取得貴族を持つ。`packed_gems`、`packed_bonuses`、`noble_eligibility_mask`はderived値である。
+購入履歴（最大90枚）と取得貴族（最大12枚）は固定長の領域に置き、千日手の判定区間も8局面までは
+`Board`の中に持つ（それより長い区間だけheapを使う）。そのため局面の複製はほぼ常にheap確保を伴わない。
+Pythonの`PlayerState.purchased_cards`・`acquired_nobles`に上限を超える長さを代入すると`ValueError`になる。
 
 `Game.clone()`はaction/undo journalを含む。`clone_light()`と`shuffled_clone*()`は現在局面と
 modeだけを複製する。versioned snapshotも現在局面とmodeだけを保存し、journalとlazy hash

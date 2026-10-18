@@ -86,7 +86,7 @@ void bind_rules(py::module_ &m) {
           &state::editor::set_winner)
       .def_property(
           "repetition_keys",
-          [](const Board &b) { return b.repetition_keys; },
+          [](const Board &b) { return b.repetition_keys.to_vector(); },
           &state::editor::set_repetition_keys,
           "repetition_position_key() of the positions since the last "
           "irreversible decision, oldest first, ending with the current one "

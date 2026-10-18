@@ -92,14 +92,10 @@ public:
       CSPLENDOR_PERF_INC(SolverCompactRollbackRestores);
     } else {
       const Board &parent = std::get<1>(state_);
-      // Ordinary apply (including PASS's copy/move) cannot leave less capacity
-      // than the original provenance sizes. Check before copy assignment so
-      // this noexcept path cannot unexpectedly grow a vector.
-      for (int player = 0; player < Board::NUM_PLAYERS; ++player)
-        if (game_.board.players[player].purchased_cards.capacity() < parent.players[player].purchased_cards.size() ||
-            game_.board.players[player].acquired_nobles.capacity() < parent.players[player].acquired_nobles.size())
-          std::abort();
-      if (game_.board.repetition_keys.capacity() < parent.repetition_keys.size())
+      // Ordinary apply only clears or appends the repetition window, so a
+      // long window keeps its heap capacity. Check before copy assignment so
+      // this noexcept path cannot unexpectedly allocate.
+      if (!game_.board.repetition_keys.fits_without_allocation(parent.repetition_keys.size()))
         std::abort();
       game_.board = parent;
       CSPLENDOR_PERF_INC(SolverFullRollbackRestores);
