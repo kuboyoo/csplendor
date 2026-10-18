@@ -38,9 +38,11 @@ The main class for controlling game state.
   deck order, and phase without undo history.
 - `Game.deserialize_snapshot(snapshot: bytes) -> Game`: Restores a versioned
   lightweight snapshot after validating its rules fingerprint and checksum.
-  Only the current format/rules version (2) is accepted; a version 1 snapshot
-  is rejected with "csplendor game snapshot version 1 must be converted with
-  Game.upgrade_snapshot_v1 first".
+  The current format/rules version is 4; versions 2 and 3 are also read (the
+  repetition window starts at the restored position, see
+  doc/game_snapshot.md), and writing always produces version 4. A version 1
+  snapshot is rejected with "csplendor game snapshot version 1 must be
+  converted with Game.upgrade_snapshot_v1 first".
 - `Game.upgrade_snapshot_v1(snapshot: bytes) -> bytes`: One-off migration of a
   version 1 snapshot to the current version (version 1 positions never have a
   pending token return). There is no runtime backward compatibility.
