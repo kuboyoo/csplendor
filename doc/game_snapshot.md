@@ -22,6 +22,9 @@ C++ objectのmemory layoutやPython pickleには依存しない。
 `repetition_position_key()`（u64、古い順）を持つ。区間が長くなりうるため、snapshotの上限は64KiBである。
 `waiting_noble`と`waiting_return`が両方立つsnapshotは拒否する。
 
+購入済みcardはID昇順で書き出す。読み込みでは並び順を問わない（重複や範囲外のIDは拒否する）。
+engineは購入順を持たないため、購入順で並んだ過去のsnapshotも同じformatのまま読める。
+
 読み込めるのはversion 5だけである。version 1〜4のsnapshotは拒否し、変換の手段も提供しない。
 
 ```python

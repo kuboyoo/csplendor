@@ -77,7 +77,7 @@ def test_reserve_and_purchase_full_state_corpus_digest():
     )
     assert len(records) == 4367
     assert _sha256(records) == (
-        "c2876911b854f766a95d6137586016202d1bae95c4a5ce5843b5c7b3c0076b44"
+        "cfe99d9bc5d70ccd5926093396b8ec02f90bb7643d41ed0f4928bb51a93ad7ac"
     )
 
 

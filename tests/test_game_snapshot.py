@@ -1,4 +1,5 @@
 import hashlib
+import struct
 
 import pytest
 
@@ -163,3 +164,44 @@ def test_snapshot_preserves_a_pending_return():
     assert [a.pack() for a in restored.legal_actions] == [
         a.pack() for a in game.legal_actions
     ]
+
+
+SNAPSHOT_HEADER_BYTES = 28
+
+
+def _with_payload_bytes_replaced(snapshot, old, new):
+    payload = snapshot[SNAPSHOT_HEADER_BYTES:-8]
+    assert payload.count(old) == 1
+    payload = payload.replace(old, new)
+    checksum = 14695981039346656037
+    for value in payload:
+        checksum = ((checksum ^ value) * 1099511628211) % (1 << 64)
+    return snapshot[:SNAPSHOT_HEADER_BYTES] + payload + struct.pack("<Q", checksum)
+
+
+def _game_with_purchased_cards(card_ids):
+    game = csplendor.Game(seed=3)
+    player = game.board.get_player(0)
+    player.purchased_cards = card_ids
+    player.purchased_count = len(card_ids)
+    game.board.set_player(0, player)
+    return game
+
+
+def test_snapshot_writes_purchased_cards_in_ascending_order_and_reads_any_order():
+    game = _game_with_purchased_cards([40, 2, 17])
+    snapshot = game.serialize_snapshot()
+    ascending = bytes([3, 2, 17, 40])
+    assert ascending in snapshot
+
+    # Snapshots written in purchase order by earlier engines still load.
+    purchase_order = _with_payload_bytes_replaced(
+        snapshot, ascending, bytes([3, 40, 2, 17])
+    )
+    restored = csplendor.Game.deserialize_snapshot(purchase_order)
+    assert restored.board.get_player(0).purchased_cards == [2, 17, 40]
+    assert restored.serialize_snapshot() == snapshot
+
+    duplicate = _with_payload_bytes_replaced(snapshot, ascending, bytes([3, 2, 17, 2]))
+    with pytest.raises(ValueError, match="purchased card"):
+        csplendor.Game.deserialize_snapshot(duplicate)

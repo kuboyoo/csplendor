@@ -10,45 +10,6 @@
 
 namespace csplendor::solver_internal {
 
-void CardIdSet::clear() noexcept {
-  low = 0;
-  high = 0;
-}
-
-void CardIdSet::add(int card_id) noexcept {
-  if (card_id < 0 || card_id >= CARD_COUNT)
-    return;
-  if (card_id < 64)
-    low |= uint64_t{1} << card_id;
-  else
-    high |= uint64_t{1} << (card_id - 64);
-}
-
-void CardIdSet::remove(int card_id) noexcept {
-  if (card_id < 0 || card_id >= CARD_COUNT)
-    return;
-  if (card_id < 64)
-    low &= ~(uint64_t{1} << card_id);
-  else
-    high &= ~(uint64_t{1} << (card_id - 64));
-}
-
-bool CardIdSet::contains(int card_id) const noexcept {
-  if (card_id < 0 || card_id >= CARD_COUNT)
-    return false;
-  if (card_id < 64)
-    return (low & (uint64_t{1} << card_id)) != 0;
-  return (high & (uint64_t{1} << (card_id - 64))) != 0;
-}
-
-bool CardIdSet::operator==(const CardIdSet &other) const noexcept {
-  return low == other.low && high == other.high;
-}
-
-bool CardIdSet::operator!=(const CardIdSet &other) const noexcept {
-  return !(*this == other);
-}
-
 void HiddenOutcomeCatalog::remember_initial_position(
     const Game &game) noexcept {
   known_.clear();
@@ -79,18 +40,9 @@ bool HiddenOutcomeCatalog::is_claimed(const Board &board,
   if (card_id < 0 || card_id >= CARD_COUNT)
     return false;
   for (int player = 0; player < Board::NUM_PLAYERS; ++player) {
-    const auto &cards = board.players[player].purchased_cards;
-#ifdef CSPLENDOR_PERF_INSTRUMENTATION
-    for (uint8_t purchased : cards) {
-      CSPLENDOR_PERF_INC(SolverIsClaimedComparisons);
-      if (purchased == static_cast<uint8_t>(card_id))
-        return true;
-    }
-#else
-    if (std::find(cards.begin(), cards.end(), static_cast<uint8_t>(card_id)) !=
-        cards.end())
+    CSPLENDOR_PERF_INC(SolverIsClaimedComparisons);
+    if (board.players[player].purchased_cards.contains(card_id))
       return true;
-#endif
   }
   for (int level = 0; level < 3; ++level) {
     for (int slot = 0; slot < Board::CARDS_PER_LEVEL; ++slot) {
@@ -109,8 +61,8 @@ bool HiddenOutcomeCatalog::is_claimed(const Board &board,
   return false;
 }
 
-CardIdSet HiddenOutcomeCatalog::claimed_cards(const Board &board) noexcept {
-  CardIdSet result;
+CardSet HiddenOutcomeCatalog::claimed_cards(const Board &board) noexcept {
+  CardSet result;
   for (const PlayerState &player : board.players) {
     for (uint8_t card_id : player.purchased_cards)
       result.add(card_id);
@@ -124,9 +76,9 @@ CardIdSet HiddenOutcomeCatalog::claimed_cards(const Board &board) noexcept {
   return result;
 }
 
-CardIdSet
+CardSet
 HiddenOutcomeCatalog::unseen_cards(const Board &board) const noexcept {
-  CardIdSet result;
+  CardSet result;
   for (int level = 0; level < 3; ++level) {
     for (uint8_t card_id : board.decks[level]) {
       CSPLENDOR_PERF_INC(SolverScannedDeckCards);
@@ -136,9 +88,9 @@ HiddenOutcomeCatalog::unseen_cards(const Board &board) const noexcept {
   return result;
 }
 
-CardIdSet
+CardSet
 HiddenOutcomeCatalog::acquired_hidden_cards(const Board &board) const noexcept {
-  CardIdSet result;
+  CardSet result;
   for (int player = 0; player < Board::NUM_PLAYERS; ++player) {
     for (uint8_t card_id : board.players[player].purchased_cards) {
       CSPLENDOR_PERF_INC(SolverScannedPurchasedIds);
@@ -334,20 +286,20 @@ bool RevealSearchState::initialize(
 
 bool RevealSearchState::active() const noexcept { return active_; }
 
-const std::array<CardIdSet, 3> &
+const std::array<CardSet, 3> &
 RevealSearchState::remaining_by_level() const noexcept {
   return remaining_by_level_;
 }
 
-const CardIdSet &RevealSearchState::remaining_all() const noexcept {
+const CardSet &RevealSearchState::remaining_all() const noexcept {
   return remaining_all_;
 }
 
-const CardIdSet &RevealSearchState::acquired_hidden() const noexcept {
+const CardSet &RevealSearchState::acquired_hidden() const noexcept {
   return acquired_hidden_;
 }
 
-const CardIdSet &RevealSearchState::claimed() const noexcept {
+const CardSet &RevealSearchState::claimed() const noexcept {
   return claimed_;
 }
 
@@ -368,8 +320,7 @@ RevealSearchState::observe_before(const Board &board) const noexcept {
       observation.deck_tops[level] = board.decks[level].back();
   }
   for (int player = 0; player < Board::NUM_PLAYERS; ++player)
-    observation.purchased_sizes[player] =
-        board.players[player].purchased_cards.size();
+    observation.purchased[player] = board.players[player].purchased_cards;
   return observation;
 }
 
@@ -398,14 +349,12 @@ void RevealSearchState::observe_after(
   }
 
   for (int player = 0; player < Board::NUM_PLAYERS; ++player) {
-    const auto &purchased = board.players[player].purchased_cards;
-    if (purchased.size() < before.purchased_sizes[player]) {
-      runtime_fallback("purchased-card vector shrank");
+    const CardSet &purchased = board.players[player].purchased_cards;
+    if (!before.purchased[player].minus(purchased).empty()) {
+      runtime_fallback("purchased cards shrank");
       return;
     }
-    for (size_t index = before.purchased_sizes[player];
-         index < purchased.size(); ++index) {
-      const int card_id = purchased[index];
+    for (uint8_t card_id : purchased.minus(before.purchased[player])) {
       claimed_.add(card_id);
       if (catalog.is_initially_hidden(card_id))
         acquired_hidden_.add(card_id);
@@ -469,8 +418,8 @@ bool RevealSearchState::matches_reference(
     const Board &board, const HiddenOutcomeCatalog &catalog) const noexcept {
   if (!active_)
     return true;
-  std::array<CardIdSet, 3> expected_by_level{};
-  CardIdSet expected_all;
+  std::array<CardSet, 3> expected_by_level{};
+  CardSet expected_all;
   for (int level = 0; level < 3; ++level) {
     for (uint8_t card_id : board.decks[level]) {
       expected_by_level[level].add(card_id);
@@ -520,7 +469,7 @@ void RevealSearchState::verify_or_abort(
 }
 
 void RevealSearchState::deactivate() noexcept {
-  for (CardIdSet &cards : remaining_by_level_)
+  for (CardSet &cards : remaining_by_level_)
     cards.clear();
   remaining_all_.clear();
   acquired_hidden_.clear();

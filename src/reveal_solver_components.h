@@ -22,18 +22,6 @@ inline const volatile bool incremental_reveal_search_state_enabled = false;
 
 } // namespace config
 
-struct CardIdSet {
-  uint64_t low = 0;
-  uint64_t high = 0;
-
-  void clear() noexcept;
-  void add(int card_id) noexcept;
-  void remove(int card_id) noexcept;
-  bool contains(int card_id) const noexcept;
-  bool operator==(const CardIdSet &other) const noexcept;
-  bool operator!=(const CardIdSet &other) const noexcept;
-};
-
 class HiddenOutcomeCatalog {
 public:
   void remember_initial_position(const Game &game) noexcept;
@@ -41,13 +29,13 @@ public:
   bool is_initially_known(int card_id) const noexcept;
   bool is_initially_hidden(int card_id) const noexcept;
   static bool is_claimed(const Board &board, int card_id) noexcept;
-  static CardIdSet claimed_cards(const Board &board) noexcept;
-  CardIdSet unseen_cards(const Board &board) const noexcept;
-  CardIdSet acquired_hidden_cards(const Board &board) const noexcept;
+  static CardSet claimed_cards(const Board &board) noexcept;
+  CardSet unseen_cards(const Board &board) const noexcept;
+  CardSet acquired_hidden_cards(const Board &board) const noexcept;
 
 private:
-  CardIdSet known_;
-  CardIdSet hidden_;
+  CardSet known_;
+  CardSet hidden_;
 };
 
 // Solver-owned sidecar for canonical reveal-search roots.  It deliberately
@@ -59,17 +47,17 @@ public:
   struct TransitionObservation {
     std::array<size_t, 3> deck_sizes = {0, 0, 0};
     std::array<int, 3> deck_tops = {-1, -1, -1};
-    std::array<size_t, Board::NUM_PLAYERS> purchased_sizes = {0, 0};
+    std::array<CardSet, Board::NUM_PLAYERS> purchased{};
   };
 
   bool initialize(const Game &game,
                   const HiddenOutcomeCatalog &catalog) noexcept;
   bool active() const noexcept;
 
-  const std::array<CardIdSet, 3> &remaining_by_level() const noexcept;
-  const CardIdSet &remaining_all() const noexcept;
-  const CardIdSet &acquired_hidden() const noexcept;
-  const CardIdSet &claimed() const noexcept;
+  const std::array<CardSet, 3> &remaining_by_level() const noexcept;
+  const CardSet &remaining_all() const noexcept;
+  const CardSet &acquired_hidden() const noexcept;
+  const CardSet &claimed() const noexcept;
   uint64_t rule_hash() const noexcept;
 
   bool is_claimed(const Board &board, int card_id) const noexcept;
@@ -94,10 +82,10 @@ private:
   void deactivate() noexcept;
   void runtime_fallback(const char *reason) noexcept;
 
-  std::array<CardIdSet, 3> remaining_by_level_{};
-  CardIdSet remaining_all_;
-  CardIdSet acquired_hidden_;
-  CardIdSet claimed_;
+  std::array<CardSet, 3> remaining_by_level_{};
+  CardSet remaining_all_;
+  CardSet acquired_hidden_;
+  CardSet claimed_;
   uint64_t rule_hash_ = 0;
   uint64_t deck_order_hash_ = 0;
   bool active_ = false;

@@ -591,7 +591,7 @@ void install_purchased_cards(Game &game, uint8_t player_index,
       throw std::runtime_error(
           "fixture purchased card is not in public storage");
     const Card &card = get_card(card_id);
-    player.purchased_cards.push_back(card_id);
+    player.purchased_cards.add(card_id);
     ++player.bonuses[card.bonus];
     player.points = static_cast<uint8_t>(player.points + card.points);
   }
@@ -2698,18 +2698,18 @@ SolverBenchmarkKey make_solver_benchmark_key(
     bool root_independent = false) {
   CSPLENDOR_PERF_INC(SolverStateKeyCalls);
   const Board &board = game.board;
-  csplendor::solver_internal::CardIdSet unseen;
-  csplendor::solver_internal::CardIdSet acquired_hidden;
+  CardSet unseen;
+  CardSet acquired_hidden;
   uint64_t board_hash = 0;
   if (search_state != nullptr && search_state->active()) {
     CSPLENDOR_PERF_INC(SolverRevealStateFastKeyReads);
     unseen = search_state->remaining_all();
-    acquired_hidden = root_independent ? csplendor::solver_internal::CardIdSet{}
+    acquired_hidden = root_independent ? CardSet{}
                                        : search_state->acquired_hidden();
     board_hash = search_state->rule_hash();
   } else {
     unseen = catalog.unseen_cards(board);
-    acquired_hidden = root_independent ? csplendor::solver_internal::CardIdSet{}
+    acquired_hidden = root_independent ? CardSet{}
                                        : catalog.acquired_hidden_cards(board);
     board_hash = board.compute_set_deck_search_hash();
   }

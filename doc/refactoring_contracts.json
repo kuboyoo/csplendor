@@ -109,6 +109,7 @@
       "board_editor.h",
       "bindings.h",
       "bindings_array.h",
+      "card_set.h",
       "cli_utils.h",
       "encoding_schema.h",
       "fixed_stack.h",

@@ -22,7 +22,6 @@
 
 using csplendor::solver_internal::ActionOrderKey;
 using csplendor::solver_internal::CardEquivalenceMask;
-using csplendor::solver_internal::CardIdSet;
 using csplendor::solver_internal::ForceStatus;
 using csplendor::solver_internal::HiddenOutcomeCatalog;
 using csplendor::solver_internal::OracleActionMetadata;
@@ -2317,8 +2316,8 @@ private:
   StateKey state_key(const Game &game, bool root_independent = false) const {
     CSPLENDOR_PERF_INC(SolverStateKeyCalls);
     const Board &board = game.board;
-    CardIdSet unseen;
-    CardIdSet acquired_hidden;
+    CardSet unseen;
+    CardSet acquired_hidden;
     uint64_t rule_position_hash = 0;
     if (reveal_state_.active()) {
       CSPLENDOR_PERF_INC(SolverRevealStateFastKeyReads);
@@ -2327,12 +2326,12 @@ private:
 #endif
       unseen = reveal_state_.remaining_all();
       acquired_hidden =
-          root_independent ? CardIdSet{} : reveal_state_.acquired_hidden();
+          root_independent ? CardSet{} : reveal_state_.acquired_hidden();
       rule_position_hash = reveal_state_.rule_hash();
     } else {
       unseen = hidden_catalog_.unseen_cards(board);
       acquired_hidden = root_independent
-                            ? CardIdSet{}
+                            ? CardSet{}
                             : hidden_catalog_.acquired_hidden_cards(board);
       rule_position_hash = board.compute_set_deck_search_hash();
     }

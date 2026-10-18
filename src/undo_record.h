@@ -35,7 +35,7 @@ struct UndoRecord {
   uint8_t reserved_count = 0;
   uint8_t purchased_count = 0;
   uint16_t noble_eligibility_mask = 0;
-  size_t purchased_cards_size = 0;
+  CardSet purchased_cards;
   size_t acquired_nobles_size = 0;
 
   uint8_t current_player = 0;
@@ -81,7 +81,7 @@ struct UndoRecord {
     record.reserved_count = player.reserved_count;
     record.purchased_count = player.purchased_count;
     record.noble_eligibility_mask = player.noble_eligibility_mask;
-    record.purchased_cards_size = player.purchased_cards.size();
+    record.purchased_cards = player.purchased_cards;
     record.acquired_nobles_size = player.acquired_nobles.size();
 
     record.current_player = board.current_player;
@@ -104,7 +104,7 @@ struct UndoRecord {
     if (player_index >= Board::NUM_PLAYERS)
       return false;
     const PlayerState &player = board.players[player_index];
-    if (player.purchased_cards.size() < purchased_cards_size ||
+    if (!purchased_cards.minus(player.purchased_cards).empty() ||
         player.acquired_nobles.size() < acquired_nobles_size)
       return false;
     // A compact window fits the inline storage, so restoring never allocates.
@@ -139,8 +139,8 @@ struct UndoRecord {
     player.reserved_count = reserved_count;
     player.purchased_count = purchased_count;
     player.noble_eligibility_mask = noble_eligibility_mask;
-    // can_restore proved these are truncations.
-    player.purchased_cards.truncate(purchased_cards_size);
+    // can_restore proved these only drop cards and nobles gained since.
+    player.purchased_cards = purchased_cards;
     player.acquired_nobles.truncate(acquired_nobles_size);
 
     board.current_player = current_player;

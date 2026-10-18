@@ -196,15 +196,11 @@ std::string serialize(const Game &game) {
     payload.u8(player.purchased_count);
 
     if (player.reserved_count > Board::MAX_RESERVED ||
-        player.purchased_count > CARD_COUNT ||
-        player.purchased_cards.size() > CARD_COUNT)
+        player.purchased_count > CARD_COUNT)
       throw std::invalid_argument("invalid player count for game snapshot");
     payload.u8(static_cast<uint8_t>(player.purchased_cards.size()));
-    for (uint8_t card_id : player.purchased_cards) {
-      if (!valid_card_id(card_id))
-        throw std::invalid_argument("invalid purchased card for game snapshot");
+    for (uint8_t card_id : player.purchased_cards)
       payload.u8(card_id);
-    }
 
     if (player.acquired_nobles.size() > NOBLE_COUNT)
       throw std::invalid_argument("too many acquired nobles in game snapshot");
@@ -368,9 +364,10 @@ Game deserialize(std::string_view snapshot) {
     player.purchased_cards.clear();
     for (uint8_t index = 0; index < purchased_size; ++index) {
       const uint8_t card_id = reader.u8();
-      if (!valid_card_id(card_id))
+      // Any order is accepted; earlier engines wrote purchase order.
+      if (!valid_card_id(card_id) || player.purchased_cards.contains(card_id))
         throw std::invalid_argument("invalid purchased card in game snapshot");
-      player.purchased_cards.push_back(card_id);
+      player.purchased_cards.add(card_id);
     }
 
     const uint8_t acquired_noble_size = reader.u8();

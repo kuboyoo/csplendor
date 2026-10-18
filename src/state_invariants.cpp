@@ -174,8 +174,7 @@ InvariantReport validate_invariants(const Board &board,
     const int token_limit =
         Board::MAX_TOKENS +
         (board.waiting_return && player_index == board.current_player ? 1 : 0);
-    if (player.purchased_cards.size() > CARD_COUNT ||
-        player.acquired_nobles.size() > NOBLE_COUNT) {
+    if (player.acquired_nobles.size() > NOBLE_COUNT) {
       report.add(InvariantViolation::InvalidProvenanceCapacity);
     }
 

@@ -34,6 +34,20 @@ void assign_fixed(FixedStack<uint8_t, N> &target,
     target.push_back_unchecked(value);
 }
 
+CardSet card_set_from(const std::vector<uint8_t> &ids) {
+  CardSet cards;
+  for (uint8_t id : ids) {
+    if (!CardSet::valid(id))
+      throw py::value_error("purchased_cards has an invalid card ID: " +
+                            std::to_string(id));
+    if (cards.contains(id))
+      throw py::value_error("purchased_cards has a duplicate card ID: " +
+                            std::to_string(id));
+    cards.add(id);
+  }
+  return cards;
+}
+
 } // namespace
 
 void bind_domain(py::module_ &m) {
@@ -103,9 +117,12 @@ void bind_domain(py::module_ &m) {
                       assign_fixed(p.acquired_nobles, ids, "acquired_nobles");
                     })
       .def_property("purchased_cards",
-                    [](const PlayerState &p) { return fixed_list(p.purchased_cards); },
+                    [](const PlayerState &p) {
+                      return std::vector<uint8_t>(p.purchased_cards.begin(),
+                                                  p.purchased_cards.end());
+                    },
                     [](PlayerState &p, const std::vector<uint8_t> &ids) {
-                      assign_fixed(p.purchased_cards, ids, "purchased_cards");
+                      p.purchased_cards = card_set_from(ids);
                     });
 
   py::class_<Action>(m, "Action")

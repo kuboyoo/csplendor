@@ -1,5 +1,23 @@
 # 変更履歴 / Changelog
 
+## 未出荷：購入済みカードを集合で持つ（2026-10-19）
+
+- `PlayerState.purchased_cards` を購入順を持たない90ビットのカードIDの集合（`CardSet`、`src/card_set.h`）にした。
+  `PlayerState` は152→80バイト、`Board` は592→448バイトになった。ルール・合法手・hashは変わらない。
+- Python の `purchased_cards` はID昇順のlistを返す。代入は順不同を受け付け、範囲外のIDや重複は `ValueError`。
+- snapshot の format・rules version は5のまま。購入済みカードはID昇順で書き出し、読み込みは並び順を問わない
+  （購入順で書かれた過去の snapshot も読める）。同じ局面の snapshot のバイト列と、SPN の `bought:[…]` の並びは
+  変わりうる。information state は元からID順なので変わらない。
+- 準詰み探索の内部で使っていた `CardIdSet` は `CardSet` に統合した。
+- 計測（300局面、同一マシン、学習の並走あり）: `clone_light` 約12.0ns→約9.6ns、複製＋`apply_trusted`
+  約43.5ns→約38.6ns。
+
+English: purchased cards are now an unordered 90-bit card-ID set. Python lists
+them in ascending ID order, snapshots keep format/rules version 5 (written
+ascending, read in any order), and Board shrinks from 592 to 448 bytes:
+clone_light about 12.0 ns → 9.6 ns, clone + apply_trusted about 43.5 ns →
+38.6 ns.
+
 ## 未出荷：局面の複製と手の適用の高速化（2026-10-18）
 
 - `PlayerState` の購入履歴・取得貴族を固定長（90枚・12枚）にし、千日手の判定区間を8局面まで `Board` の中に持つ

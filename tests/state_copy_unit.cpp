@@ -59,7 +59,7 @@ void test_copy_policies() {
 
   // Every copy owns its Board and provenance vectors independently.
   const size_t source_count = source.board.players[0].purchased_cards.size();
-  current.board.players[0].purchased_cards.push_back(89);
+  current.board.players[0].purchased_cards.add(89);
   check(source.board.players[0].purchased_cards.size() == source_count);
 }
 
@@ -82,7 +82,7 @@ void test_undo_snapshot_preserves_editor_compatibility() {
   // Public C++ and Python editors may mutate after apply(). Production undo
   // deliberately restores the complete pre-action Board snapshot.
   game.board.begin_editor_mutation().turn = 60000;
-  game.board.players[0].purchased_cards.push_back(89);
+  game.board.players[0].purchased_cards.add(89);
   check(game.undo());
   check(csplendor::snapshot::serialize(game) == before);
 }

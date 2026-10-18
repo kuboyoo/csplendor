@@ -41,7 +41,7 @@ Pythonの `Game` は `False` が既定です。対局サーバー・AI・棋譜�
 `GameStateSchema` は次を返します。
 
 - `board`: `bank`, `visible_cards`, `deck_counts`, `nobles`, `current_player`, `turn`, `waiting_noble`, `waiting_return`, `pending_decision`, `repetition_count`, `end_reason`, `game_over`, `winner`。`pending_decision` は `0` なし、`1` トークン返却、`2` 貴族選択。`repetition_count` は現在局面がこれまでに現れた回数（千日手の判定区間内。4で引き分け）、`end_reason` は終局理由（`0` 未終局、`1` 通常、`2` 両者パス、`3` 千日手）。棋譜の書き出しは両者パス・千日手の引き分けを `Result: DRAW STALEMATE` / `Result: DRAW REPETITION` と書く。
-- `players`: 各プレイヤーのトークン、ボーナス、点数、予約・購入カードID、獲得貴族ID。
+- `players`: 各プレイヤーのトークン、ボーナス、点数、予約・購入カードID（購入カードはID昇順で、購入順は持たない）、獲得貴族ID。
 - `legal_actions`: 行動種別、対象、取得・返却、支払い、貴族選択、USI表記。
 
 初期銀行は `[4,4,4,4,4,5]`、公開後の初期山札残数は `[36,26,16]` です。色順は白・青・緑・赤・黒・金で、5要素の配列は金を含みません。カード・貴族の描画用データは [カタログ](card_catalog.md) または `get_all_cards()` / `get_all_nobles()` から取得できます。

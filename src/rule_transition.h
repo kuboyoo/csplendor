@@ -141,7 +141,7 @@ inline bool purchase_card(Board &board, const Card &card,
   board.bank[GOLD] = static_cast<uint8_t>(
       static_cast<int>(board.bank[GOLD]) + gold_used);
 
-  player.purchased_cards.push_back(card.id);
+  player.purchased_cards.add(card.id);
   ++player.purchased_count;
   ++player.bonuses[card.bonus];
   player.points += card.points;
@@ -183,7 +183,7 @@ inline bool purchase_card(Board &board, Mutator &mutation, const Card &card,
   mutation.set_bank(GOLD, static_cast<uint8_t>(
                               static_cast<int>(board.bank[GOLD]) + gold_used));
 
-  player.purchased_cards.push_back(card.id);
+  player.purchased_cards.add(card.id);
   CSPLENDOR_ROLLBACK_FAULT(ProvenanceAppend);
   mutation.set_player_purchased_count(
       player_index, static_cast<uint8_t>(player.purchased_count + 1));
