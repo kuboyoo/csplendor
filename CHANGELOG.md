@@ -1,5 +1,10 @@
 # 変更履歴 / Changelog
 
+## 未出荷：準詰みの初手指定（2026-10-18）
+
+- `near_mate_probability_cpp` に `required_root_action`（packed action code）を追加した。攻め側の初手をその手だけに
+  限って準詰みの確率を評価する（`doc/mate_usage.md`）。dlsplendor の準詰みによる手の上書きが使う。
+
 ## 未出荷：V3 探索で観測者自身の山札予約を分岐させない選択肢（2026-10-17）
 
 - `V3SearchConfig.merge_own_deck_reveal`（既定 `False`）を追加した。`True` では観測者の山札予約も chance 節点を作らず、
