@@ -8,10 +8,11 @@
 > **Header**: `src/action_encoder_v3.h`
 > **Python**: `csplendor.ActionEncoderV3`
 
-> **Note (2026-10-05)**: 山札予約の返却は別の `RETURN_GEM` 行動（返却フェーズ）になった。
-> V3はこれを表現できず、返却フェーズではマスクが空、`encode` は `-1` を返す。
-> 全行動policyには [ActionEncoderV4](action_space_v4.md)（3121枠）を使う。
-> V3の山札予約21枠のうち、現行ルールで合法になるのは返却なしの3枠（`1064 + level * 7`）だけである。
+> **Note (2026-10-18)**: 予約（場札・山札）の返却は別の `RETURN_GEM` 行動（返却フェーズ）になった
+> （山札は2026-10-05、場札は2026-10-18から）。V3はこれを表現できず、返却フェーズではマスクが空、
+> `encode` は `-1` を返す。全行動policyには [ActionEncoderV5](action_space_v5.md)（3049枠）を使う。
+> V3の予約枠のうち、現行ルールで合法になるのは返却なしの場札予約12枠（`980 + slot * 7`）と
+> 山札予約3枠（`1064 + level * 7`）だけである。
 
 ## Overview
 
@@ -164,7 +165,9 @@ action_id = 840 + color * 28 + ret_pattern
 
 ### RESERVE_VISIBLE (offset 980, size 84)
 
-Same as V2. Reserve a face-up card from the board.
+Same as V2. Reserve a face-up card from the board. Under the current rules a
+reservation never carries a return, so only `ret_pattern = 0` is legal; the
+return is a separate `RETURN_GEM` action that V3 cannot encode (see V5).
 
 ```
 slot = level * 4 + position  // 0-11
@@ -174,9 +177,8 @@ action_id = 980 + slot * 7 + ret_pattern
 
 ### RESERVE_DECK (offset 1064, size 21)
 
-Same as V2. Reserve the top card from a deck. Under the current rules a deck
-reservation never carries a return, so only `ret_pattern = 0` is legal; the
-return is a separate `RETURN_GEM` action that V3 cannot encode (see V4).
+Same as V2. Reserve the top card from a deck. As with face-up reservations,
+only `ret_pattern = 0` is legal (see V5).
 
 ```
 level = deck level (0-2)

@@ -11,11 +11,11 @@ namespace csplendor::information_state {
 // Durable, observer-safe identity used by offline analysis and opening books.
 // The bytes are an identity only: they deliberately omit the authoritative
 // hidden partition and therefore cannot be deserialized into a Game.
-// Format 3 / rules 2 add the pending deck-reservation return; format 5 /
-// rules 4 replace the passive streak with the repetition window (a position
-// occurring for the fourth time draws).
-static constexpr uint16_t FORMAT_VERSION = 5;
-static constexpr uint16_t RULES_VERSION = 4;
+// Format 6 / rules 5: no reservation carries a token return (RETURN_GEM
+// follows the refill or the drawn card); the bytes include the pending
+// return, the end reason and the repetition window.
+static constexpr uint16_t FORMAT_VERSION = 6;
+static constexpr uint16_t RULES_VERSION = 5;
 static constexpr std::array<uint8_t, 8> MAGIC = {
     {'C', 'S', 'P', 'L', 'I', 'N', 'F', 'O'}};
 

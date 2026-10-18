@@ -160,14 +160,13 @@ struct ActionSpaceV3 {
   }
 };
 
-// V4: a deck reservation no longer carries a token return (one id per
-// level); the excess is returned afterwards by RETURN_GEM (one id per colour,
-// gold last), chosen after the player has seen the drawn card.
-struct ActionSpaceV4 {
-  static constexpr uint32_t VERSION = 4;
+// V5: no reservation carries a token return (one id per board slot and per
+// deck level); the excess is returned afterwards by RETURN_GEM (one id per
+// colour, gold last), chosen after the refill or the drawn card is seen.
+struct ActionSpaceV5 {
+  static constexpr uint32_t VERSION = 5;
   static constexpr int TAKE_DIFF_RETURN_PATTERNS = 84;
   static constexpr int TAKE_SAME_RETURN_PATTERNS = 28;
-  static constexpr int RESERVE_RETURN_PATTERNS = 7;
 
   static constexpr int NUM_TAKE_DIFFERENT = 10;
   static constexpr int NUM_TAKE_SAME = 5;
@@ -185,7 +184,7 @@ struct ActionSpaceV4 {
   static constexpr int OFFSET_RESERVE_VISIBLE =
       OFFSET_TAKE_SAME + NUM_TAKE_SAME * TAKE_SAME_RETURN_PATTERNS;
   static constexpr int OFFSET_RESERVE_DECK =
-      OFFSET_RESERVE_VISIBLE + NUM_RESERVE_VISIBLE * RESERVE_RETURN_PATTERNS;
+      OFFSET_RESERVE_VISIBLE + NUM_RESERVE_VISIBLE;
   static constexpr int OFFSET_PURCHASE = OFFSET_RESERVE_DECK + NUM_RESERVE_DECK;
   static constexpr int OFFSET_VISIT_NOBLE = OFFSET_PURCHASE + TOTAL_PURCHASE;
   static constexpr int OFFSET_RETURN_GEM = OFFSET_VISIT_NOBLE + NUM_NOBLES;
@@ -198,7 +197,7 @@ struct ActionSpaceV4 {
       {"take_same", TAKE_SAME, OFFSET_TAKE_SAME,
        NUM_TAKE_SAME *TAKE_SAME_RETURN_PATTERNS},
       {"reserve_visible", RESERVE_VISIBLE, OFFSET_RESERVE_VISIBLE,
-       NUM_RESERVE_VISIBLE *RESERVE_RETURN_PATTERNS},
+       NUM_RESERVE_VISIBLE},
       {"reserve_deck", RESERVE_DECK, OFFSET_RESERVE_DECK, NUM_RESERVE_DECK},
       {"purchase", PURCHASE, OFFSET_PURCHASE, TOTAL_PURCHASE},
       {"visit_noble", VISIT_NOBLE, OFFSET_VISIT_NOBLE, NUM_NOBLES},
@@ -207,16 +206,17 @@ struct ActionSpaceV4 {
   }};
 
   static constexpr const char *fingerprint() noexcept {
-    return "csplendor.action.v4;size=3121;layout=840,140,84,3,2035,12,6,1";
+    return "csplendor.action.v5;size=3049;layout=840,140,12,3,2035,12,6,1";
   }
 };
 
-static_assert(ActionSpaceV4::SIZE == 3121, "V4 action space size");
-static_assert(ActionSpaceV4::OFFSET_PURCHASE == 1067 &&
-                  ActionSpaceV4::OFFSET_VISIT_NOBLE == 3102 &&
-                  ActionSpaceV4::OFFSET_RETURN_GEM == 3114 &&
-                  ActionSpaceV4::OFFSET_PASS == 3120,
-              "V4 action layout");
+static_assert(ActionSpaceV5::SIZE == 3049, "V5 action space size");
+static_assert(ActionSpaceV5::OFFSET_RESERVE_DECK == 992 &&
+                  ActionSpaceV5::OFFSET_PURCHASE == 995 &&
+                  ActionSpaceV5::OFFSET_VISIT_NOBLE == 3030 &&
+                  ActionSpaceV5::OFFSET_RETURN_GEM == 3042 &&
+                  ActionSpaceV5::OFFSET_PASS == 3048,
+              "V5 action layout");
 
 struct StateFeatureV1 {
   static constexpr uint32_t VERSION = 1;

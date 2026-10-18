@@ -1,5 +1,5 @@
-#ifndef CSPLENDOR_ACTION_ENCODER_V4_H
-#define CSPLENDOR_ACTION_ENCODER_V4_H
+#ifndef CSPLENDOR_ACTION_ENCODER_V5_H
+#define CSPLENDOR_ACTION_ENCODER_V5_H
 
 #include "action.h"
 #include "action_encoder_v3.h"
@@ -11,28 +11,24 @@
 #include <vector>
 
 /**
- * ActionEncoderV4 - V3 with the deck-reservation return split off (3121 ids).
+ * ActionEncoderV5 - the all-action policy space (3049 ids).
  *
- * Under the current rules a deck reservation never carries a token return:
- * when it takes the player above ten tokens, the player sees the drawn card
- * and then returns one token with a separate RETURN_GEM action.
+ * No reservation carries a token return: when it takes the player above ten
+ * tokens, the player sees the refilled board card or the drawn card and then
+ * returns one token with a separate RETURN_GEM action.
  *
  *   TAKE_DIFFERENT   840  [0..839]      same as V3
  *   TAKE_SAME        140  [840..979]    same as V3
- *   RESERVE_VISIBLE   84  [980..1063]   same as V3
- *   RESERVE_DECK       3  [1064..1066]  one id per level (no return)
- *   PURCHASE        2035  [1067..3101]  V3 id - 18
- *   VISIT_NOBLE       12  [3102..3113]  V3 id - 18
- *   RETURN_GEM         6  [3114..3119]  white, blue, green, red, black, gold
- *   PASS               1  [3120]
- *
- * v3_to_v4_id() maps every V3 id deterministically (a V3 deck reservation
- * with any return pattern maps to the V4 reservation of the same level), so
- * V3 policy targets migrate by summing probabilities over each image.
+ *   RESERVE_VISIBLE   12  [980..991]    980 + level * 4 + slot
+ *   RESERVE_DECK       3  [992..994]    992 + level
+ *   PURCHASE        2035  [995..3029]   V3 id - 90
+ *   VISIT_NOBLE       12  [3030..3041]  V3 id - 90
+ *   RETURN_GEM         6  [3042..3047]  white, blue, green, red, black, gold
+ *   PASS               1  [3048]
  */
-class ActionEncoderV4 {
+class ActionEncoderV5 {
 public:
-  using Schema = csplendor::encoding::ActionSpaceV4;
+  using Schema = csplendor::encoding::ActionSpaceV5;
   using V3 = ActionEncoderV3;
 
   static constexpr int OFFSET_TAKE_DIFFERENT = Schema::OFFSET_TAKE_DIFFERENT;
@@ -46,48 +42,39 @@ public:
   static constexpr int OFFSET_PASS = Schema::OFFSET_PASS;
   static constexpr int ACTION_SIZE = Schema::SIZE;
 
-  // Ids from OFFSET_PURCHASE on are V3 ids shifted down by this amount.
-  static constexpr int V3_SHIFT =
-      V3::OFFSET_PURCHASE - Schema::OFFSET_PURCHASE; // 18
+  // Purchase and noble ids are V3 ids shifted down by this amount.
+  static constexpr int V3_SHIFT = V3::OFFSET_PURCHASE - OFFSET_PURCHASE; // 90
 
-  static_assert(V3::OFFSET_RESERVE_DECK == OFFSET_RESERVE_DECK,
-                "V3/V4 share the ids below the deck reservations");
+  static_assert(V3::OFFSET_TAKE_SAME == OFFSET_TAKE_SAME &&
+                    V3::OFFSET_RESERVE_VISIBLE == OFFSET_RESERVE_VISIBLE,
+                "V5 keeps the V3 take ids");
   static_assert(V3::OFFSET_VISIT_NOBLE - V3_SHIFT == OFFSET_VISIT_NOBLE,
-                "purchase and noble ids shift together");
-
-  // Deterministic V3 -> V4 id map; -1 for ids outside the V3 space.
-  static constexpr int v3_to_v4_id(int v3_id) noexcept {
-    if (v3_id < 0 || v3_id >= V3::ACTION_SIZE)
-      return -1;
-    if (v3_id < V3::OFFSET_RESERVE_DECK)
-      return v3_id;
-    if (v3_id < V3::OFFSET_PURCHASE)
-      return OFFSET_RESERVE_DECK +
-             (v3_id - V3::OFFSET_RESERVE_DECK) / V3::RESERVE_RETURN_PATTERNS;
-    if (v3_id < V3::OFFSET_PASS)
-      return v3_id - V3_SHIFT;
-    return OFFSET_PASS;
-  }
-
-  // Inverse for ids that exist in V3 (a deck reservation maps to its
-  // no-return V3 id); -1 for RETURN_GEM and out-of-range ids.
-  static constexpr int v4_to_v3_id(int v4_id) noexcept {
-    if (v4_id < 0 || v4_id >= ACTION_SIZE)
-      return -1;
-    if (v4_id < OFFSET_RESERVE_DECK)
-      return v4_id;
-    if (v4_id < OFFSET_PURCHASE)
-      return V3::OFFSET_RESERVE_DECK +
-             (v4_id - OFFSET_RESERVE_DECK) * V3::RESERVE_RETURN_PATTERNS;
-    if (v4_id < OFFSET_RETURN_GEM)
-      return v4_id + V3_SHIFT;
-    if (v4_id < OFFSET_PASS)
-      return -1;
-    return V3::OFFSET_PASS;
-  }
+                "V5 keeps the V3 purchase and noble layout");
 
   static int encode(const Action &action, const Game &game) {
     switch (action.type) {
+    case TAKE_DIFFERENT:
+    case TAKE_SAME:
+      return V3::encode(action, game);
+    case RESERVE_VISIBLE: {
+      if (!csplendor::rules::has_no_token_return(action))
+        return -1;
+      for (int level = 0; level < 3; ++level)
+        for (int slot = 0; slot < 4; ++slot)
+          if (game.board.visible[level][slot] == action.card_id)
+            return OFFSET_RESERVE_VISIBLE + level * 4 + slot;
+      return -1;
+    }
+    case RESERVE_DECK:
+      if (!csplendor::rules::has_no_token_return(action) ||
+          action.deck_level < 0 || action.deck_level > 2)
+        return -1;
+      return OFFSET_RESERVE_DECK + action.deck_level;
+    case PURCHASE:
+    case VISIT_NOBLE: {
+      const int v3_id = V3::encode(action, game);
+      return v3_id < 0 ? -1 : v3_id - V3_SHIFT;
+    }
     case RETURN_GEM: {
       const int color = action.returned_color();
       int total = 0;
@@ -95,43 +82,38 @@ public:
         total += amount;
       return color < 6 && total == 1 ? OFFSET_RETURN_GEM + color : -1;
     }
-    case RESERVE_DECK:
-      for (uint8_t amount : action.return_gems)
-        if (amount != 0)
-          return -1;
-      if (action.deck_level < 0 || action.deck_level > 2)
-        return -1;
-      return OFFSET_RESERVE_DECK + action.deck_level;
-    default: {
-      const int v3_id = V3::encode(action, game);
-      return v3_id < 0 ? -1 : v3_to_v4_id(v3_id);
-    }
+    case PASS:
+      return OFFSET_PASS;
+    default:
+      return -1;
     }
   }
 
   static Action decode(int action_id, const Game &game) {
-    if (action_id >= OFFSET_RETURN_GEM && action_id < OFFSET_PASS) {
-      Action action;
-      action.type = RETURN_GEM;
-      action.return_gems[action_id - OFFSET_RETURN_GEM] = 1;
-      return action;
-    }
-    if (action_id >= OFFSET_RESERVE_DECK && action_id < OFFSET_PURCHASE) {
-      Action action;
+    Action action;
+    if (action_id < 0 || action_id >= ACTION_SIZE) {
+      action.type = ACTION_TYPE_COUNT;
+    } else if (action_id < OFFSET_RESERVE_VISIBLE) {
+      return V3::decode(action_id, game);
+    } else if (action_id < OFFSET_RESERVE_DECK) {
+      const int local = action_id - OFFSET_RESERVE_VISIBLE;
+      action.type = RESERVE_VISIBLE;
+      action.card_id = game.board.visible[local / 4][local % 4];
+    } else if (action_id < OFFSET_PURCHASE) {
       action.type = RESERVE_DECK;
       action.deck_level = static_cast<int8_t>(action_id - OFFSET_RESERVE_DECK);
-      return action;
+    } else if (action_id < OFFSET_RETURN_GEM) {
+      return V3::decode(action_id + V3_SHIFT, game);
+    } else if (action_id < OFFSET_PASS) {
+      action.type = RETURN_GEM;
+      action.return_gems[action_id - OFFSET_RETURN_GEM] = 1;
+    } else {
+      action.type = PASS;
     }
-    const int v3_id = v4_to_v3_id(action_id);
-    if (v3_id < 0) {
-      Action invalid;
-      invalid.type = ACTION_TYPE_COUNT;
-      return invalid;
-    }
-    return V3::decode(v3_id, game);
+    return action;
   }
 
-  // Legal actions in MoveGenerator order with their V4 ids (forced PASS when
+  // Legal actions in MoveGenerator order with their V5 ids (forced PASS when
   // no ordinary action exists, as in get_action_mask()).
   template <typename Sink>
   static void for_each_legal_with_id(const Game &game, Sink &sink) {
@@ -188,4 +170,4 @@ public:
   }
 };
 
-#endif // CSPLENDOR_ACTION_ENCODER_V4_H
+#endif // CSPLENDOR_ACTION_ENCODER_V5_H

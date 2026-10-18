@@ -119,9 +119,9 @@ def test_legacy_kifu_export_and_now_iso_monkeypatch_keep_digest(monkeypatch):
 
     # Only the KIFU format header changed for v1.1; with "v1.0" the digest is
     # fe7de2921e5977be50333249fdae202ad512b63a81c83a26c3601d9cf5d8550d.
-    assert "Format: Splendor KIFU v1.1\n" in text
+    assert "Format: Splendor KIFU v1.2\n" in text
     assert _sha256(text) == (
-        "af5d2b0ec8621cd7ee4165d7dc269e2ba535d998bbd346e651b9444da7c13241"
+        "b48ca436e78f4808173e5640dd5143ec727c1b8cd52684ea3493f5bb938fe71f"
     )
     assert direct_text == text
 

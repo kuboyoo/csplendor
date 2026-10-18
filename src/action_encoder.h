@@ -586,10 +586,8 @@ private:
           reserve_sources += card_id >= 0 ? 1 : 0;
       for (const auto &deck : board.decks)
         reserve_sources += !deck.empty() ? 1 : 0;
-      const int reserve_tokens = tokens + (board.bank[GOLD] > 0 ? 1 : 0);
-      action_upper += static_cast<uint32_t>(reserve_sources) *
-                      return_pattern_upper_bound(
-                          std::max(0, reserve_tokens - Board::MAX_TOKENS));
+      // A reservation carries no return (RETURN_GEM follows instead).
+      action_upper += static_cast<uint32_t>(reserve_sources);
     }
 
     auto add_purchase_options = [&](int8_t card_id) {
@@ -715,10 +713,8 @@ private:
   }
 
   static void set_first_canonical_return(const Board &board, Action &action) {
-    // Deck reservations never carry a return (RETURN_GEM follows instead).
-    if (action.type == PURCHASE || action.type == VISIT_NOBLE ||
-        action.type == RESERVE_DECK || action.type == RETURN_GEM ||
-        action.type == ACTION_TYPE_COUNT)
+    // Only takes carry a return (a reservation is followed by RETURN_GEM).
+    if (action.type != TAKE_DIFFERENT && action.type != TAKE_SAME)
       return;
     const std::array<uint8_t, 6> available =
         csplendor::rules::gems_after_token_action(board, action);

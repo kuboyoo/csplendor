@@ -17,19 +17,20 @@ def _returns_match(
     return [int(value) for value in actual[:6]] == expected[:6]
 
 
-_LEGACY_DECK_RESERVE = re.compile(
-    r"\s*(reserve:L[123])/(return:[WUGRKD])\s*", flags=re.IGNORECASE
+_LEGACY_RESERVE = re.compile(
+    r"\s*(reserve:(?:L[123]|C\d+))/(return:[WUGRKD])\s*", flags=re.IGNORECASE
 )
 
 
 def expand_usi_move(usi_move: str) -> List[str]:
-    """Split the legacy one-ply deck reservation into its canonical plies.
+    """Split a legacy one-ply reservation into its canonical plies.
 
-    ``reserve:L2/return:W`` is accepted as shorthand for ``reserve:L2``
-    followed by ``return:W``.  Only a single returned token is possible
-    because a deck reservation reaches at most eleven tokens.
+    ``reserve:L2/return:W`` and ``reserve:C10/return:U`` are accepted as
+    shorthand for the reservation followed by its ``return:`` ply.  Only a
+    single returned token is possible because a reservation reaches at most
+    eleven tokens.
     """
-    match = _LEGACY_DECK_RESERVE.fullmatch(usi_move)
+    match = _LEGACY_RESERVE.fullmatch(usi_move)
     if match is None:
         return [usi_move]
     return [match.group(1), match.group(2)]
@@ -60,29 +61,27 @@ def find_legal_action_index_by_usi(game, usi_move: str) -> int:
             if _returns_match(parsed.return_gems, action.return_gems):
                 return index
         raise ValueError(f"no legal take action matches USI move: {value}")
+    if parsed.kind in ("reserve_visible", "reserve_deck") and parsed.return_gems is not None:
+        raise ValueError(
+            "reservation returns are a separate ply; "
+            f"apply it with expand_usi_move first: {value}"
+        )
     if parsed.kind == "reserve_visible":
         for index, action in enumerate(legal_actions):
-            if action.type != CoreActionType.RESERVE_VISIBLE:
-                continue
-            if int(action.card_id) == int(parsed.card_id) and _returns_match(
-                parsed.return_gems, action.return_gems
+            if (
+                action.type == CoreActionType.RESERVE_VISIBLE
+                and int(action.card_id) == int(parsed.card_id)
             ):
                 return index
         raise ValueError(
             f"no legal reserve-visible action matches USI move: {value}"
         )
     if parsed.kind == "reserve_deck":
-        if parsed.return_gems is not None:
-            raise ValueError(
-                "deck reservation returns are a separate ply; "
-                f"apply it with expand_usi_move first: {value}"
-            )
         for index, action in enumerate(legal_actions):
-            if action.type != CoreActionType.RESERVE_DECK:
-                continue
-            if int(action.deck_level) == int(
-                parsed.deck_level
-            ) and _returns_match(parsed.return_gems, action.return_gems):
+            if (
+                action.type == CoreActionType.RESERVE_DECK
+                and int(action.deck_level) == int(parsed.deck_level)
+            ):
                 return index
         raise ValueError(
             f"no legal reserve-deck action matches USI move: {value}"

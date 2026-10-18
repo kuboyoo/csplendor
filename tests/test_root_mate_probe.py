@@ -82,7 +82,7 @@ def _reference_probe(
     action = next(a for a in game.legal_actions if int(a.pack()) == int(packed))
     out["proven"] = True
     out["action_code"] = int(packed)
-    out["action_id"] = int(cs.ActionEncoderV4.encode(action, game))
+    out["action_id"] = int(cs.ActionEncoderV5.encode(action, game))
     return out
 
 

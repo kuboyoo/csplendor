@@ -10,13 +10,12 @@
 
 namespace csplendor::snapshot {
 
-// Version 2 adds the pending deck-reservation return (Board::waiting_return)
-// and the rules in which a deck reservation never carries a token return.
-// Version 3 adds the passive streak and the end reason; version 4 replaces
-// the streak with the repetition window (a position occurring for the fourth
-// time draws).
-static constexpr uint16_t GAME_SNAPSHOT_FORMAT_VERSION = 4;
-static constexpr uint16_t GAME_SNAPSHOT_RULES_VERSION = 4;
+// Version 5: no reservation carries a token return (the excess is returned
+// by RETURN_GEM after the refill or the drawn card is seen); the payload has
+// the pending return, the end reason and the repetition window. Older
+// versions are rejected.
+static constexpr uint16_t GAME_SNAPSHOT_FORMAT_VERSION = 5;
+static constexpr uint16_t GAME_SNAPSHOT_RULES_VERSION = 5;
 static constexpr std::array<uint8_t, 8> GAME_SNAPSHOT_MAGIC = {
     {'C', 'S', 'P', 'L', 'S', 'N', 'P', '\0'}};
 // The repetition window takes eight bytes per position of the current
@@ -67,13 +66,8 @@ bool valid_noble_id(int value);
 void require_boolean(uint8_t value, const char *field);
 
 std::string serialize(const Game &game);
-// Accepts the current version and, so that stored self-play stays usable,
-// versions 2 (before the repetition rule) and 3 (passive streak). Their
-// positions start a repetition window.
+// Accepts the current version only.
 Game deserialize(std::string_view snapshot);
-// One-off migration: re-encodes a format/rules version 1 snapshot as the
-// current version. Version 1 positions never have a pending return.
-std::string upgrade_v1(std::string_view snapshot);
 
 } // namespace csplendor::snapshot
 

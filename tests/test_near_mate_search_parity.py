@@ -233,7 +233,7 @@ def test_the_native_result_carries_the_v4_id_of_the_best_action():
     result = cs.near_mate_search(game, config)
     assert result.lower == 1.0 and result.stop_reason == "mate_proven"
     action = cs.Action.unpack(result.best_action)
-    assert result.best_action_id == cs.ActionEncoderV4.encode(action, game)
+    assert result.best_action_id == cs.ActionEncoderV5.encode(action, game)
 
 
 @pytest.mark.parametrize("thresholds", [(), (1.2,), (0.0,)])

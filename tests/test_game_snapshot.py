@@ -87,13 +87,13 @@ def test_game_snapshot_preserves_hidden_reservation_and_future_deck_order():
 
 def test_game_snapshot_rejects_corruption_and_has_a_versioned_golden_encoding():
     snapshot = csplendor.Game(seed=42).serialize_snapshot()
-    assert csplendor.Game.snapshot_format_version() == 4
-    assert csplendor.Game.snapshot_rules_version() == 4
-    # Version 4 has the end reason and the repetition window (u16 count and
-    # u64 keys) after winner.
+    assert csplendor.Game.snapshot_format_version() == 5
+    assert csplendor.Game.snapshot_rules_version() == 5
+    # Version 5 has the pending return, the end reason and the repetition
+    # window (u16 count and u64 keys) after winner.
     assert len(snapshot) == 194
     assert hashlib.sha256(snapshot).hexdigest() == (
-        "ee1c7c6366e3747faae5d87a6ff62ee7d6ce14bce245168242e9bbb4083e9b06"
+        "0c066052967400aa47f2fc7446956d12dd64cb1f4475e523e70cb6bad70c2e6a"
     )
 
     for broken in (
@@ -104,7 +104,7 @@ def test_game_snapshot_rejects_corruption_and_has_a_versioned_golden_encoding():
         with pytest.raises(ValueError):
             csplendor.Game.deserialize_snapshot(broken)
 
-    incompatible_rules = snapshot[:10] + b"\x05\x00" + snapshot[12:]
+    incompatible_rules = snapshot[:10] + b"\x06\x00" + snapshot[12:]
     with pytest.raises(ValueError, match="rules version"):
         csplendor.Game.deserialize_snapshot(incompatible_rules)
 
@@ -140,31 +140,10 @@ V1_INITIAL = bytes.fromhex(
     "000000000000ffffff00000000000000000000000000000000000000ffffff0000000000"
     "00007b5530a86091f669"
 )
-V1_MIDGAME = bytes.fromhex(
-    "4353504c534e5000010001005a000c0001b7ca4404d4b5d49400000000010b000000ff00"
-    "01020200040423241c3f282a2c535646542022171d0801121600201b0a14181e03051013"
-    "2509260e15270b0f060c1a2119021734373d4538402b2e414336303a44313e3932353c29"
-    "2f3b0e4c4d4852584a5059574b4e4f494703010a070001010003010001000101012d331f"
-    "0000000303030d07110004020102010000000000000042515500000003000000dee8efa5"
-    "55662152"
-)
-
-
-def test_version_1_snapshots_are_rejected_but_upgrade_exactly():
-    with pytest.raises(ValueError, match="upgrade_snapshot_v1"):
+def test_older_snapshot_versions_are_rejected():
+    with pytest.raises(ValueError, match="unsupported csplendor game snapshot version"):
         csplendor.Game.deserialize_snapshot(V1_INITIAL)
-
-    upgraded = csplendor.Game.upgrade_snapshot_v1(V1_INITIAL)
-    assert upgraded == csplendor.Game(seed=42).serialize_snapshot()
-
-    midgame = csplendor.Game.upgrade_snapshot_v1(V1_MIDGAME)
-    restored = csplendor.Game.deserialize_snapshot(midgame)
-    assert not restored.board.waiting_return
-    assert restored.serialize_snapshot() == midgame
-    assert int(restored.turn) == 11 and int(restored.current_player) == 1
-
-    with pytest.raises(ValueError):
-        csplendor.Game.upgrade_snapshot_v1(upgraded)  # already the current version
+    assert not hasattr(csplendor.Game, "upgrade_snapshot_v1")
 
 
 def test_snapshot_preserves_a_pending_return():

@@ -11,7 +11,7 @@ class Game;
 class ActionEncoderCpp;
 class ActionEncoderV2;
 class ActionEncoderV3;
-class ActionEncoderV4;
+class ActionEncoderV5;
 
 namespace csplendor::move_generation_detail {
 
@@ -212,7 +212,7 @@ private:
   friend class ActionEncoderCpp;
   friend class ActionEncoderV2;
   friend class ActionEncoderV3;
-  friend class ActionEncoderV4;
+  friend class ActionEncoderV5;
 
   // Select within the SAME base/final capped prefix as consume_all_capped.
   // Count preceding return subtrees, then materialize just the selected one.
@@ -552,9 +552,10 @@ private:
     // Purchases can only spend gems; unlike take/reserve actions they never
     // permit an explicit token return.  This also keeps generator/apply
     // parity for public editor states that start above the ten-token limit.
-    // A deck reservation never carries a return either: the player sees the
-    // drawn card first and returns in the following RETURN_GEM decision.
-    if (action.type == PURCHASE || action.type == RESERVE_DECK) {
+    // A reservation never carries a return either: the player sees the
+    // refilled board card or the drawn card first and returns in the
+    // following RETURN_GEM decision.
+    if (action.type != TAKE_DIFFERENT && action.type != TAKE_SAME) {
       if constexpr (PackedCodes)
         return sink(base_code);
       else
@@ -608,7 +609,7 @@ private:
 
   static uint16_t count_with_returns(const Board &board, const Action &action,
                                      uint16_t limit) {
-    if (action.type == PURCHASE || action.type == RESERVE_DECK)
+    if (action.type != TAKE_DIFFERENT && action.type != TAKE_SAME)
       return std::min<uint16_t>(1, limit);
 
     const int excess =

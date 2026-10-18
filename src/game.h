@@ -397,12 +397,14 @@ private:
     if (!applied)
       return false;
 
-    // A deck reservation that leaves the player above the token limit waits
-    // for RETURN_GEM decisions (the player has seen the drawn card); the
-    // turn then finishes as usual once the player is back at the limit.
+    // A reservation that leaves the player above the token limit waits for a
+    // RETURN_GEM decision (the player has seen the refill or the drawn card);
+    // the turn then finishes as usual once the player is back at the limit.
     const bool over_limit =
         board.players[board.current_player].total_gems() > Board::MAX_TOKENS;
-    if ((action.type == RESERVE_DECK || action.type == RETURN_GEM) && over_limit) {
+    if ((action.type == RESERVE_VISIBLE || action.type == RESERVE_DECK ||
+         action.type == RETURN_GEM) &&
+        over_limit) {
       mutation.set_waiting_return(true);
     } else {
       mutation.set_waiting_return(false);
@@ -487,14 +489,11 @@ private:
     if (!csplendor::rules::find_visible_card_source(board, a.card_id))
       return false;
 
-    std::array<uint8_t, 6> next_gems = p.gems;
-    if (board.bank[GOLD] > 0)
-      next_gems[GOLD]++;
-    return csplendor::rules::validate_token_return(next_gems, a.return_gems);
+    return csplendor::rules::has_no_token_return(a);
   }
 
-  // A deck reservation never carries a return: any excess is returned in
-  // the following RETURN_GEM decision, after the player has seen the card.
+  // A reservation never carries a return: any excess is returned in the
+  // following RETURN_GEM decision, after the player has seen the card.
   bool can_apply_reserve_deck(const Action &a) const {
     if (!valid_current_player() || a.deck_level < 0 || a.deck_level >= 3 ||
         !csplendor::rules::has_no_token_return(a))
@@ -620,7 +619,6 @@ private:
 
     csplendor::detail::grant_reserve_gold(board, mutation);
     CSPLENDOR_ROLLBACK_FAULT(SourceRemoval);
-    apply_gem_return(a, mutation);
     return true;
   }
 

@@ -55,12 +55,12 @@ python scripts/dfpn_mate_solver.py \
 - `--no-proof`: 証明木・反証木を出力しない。
 - `--pretty`: JSONを整形して出力する。
 
-山札予約で11枚になった場合のトークン返却（`RETURN_GEM`）は予約手の一部として扱い、
+予約（場札・山札）で11枚になった場合のトークン返却（`RETURN_GEM`）は予約手の一部として扱い、
 詰み深さを消費しません。ネイティブのreveal-verified・visible-only solver、
 `scripts/mate_solver.py`、`scripts/dfpn_mate_solver.py` のいずれも、返却の選択肢を
 貴族選択と同じく着手したプレイヤーの選択として展開します。証明・payloadの辞書は
 `waiting_return` を含みます。`--moves` や `position ... moves` では旧来の
-`reserve:L2/return:W` も2手（`reserve:L2`、`return:W`）に展開して受け付けます。
+`reserve:L2/return:W`・`reserve:C10/return:U` も2手（例: `reserve:L2`、`return:W`）に展開して受け付けます。
 
 終了コードは、`Mate` / `NoMate` の確定時が `0`、入力エラーが `1`、上限到達などで `Unknown` の場合が `2` です。
 

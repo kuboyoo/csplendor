@@ -102,4 +102,4 @@ def test_winning_root_action_has_its_v4_id():
     result = cs.exact_mate_search(game, config)
     assert result.status == "mate"
     action = cs.Action.unpack(result.winning_root_action)
-    assert result.winning_root_action_id == cs.ActionEncoderV4.encode(action, game)
+    assert result.winning_root_action_id == cs.ActionEncoderV5.encode(action, game)

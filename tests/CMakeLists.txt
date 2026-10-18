@@ -23,7 +23,7 @@ set(CSPLENDOR_STANDALONE_HEADERS
     action_encoder.h
     action_encoder_v2.h
     action_encoder_v3.h
-    action_encoder_v4.h
+    action_encoder_v5.h
     board.h
     card_data.h
     game.h

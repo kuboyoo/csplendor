@@ -75,19 +75,20 @@ take:RR/return:D             → 赤2枚取得、金1枚返却
 ### 3.2 カード予約 (Reserve)
 
 ```
-reserve:C<card_id>[/return:<ret_colors>]
+reserve:C<card_id>
 reserve:L<level>
 ```
 
-- `C<card_id>`: 場のカードを指定（カードID 0-89）。10枚超え時の返却は同じ手に `/return:` で付ける。
-- `L<level>`: デッキからの予約（レベル 1-3）。返却は付けない。11枚になった場合は、同じプレイヤーが
-  めくれたカードを見てから次の手 `return:<C>` で1枚返す（[3.5](#35-山札予約後の返却-return)）。
+- `C<card_id>`: 場のカードを指定（カードID 0-89）。
+- `L<level>`: デッキからの予約（レベル 1-3）。
+- 予約は返却を付けない。11枚になった場合は、同じプレイヤーが補充された場札・引いたカードを見てから
+  次の手 `return:<C>` で1枚返す（[3.5](#35-予約後の返却-return)。USI 1.3、2026-10-18から場札の予約も同じ）。
 
 **例:**
 ```
 reserve:C42                  → カードID42を予約（金トークン獲得）
 reserve:L2                   → レベル2デッキから予約
-reserve:C10/return:U         → カード10を予約、青を1枚返却
+reserve:C10 return:U         → カード10を予約し、続く手で青を1枚返却（2手）
 reserve:L2 return:W          → レベル2デッキから予約し、続く手で白を1枚返却（2手）
 ```
 
@@ -129,22 +130,22 @@ noble:N7                     → 貴族ID7を獲得
 > 貴族訪問は購入後に自動的に発生するが、複数候補がある場合はプレイヤーが選択する必要がある。
 > エンジンは `bestmove buy:C42 noble:N3` のように購入と貴族を同一行で返すことができる。
 
-### 3.5 山札予約後の返却 (Return)
+### 3.5 予約後の返却 (Return)
 
 ```
 return:<C>
 ```
 
 - `<C>`: 返却する色1文字（`W` `U` `G` `R` `K` `D` のいずれか）。1手で返すのは常に1枚。
-- 山札予約で所持トークンが11枚になった直後の返却フェーズでだけ合法。手番は予約したプレイヤーのまま。
+- 予約（場札・山札）で所持トークンが11枚になった直後の返却フェーズでだけ合法。手番は予約したプレイヤーのまま。
 - 返却後に貴族判定と手番終了処理を行う（順序は「返却 → 貴族」）。
 
-山札予約の正規形は `reserve:L2` → `return:W` の2手である。csplendorは入力に限り、旧来の1手表記
-`reserve:L2/return:W`（返却色はちょうど1文字）を受け付け、2手に展開する
+予約の正規形は `reserve:L2` → `return:W`、`reserve:C10` → `return:U` の2手である。csplendorは入力に限り、
+旧来の1手表記 `reserve:L2/return:W`・`reserve:C10/return:U`（返却色はちょうど1文字）を受け付け、2手に展開する
 （`csplendor.api.usi_resolver.expand_usi_move`）。`position ... moves ...` の再生、KIFUの読み込み、
 `GameSessionService.apply_usi` / Web API `POST /game/{id}/action_usi` が展開に対応する。
-展開せずに `reserve:L<n>/return:...` を合法手照合（`find_legal_action_index_by_usi`）へ渡すと
-`deck reservation returns are a separate ply` として拒否する。出力は常に正規の2手である。
+展開せずに `reserve:.../return:...` を合法手照合（`find_legal_action_index_by_usi`）へ渡すと
+`reservation returns are a separate ply` として拒否する。出力は常に正規の2手である。
 
 ### 3.6 パス (Pass)
 
@@ -161,7 +162,7 @@ pass
 ```bnf
 <move>        ::= <take> | <reserve> | <buy> | <noble> | <return> | "pass"
 <take>        ::= "take:" <colors> [ "/return:" <ret> ]
-<reserve>     ::= "reserve:" "C" <card_id> [ "/return:" <ret> ] | "reserve:" "L" <level>
+<reserve>     ::= "reserve:" "C" <card_id> | "reserve:" "L" <level>
 <return>      ::= "return:" <color>
 <buy>         ::= "buy:" <card_ref> [ "/gold:" <gold_assign> ] [ " " <noble> ]
 <noble>       ::= "noble:" "N" <noble_id>
@@ -233,7 +234,7 @@ P0:gems:W1U2G0R0K1D0;bonuses:W0U1G0R0K0;points:0;reserved:[42,?L3];bought:[1]
 ```
 
 SPNは返却フェーズのフィールドを持たない。csplendorの `spn_to_game` は、手番プレイヤーの
-所持トークンが10枚を超える局面を山札予約直後の返却フェーズ（`waiting_return`）として復元する。
+所持トークンが10枚を超える局面を予約直後の返却フェーズ（`waiting_return`）として復元する。
 
 #### Current Player
 末尾に現在の手番プレイヤー番号を記載: `0`, `1`, `2`, `3`

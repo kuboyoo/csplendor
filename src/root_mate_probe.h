@@ -12,7 +12,7 @@
 // Python driver, both sweeps share one deadline, so a call never exceeds its
 // time limit.
 
-#include "action_encoder_v4.h"
+#include "action_encoder_v5.h"
 #include "exact_mate_search.h"
 #include "game.h"
 #include "reveal_verified_solver.h"
@@ -50,7 +50,7 @@ struct RootMateProbeResult {
   bool value_proven = false; // mate, with or without a root action
   int depth = -1;
   int64_t action_code = -1; // Action::pack() of the mating root action
-  int action_id = -1;       // ActionEncoderV4 id of that action
+  int action_id = -1;       // ActionEncoderV5 id of that action
   uint64_t nodes = 0;
   double elapsed_ms = 0.0;
   std::string stop_reason; // empty when no search was attempted
@@ -261,7 +261,7 @@ inline RootMateProbeResult root_mate_probe(const Game &game, const RootMateProbe
         if (action.pack() == sweep.root_action) {
           result.proven = true;
           result.action_code = static_cast<int64_t>(sweep.root_action);
-          result.action_id = ActionEncoderV4::encode(action, game);
+          result.action_id = ActionEncoderV5::encode(action, game);
           break;
         }
       }

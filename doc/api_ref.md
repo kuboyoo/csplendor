@@ -38,14 +38,8 @@ The main class for controlling game state.
   deck order, and phase without undo history.
 - `Game.deserialize_snapshot(snapshot: bytes) -> Game`: Restores a versioned
   lightweight snapshot after validating its rules fingerprint and checksum.
-  The current format/rules version is 4; versions 2 and 3 are also read (the
-  repetition window starts at the restored position, see
-  doc/game_snapshot.md), and writing always produces version 4. A version 1
-  snapshot is rejected with "csplendor game snapshot version 1 must be
-  converted with Game.upgrade_snapshot_v1 first".
-- `Game.upgrade_snapshot_v1(snapshot: bytes) -> bytes`: One-off migration of a
-  version 1 snapshot to the current version (version 1 positions never have a
-  pending token return). There is no runtime backward compatibility.
+  The current format/rules version is 5; older versions (1-4) are rejected
+  and no conversion is provided.
 - `Game.snapshot_format_version() -> int`: Returns the binary layout version.
 - `Game.snapshot_rules_version() -> int`: Returns the rule-transition version.
 - `serialize_information_state(observer: int) -> bytes`: Returns a versioned,
@@ -70,7 +64,7 @@ analysis and book keys.
 - `Board.waiting_noble`: True while the player to move must choose a noble
   (`VISIT_NOBLE` only). Kept for compatibility with `pending_decision`.
 - `Board.waiting_return`: True while the player to move must return one token
-  after a deck reservation that left them with 11 tokens (`RETURN_GEM` only;
+  after a reservation (visible or deck) that left them with 11 tokens (`RETURN_GEM` only;
   the player keeps the turn and may hold 11 tokens until the return).
 - `Board.pending_decision` (read-only int): `0` none, `1` return a token
   (`waiting_return`), `2` choose a noble (`waiting_noble`). Both flags are never
@@ -131,9 +125,10 @@ Represents a game move.
 - `deck_level`: Level of the deck being reserved (0-2).
 - `from_reserved`: Boolean, True if purchasing from hand.
 - `gold_as`: List[5] of colors that Gold gems are acting as.
-- `return_gems`: List[6] of gems to return if over the limit of 10. Take and
-  visible-reservation actions carry their returns inline; a deck reservation
-  never does (the return is a following `RETURN_GEM` action). For
+- `return_gems`: List[6] of gems to return if over the limit of 10. Take
+  actions carry their returns inline; a reservation (visible or deck) never
+  does (the return is a following `RETURN_GEM` action, chosen after the refill
+  or the drawn card is seen). For
   `RETURN_GEM` exactly one entry is 1.
   `pack()` encodes the returned colour and `repr(action)` is
   `"RETURN_GEM: c"` (the C++ `Action::returned_color()` helper is not bound to
@@ -152,25 +147,23 @@ Represents a game move.
 - `csplendor.MateSearchSession(attacker, *, jobs=..., max_cache_states=2_000_000)`: Reusable AI-facing search session with cooperative cancellation and a bounded exact transposition table retained across depths and turns. It reuses exact descendant results and shallower-depth move ordering. Use `search_anytime()` for live play, `search()` for minimal-depth analysis, and `clear()` between games.
 - `csplendor.MateSearchCancellationToken`: Cooperative cancellation token accepted by the stateless mate-search APIs.
 
-## V4 action encoder helpers
+## V5 action encoder helpers
 
-`ActionEncoderV4` (3121 ids) is V3 with the deck-reservation returns split into
-a 6-slot `RETURN_GEM` section. See [Action space V4](action_space_v4.md).
+`ActionEncoderV5` (3049 ids) is the full-action policy space. Reservations
+(visible: 12 ids, deck: 3 ids) carry no return; the return is a 6-slot
+`RETURN_GEM` section. See [Action space V5](action_space_v5.md). The former
+`ActionEncoderV4` (3121 ids) was removed without migration helpers.
 
-- `ActionEncoderV4.get_action_mask(game) -> numpy.ndarray`: 3121-slot legality mask.
-- `ActionEncoderV4.encode` / `decode` / `decode_and_match`: Convert single actions.
-- `ActionEncoderV4.legal_action_ids(game) -> numpy.ndarray`: V4 ids of
+- `ActionEncoderV5.get_action_mask(game) -> numpy.ndarray`: 3049-slot legality mask.
+- `ActionEncoderV5.encode` / `decode` / `decode_and_match`: Convert single actions.
+- `ActionEncoderV5.legal_action_ids(game) -> numpy.ndarray`: V5 ids of
   `game.legal_actions` in order, as an `int32` array.
-- `ActionEncoderV4.v3_to_v4_id(v3_id)` / `v4_to_v3_id(v4_id)`: Id conversion
-  (`v4_to_v3_id` returns `-1` for `RETURN_GEM`).
-- `ActionEncoderV4.v3_to_v4_table() -> numpy.ndarray`: `int32[3133]` map for
-  migrating V3 policy targets (`np.add.at(v4, table, v3)`).
-- `ActionEncoderV4.schema_version()` / `schema_fingerprint()` / `schema_sections()`.
+- `ActionEncoderV5.schema_version()` / `schema_fingerprint()` / `schema_sections()`.
 
 ## V3 action encoder helpers
 
 V3 cannot represent `RETURN_GEM`: during the return phase its mask is empty and
-`encode` returns `-1`.
+`encode` returns `-1`. Its reservation ids with a return are never legal.
 
 - `ActionEncoderV3.get_action_mask(game) -> numpy.ndarray`: 3133-slot legality mask.
 - `ActionEncoderV3.encode(action, game) -> int` / `decode(action_id, game) -> Action` /
@@ -184,11 +177,11 @@ V3 cannot represent `RETURN_GEM`: during the return phase its mask is empty and
 ## Native V3 search (`V3SearchSession`, experimental)
 
 `V3SearchConfig` fields are documented in [V3 multi-game search](mcts_v3.md).
-The session works on V4 action ids. `V3SearchConfig.pending_decision_features`
+The session works on V5 action ids. `V3SearchConfig.pending_decision_features`
 (default `True`) appends two pending-decision features after the seat feature:
 `waiting_return` then `waiting_noble` (1.0 when set), so the default `state_dim`
 is 316 (314 + 2); set it to `False` to omit them.
-`csplendor.v4_semantic_group_id(v4_id)` gives the 139 decision groups used by
+`csplendor.v5_semantic_group_id(v5_id)` gives the 139 decision groups used by
 the session; `v3_semantic_group_id` keeps its V3 meaning.
 `V3SearchConfig.num_threads` (default `1`, must be positive) runs `collect()` and
 `apply()` with one worker per game. Rows are concatenated in slot order, so the

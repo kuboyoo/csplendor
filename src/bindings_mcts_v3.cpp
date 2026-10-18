@@ -289,9 +289,9 @@ void bind_mcts_v3(py::module_ &m) {
   m.def("v3_semantic_group_id", &csplendor::v3search::semantic_group_id_v3,
         py::arg("action_id"),
         "Decision group of a V3 action id before payment/return details");
-  m.def("v4_semantic_group_id", &csplendor::v3search::semantic_group_id,
+  m.def("v5_semantic_group_id", &csplendor::v3search::semantic_group_id,
         py::arg("action_id"),
-        "Decision group of a V4 action id (groups 0..132 as for V3, returns "
+        "Decision group of a V5 action id (groups 0..132 as for V3, returns "
         "133..138); the groups used by V3SearchSession");
 }
 

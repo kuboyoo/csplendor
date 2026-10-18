@@ -234,28 +234,7 @@ std::string serialize(const Game &game) {
   return snapshot.take();
 }
 
-namespace {
-Game deserialize_version(std::string_view snapshot, uint16_t accepted_version);
-} // namespace
-
 Game deserialize(std::string_view snapshot) {
-  const size_t at = GAME_SNAPSHOT_MAGIC.size();
-  const bool older = snapshot.size() >= at + 2 &&
-                     (static_cast<uint8_t>(snapshot[at]) == 2 ||
-                      static_cast<uint8_t>(snapshot[at]) == 3) &&
-                     static_cast<uint8_t>(snapshot[at + 1]) == 0;
-  return deserialize_version(snapshot,
-                             older ? static_cast<uint8_t>(snapshot[at])
-                                   : GAME_SNAPSHOT_FORMAT_VERSION);
-}
-
-std::string upgrade_v1(std::string_view snapshot) {
-  return serialize(deserialize_version(snapshot, 1));
-}
-
-namespace {
-
-Game deserialize_version(std::string_view snapshot, uint16_t accepted_version) {
   if (snapshot.size() > GAME_SNAPSHOT_MAX_BYTES)
     throw std::invalid_argument("csplendor game snapshot is too large");
 
@@ -267,15 +246,10 @@ Game deserialize_version(std::string_view snapshot, uint16_t accepted_version) {
   if (magic != expected_magic)
     throw std::invalid_argument("invalid csplendor game snapshot magic");
 
-  // Format and rules versions move together; version 1 is readable only
-  // through upgrade_v1().
-  const uint16_t version = envelope.u16();
-  if (version != accepted_version)
-    throw std::invalid_argument(
-        version == 1 ? "csplendor game snapshot version 1 must be converted "
-                       "with Game.upgrade_snapshot_v1 first"
-                     : "unsupported csplendor game snapshot version");
-  if (envelope.u16() != accepted_version)
+  // Format and rules versions move together; older ones are rejected.
+  if (envelope.u16() != GAME_SNAPSHOT_FORMAT_VERSION)
+    throw std::invalid_argument("unsupported csplendor game snapshot version");
+  if (envelope.u16() != GAME_SNAPSHOT_RULES_VERSION)
     throw std::invalid_argument(
         "csplendor game snapshot rules version mismatch");
   if (envelope.u16() != CARD_COUNT || envelope.u16() != NOBLE_COUNT ||
@@ -301,7 +275,7 @@ Game deserialize_version(std::string_view snapshot, uint16_t accepted_version) {
   board.turn = reader.u16();
   const uint8_t final_round = reader.u8();
   const uint8_t waiting_noble = reader.u8();
-  const uint8_t waiting_return = accepted_version >= 2 ? reader.u8() : 0;
+  const uint8_t waiting_return = reader.u8();
   require_boolean(final_round, "final_round");
   require_boolean(waiting_noble, "waiting_noble");
   require_boolean(waiting_return, "waiting_return");
@@ -316,30 +290,19 @@ Game deserialize_version(std::string_view snapshot, uint16_t accepted_version) {
       board.winner > 1)
     throw std::invalid_argument("invalid game status in game snapshot");
   std::vector<uint64_t> repetition_keys;
-  if (accepted_version >= 3) {
-    if (accepted_version == 3)
-      reader.u8(); // The passive streak of the old rule has no successor.
-    const uint8_t reason = reader.u8();
-    if (reason > static_cast<uint8_t>(Board::EndReason::Repetition))
-      throw std::invalid_argument("invalid repetition state in game snapshot");
-    board.end_reason = static_cast<Board::EndReason>(reason);
-    if ((board.end_reason == Board::EndReason::None) != (board.winner == -1) ||
-        ((board.end_reason == Board::EndReason::Repetition ||
-          board.end_reason == Board::EndReason::Stalemate) &&
-         board.winner != -2))
-      throw std::invalid_argument("inconsistent game result in game snapshot");
-    if (accepted_version >= 4) {
-      const uint16_t count = reader.u16();
-      repetition_keys.reserve(count);
-      for (uint16_t index = 0; index < count; ++index)
-        repetition_keys.push_back(reader.u64());
-    }
-  } else {
-    // Before the repetition rule: a draw by stalemate is indistinguishable
-    // from an ordinary one.
-    board.end_reason =
-        board.winner == -1 ? Board::EndReason::None : Board::EndReason::Normal;
-  }
+  const uint8_t reason = reader.u8();
+  if (reason > static_cast<uint8_t>(Board::EndReason::Repetition))
+    throw std::invalid_argument("invalid repetition state in game snapshot");
+  board.end_reason = static_cast<Board::EndReason>(reason);
+  if ((board.end_reason == Board::EndReason::None) != (board.winner == -1) ||
+      ((board.end_reason == Board::EndReason::Repetition ||
+        board.end_reason == Board::EndReason::Stalemate) &&
+       board.winner != -2))
+    throw std::invalid_argument("inconsistent game result in game snapshot");
+  const uint16_t repetition_count = reader.u16();
+  repetition_keys.reserve(repetition_count);
+  for (uint16_t index = 0; index < repetition_count; ++index)
+    repetition_keys.push_back(reader.u64());
 
   for (uint8_t &value : board.bank)
     value = reader.u8();
@@ -436,14 +399,11 @@ Game deserialize_version(std::string_view snapshot, uint16_t accepted_version) {
     throw std::invalid_argument("invalid repetition window in game snapshot");
   }
   if (board.end_reason == Board::EndReason::Repetition &&
-      accepted_version >= 4 &&
       board.repetition_count() < Board::REPETITION_DRAW_COUNT)
     throw std::invalid_argument("inconsistent game result in game snapshot");
 
   return Game::from_state(std::move(board), (mode_flags & 1U) != 0,
                          (mode_flags & 2U) != 0);
 }
-
-} // namespace
 
 } // namespace csplendor::snapshot

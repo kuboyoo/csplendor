@@ -40,13 +40,13 @@ assert isinstance(index, int)
 envelopeはmagic、format version、rules version、card/noble数、ruleset
 fingerprint、payload長、checksumを持つ。fieldの追加・削除・canonicalization変更時は
 `information_state::FORMAT_VERSION`を更新する。同じlayoutのままrule上の意味を変更する
-場合は`RULES_VERSION`を更新する。現在はformat version 5、rules version 4である
-（千日手を「同一局面4回目」に改めた際に、旧規則の連続回数 `passive_streak` を判定区間
-`repetition_keys` に置き換えて更新。区間は公開情報で、引き分けを決めるため、局面数（u16）と
-昇順に並べた鍵（u64）として含める。順序は未来に影響しないので含めない）。旧versionのbytesとは一致しないため、
+場合は`RULES_VERSION`を更新する。現在はformat version 6、rules version 5である
+（2026-10-18、場札の予約も返却を持たず返却フェーズで返すルールに改めた際に更新）。千日手の判定区間
+`repetition_keys` は公開情報で、引き分けを決めるため、局面数（u16）と昇順に並べた鍵（u64）として含める
+（順序は未来に影響しないので含めない）。旧versionのbytesとは一致しないため、
 永続DBのキーは再生成する。
 
-山札予約でめくれたカードは相手から見て非公開のままで、返却色は公開情報である。
+山札予約で引いたカードは相手から見て非公開のままで、補充された場札と返却色は公開情報である。
 
 色置換による対称性圧縮はversion 3でも行わない。cardとnobleの実catalogueがその置換で
 閉じていることを証明せずに色をcanonicalizeしてはならない。

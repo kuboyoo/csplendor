@@ -1,5 +1,30 @@
 # 変更履歴 / Changelog
 
+## 未出荷：場札予約の返却も補充を見てから選ぶ（行動空間V5）（2026-10-18）
+
+- 場札の予約（`RESERVE_VISIBLE`）は返却を持たなくなった。予約（場札・山札）で11枚になったら返却フェーズ
+  （`waiting_return`、`pending_decision=1`）に入り、同じプレイヤーが補充された場札・引いたカードを見てから
+  `RETURN_GEM` で1枚返す。順序は「返却 → 貴族」。取得の返却は従来どおり同じActionに含む（`doc/engine_specs.md`）。
+- 全行動policy用の行動空間を `ActionEncoderV5`（3049枠、`src/action_encoder_v5.h`）にした。場札予約は返却なしの
+  12枠 `980 + level * 4 + slot`、購入は V3 id − 90。`ActionEncoderV4`（3121枠）と `v3_to_v4_id` /
+  `v4_to_v3_id` / `v3_to_v4_table` は削除し、移行の手段は提供しない（`doc/action_space_v5.md`）。
+  `v4_semantic_group_id` は `v5_semantic_group_id` に改名した（139群は同じ）。
+- `V3SearchSession`、`near_mate_search` の `best_action_id`、`exact_mate_search` の `winning_root_action_id`、
+  `root_mate_probe` の `action_id` は V5 ID になった。V2/V3 は返却フェーズを表現できず、返却付きの場札予約の枠は合法にならない。
+- USI 1.3 / KIFU v1.2：正規形は `reserve:C10` → `return:U` の2手。旧来の1手表記 `reserve:C<id>/return:<C>` は
+  入力に限り2手に展開する（`expand_usi_move`）。KIFU v1.0・v1.1 も読める。SPN は変えず、手番側の11枚は予約後の返却待ちとして読む。
+- Game snapshot を format/rules version 5、情報集合を format 6 / rules 5 にした。version 1〜4 の snapshot は読めない
+  （`Game.upgrade_snapshot_v1` は削除）。状態特徴量（196）と `pending_decision_features` の意味は変えない。
+- 10枚での場札予約が補充ごとの返却判断になるため、詰み探索の節点数は増える（5手詰めのベンチ局面は約66万→150万）。
+- `csplendor/api/usi_kifu.py` に残っていた、末尾の import で上書きされて使われない旧実装（USIの読み書き・棋譜の読み書き）を削除した。
+
+English: Face-up reservations no longer carry a token return; any reservation
+that reaches 11 tokens enters the return phase, and the return is chosen after
+the refill is seen. `ActionEncoderV5` (3049 ids) replaces the deleted
+`ActionEncoderV4`, with no migration helpers. USI 1.3 / KIFU v1.2 record the
+return as a separate ply. Snapshots are version 5 only; information states are
+format 6 / rules 5.
+
 ## 未出荷：準詰みの初手指定（2026-10-18）
 
 - `near_mate_probability_cpp` に `required_root_action`（packed action code）を追加した。攻め側の初手をその手だけに

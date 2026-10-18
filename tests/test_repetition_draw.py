@@ -25,9 +25,6 @@ PASSIVE_DRAW_PLY = 6
 V2_MIDGAME = bytes.fromhex(
     "4353504c534e5000020002005a000c0001b7ca4404d4b5d49500000000010b00000000ff01000003020511240b063f2e2f424d5649471e181221221d1b0310230c1409000e1c07040a251f01080d151a1e05270f1718402938442b433d33362c30452841393e3532373b3a2d2a340e4e4c4f4a554b5848504659525453030a0401000002010100000101000100205751000000030303260213000304020001000100000000003c3116010100030101190008f2b4add3adc93a"
 )
-V2_TERMINAL = bytes.fromhex(
-    "4353504c534e5000020002005a000c0001b7ca4404d4b5d4980000000000200001000000040404040405091a24113d2c2b294c564e51031c0325133935453e31322e2f303f3c373b4344342d38330c544f5847554a4952504d4b59010500000000000004040603030f4853ff000000021414230205121b0116401857211f42190f0b0e284117010700000000000003050404050b2affff0000000115151e14081d2010360c0722270d3a0a061326041546000106c22a0c1ee3f83f64"
-)
 
 # Version 3 snapshots of the passive-streak rule (2026-10-14 main): the
 # exchange position below after three passive turns, and after six (a draw).
@@ -192,9 +189,16 @@ def test_a_forced_pass_extends_the_window_and_a_two_sided_one_is_a_stalemate():
 
 
 def test_a_normal_finish_is_reported_as_normal():
-    snapshot_game = cs.Game.deserialize_snapshot(V2_TERMINAL)
-    assert snapshot_game.is_game_over()
-    assert snapshot_game.board.end_reason == cs.GameEndReason.NORMAL
+    game = cs.Game(seed=4)
+    while not game.is_game_over():
+        # Buying whenever possible ends the game through the final round.
+        actions = game.legal_actions
+        buys = [a for a in actions if a.type == cs.ActionType.PURCHASE]
+        assert game.apply((buys or actions)[0], True)
+    assert game.board.end_reason == cs.GameEndReason.NORMAL
+    restored = cs.Game.deserialize_snapshot(game.serialize_snapshot())
+    assert restored.is_game_over()
+    assert restored.board.end_reason == cs.GameEndReason.NORMAL
 
 
 def test_window_is_part_of_the_exact_and_observable_hash_only():
@@ -233,21 +237,13 @@ def test_snapshot_round_trips_window_and_reason():
     final = cs.Game.deserialize_snapshot(game.serialize_snapshot())
     assert restored.board.end_reason == cs.GameEndReason.REPETITION
     assert final.board.end_reason == cs.GameEndReason.REPETITION
-    assert final.serialize_snapshot()[8] == 4  # format version byte
+    assert final.serialize_snapshot()[8] == 5  # format version byte
 
 
-@pytest.mark.parametrize("snapshot", [V2_MIDGAME, V3_STREAK_3])
-def test_older_snapshots_load_with_a_window_starting_there(snapshot):
-    game = cs.Game.deserialize_snapshot(snapshot)
-    assert game.board.repetition_keys == []
-    assert game.board.end_reason == cs.GameEndReason.NONE
-    assert game.serialize_snapshot()[8] == 4
-
-
-def test_version_3_repetition_result_is_kept():
-    game = cs.Game.deserialize_snapshot(V3_REPETITION)
-    assert game.winner == -2
-    assert game.board.end_reason == cs.GameEndReason.REPETITION
+@pytest.mark.parametrize("snapshot", [V2_MIDGAME, V3_STREAK_3, V3_REPETITION])
+def test_older_snapshots_are_rejected(snapshot):
+    with pytest.raises(ValueError, match="unsupported csplendor game snapshot version"):
+        cs.Game.deserialize_snapshot(snapshot)
 
 
 def test_invalid_windows_are_rejected():

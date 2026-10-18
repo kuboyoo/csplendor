@@ -156,19 +156,6 @@ void bind_rules(py::module_ &m) {
           py::arg("snapshot"),
           "Restore a versioned lightweight game-state snapshot")
       .def_static(
-          "upgrade_snapshot_v1",
-          [](py::bytes snapshot) {
-            char *data = nullptr;
-            Py_ssize_t size = 0;
-            if (PyBytes_AsStringAndSize(snapshot.ptr(), &data, &size) != 0)
-              throw py::error_already_set();
-            return py::bytes(csplendor::snapshot::upgrade_v1(
-                std::string_view(data, static_cast<size_t>(size))));
-          },
-          py::arg("snapshot"),
-          "One-off migration of a version 1 snapshot to the current version "
-          "(version 1 positions never have a pending token return)")
-      .def_static(
           "snapshot_format_version",
           []() {
             return csplendor::snapshot::GAME_SNAPSHOT_FORMAT_VERSION;

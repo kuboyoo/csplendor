@@ -36,16 +36,16 @@ cacheを含めない。
 
 ## 手番進行・返却フェーズ・貴族
 
-山札予約（`RESERVE_DECK`）は返却を持たない。予約で所持トークンが11枚（10枚＋金1枚）に
-なった場合は返却フェーズに入る。
+予約（`RESERVE_VISIBLE`・`RESERVE_DECK`）は返却を持たない。予約で所持トークンが11枚（10枚＋金1枚）に
+なった場合は返却フェーズに入る（2026-10-18から場札の予約も同じ。それまでは場札の予約が返却を含んでいた）。
 
 - 手番を維持し、`waiting_return=true`（`pending_decision=1`）とする。
 - この間の合法手は`RETURN_GEM`（`ActionType`値7）だけで、手番playerが所持する色
-  （金を含む6色）ごとに1つ、各1枚を返す。返却はめくれたカードを見た後に選ぶ。
+  （金を含む6色）ごとに1つ、各1枚を返す。返却は場札の補充・山札から引いたカードを見た後に選ぶ。
 - 返却後に以下の通常の手番終了処理（貴族判定・手番交代）を行う。順序は「返却 → 貴族」である。
 - 返却フェーズ中だけ手番playerは11枚を保持できる。
 
-めくれたカードは相手に非公開のまま、返却色は公開情報である。Zobrist hashは
+山札から引いたカードは相手に非公開のまま、補充された場札と返却色は公開情報である。Zobrist hashは
 player別の返却フェーズsaltをexact/observable hashの両方に含める。
 
 通常action（返却フェーズがあればその返却）の適用後、そのplayerが条件を満たす場の貴族を調べる。
@@ -103,12 +103,12 @@ player別の返却フェーズsaltをexact/observable hashの両方に含める�
 - 銀行にある色から最大3色を選んで各1個取得する。銀行に2色以下しかなければその色数だけ取得する。
 - bankに4個以上ある同色を2個取得する。
 - visible cardまたはdeck先頭を予約し、可能ならGoldを1個得る。
-- 山札予約後の返却フェーズで1枚返す（`RETURN_GEM`）。
+- 予約後の返却フェーズで1枚返す（`RETURN_GEM`）。
 - visible/reserved cardを購入する。
 - 複数貴族候補から1枚を選ぶ。
 - 行動不能時だけpassする（千日手の局面の出現として数える）。
 
-token上限を超える取得・公開予約では必要な返却組合せを、購入では色tokenとGoldの有効な
+token上限を超える取得では必要な返却組合せを、購入では色tokenとGoldの有効な
 支払組合せをすべて別actionとして列挙する。合法手の集合、生成順、packed code、
 editor状態で2048件を超えた場合に先頭2048件を保持する挙動まで互換契約である。
 
@@ -128,7 +128,7 @@ hot pathであり、不正入力の結果を保証しない。solver向け低レ
 | action V1 | 1 | 48 | base action。逐次MCTSとlegacy MLの固定契約。返却フェーズではslot 0..5を返却色に再利用 |
 | action V2 | 2 | 4869 | slotと支払/返却を含む互換API |
 | action V3 | 3 | 3133 | card/noble IDと支払/返却を含むAPI。返却フェーズは表現不可 |
-| action V4 | 4 | 3121 | V3の山札予約返却を分離し`RETURN_GEM` 6枠を追加。[仕様](action_space_v4.md) |
+| action V5 | 5 | 3049 | 予約の返却を分離し`RETURN_GEM` 6枠を持つ全行動policy用。[仕様](action_space_v5.md) |
 | state feature V1 | 1 | 196 | bank、players、visible、deck count、nobles、手番 |
 
 schemaのversion、offset、fingerprint、宝石順はC++ descriptorを正本とし、Python wrapperも
@@ -151,4 +151,4 @@ visible-only solverは見えている局面だけを対象とする。reveal-ver
 列挙し、oracle metadataとproof DAGを構築する。両者は共通value typeと通常rule primitiveを
 利用するが、探索順、memo key、proof semanticsはMCTSや`Game`へ混ぜない。C++の
 reveal-verified headerと並列MCTS headerはexperimental分類を維持する。
-山札予約後の返却は予約手の一部として扱い、詰み深さを消費しない。
+予約後の返却は予約手の一部として扱い、詰み深さを消費しない。

@@ -1,9 +1,9 @@
-"""Deck-reservation token return phase across the public surfaces.
+"""Reservation token return phase across the public surfaces.
 
-A deck reservation that leaves the mover with eleven tokens is followed by a
-separate RETURN_GEM decision of the same player, made after the drawn card is
-known.  These tests pin the USI, SPN, API, V4 action-space, search-feature and
-solver contracts of that phase.
+A reservation (board card or deck) that leaves the mover with eleven tokens is
+followed by a separate RETURN_GEM decision of the same player, made after the
+refilled board card or the drawn card is known.  These tests pin the USI, SPN,
+API, V5 action-space, search-feature and solver contracts of that phase.
 """
 
 import numpy as np
@@ -23,7 +23,7 @@ from csplendor.api.usi_kifu import (
 )
 from csplendor.api.usi_parser import parse_usi_move
 
-E4 = cs.ActionEncoderV4
+E5 = cs.ActionEncoderV5
 E3 = cs.ActionEncoderV3
 COLORS = "WUGRKD"
 
@@ -45,11 +45,39 @@ def _deck_reserve(game, level=1):
     )
 
 
-def _return_phase_game(seed=42):
+def _visible_reserve(game, level=0, slot=0):
+    card = int(game.board.visible[level][slot])
+    return next(
+        action
+        for action in game.legal_actions
+        if action.type == cs.ActionType.RESERVE_VISIBLE and int(action.card_id) == card
+    )
+
+
+def _reserve(game, kind):
+    return _deck_reserve(game) if kind == "deck" else _visible_reserve(game)
+
+
+def _return_phase_game(seed=42, kind="deck"):
     game = _ten_token_game(seed)
-    assert game.apply(_deck_reserve(game), True)
+    assert game.apply(_reserve(game, kind), True)
     assert game.board.waiting_return
     return game
+
+
+def test_visible_reservation_enters_the_return_phase_after_the_refill():
+    game = _ten_token_game()
+    card = int(game.board.visible[0][0])
+    reserves = [a for a in game.legal_actions if a.type == cs.ActionType.RESERVE_VISIBLE]
+    assert len(reserves) == 12
+    assert all(list(map(int, a.return_gems)) == [0] * 6 for a in reserves)
+    assert game.apply(_visible_reserve(game), True)
+    board = game.board
+    assert board.waiting_return and board.pending_decision == 1
+    assert int(board.current_player) == 0
+    assert int(board.visible[0][0]) not in (-1, card)  # refilled before the return
+    assert list(map(int, board.players[0].gems)) == [2, 2, 2, 2, 2, 1]
+    assert [a.type for a in game.legal_actions] == [cs.ActionType.RETURN_GEM] * 6
 
 
 def test_return_actions_serialize_and_resolve_as_single_letters():
@@ -71,29 +99,38 @@ def test_return_moves_are_illegal_outside_the_return_phase():
         find_legal_action_index_by_usi(game, "return:W")
 
 
-def test_deck_reservation_is_one_ply_and_rejects_inline_returns():
+def test_reservations_are_one_ply_and_reject_inline_returns():
     game = _ten_token_game()
+    card = int(game.board.visible[0][0])
     assert action_to_usi(_deck_reserve(game), game=game) == "reserve:L2"
-    with pytest.raises(ValueError, match="separate ply"):
-        find_legal_action_index_by_usi(game, "reserve:L2/return:W")
+    assert action_to_usi(_visible_reserve(game), game=game) == f"reserve:C{card}"
+    for move in ("reserve:L2/return:W", f"reserve:C{card}/return:W"):
+        with pytest.raises(ValueError, match="separate ply"):
+            find_legal_action_index_by_usi(game, move)
 
 
-def test_legacy_deck_reservation_shorthand_expands_to_two_plies():
+def test_legacy_reservation_shorthand_expands_to_two_plies():
     assert expand_usi_move("reserve:L2/return:W") == ["reserve:L2", "return:W"]
     assert expand_usi_move("reserve:l3/return:d") == ["reserve:l3", "return:d"]
+    assert expand_usi_move("reserve:C12/return:W") == ["reserve:C12", "return:W"]
+    assert expand_usi_move("reserve:c7/return:u") == ["reserve:c7", "return:u"]
     for unchanged in (
         "reserve:L2",
-        "reserve:C12/return:W",
+        "reserve:C12",
         "take:WUG/return:K",
         "reserve:L2/return:WU",
+        "reserve:C12/return:WU",
     ):
         assert expand_usi_move(unchanged) == [unchanged]
 
 
-def test_position_replay_accepts_canonical_and_legacy_deck_returns():
-    base = game_to_spn(_ten_token_game())
-    canonical = position_to_game(f"position {base} moves reserve:L2 return:W")
-    legacy = position_to_game(f"position {base} moves reserve:L2/return:W")
+@pytest.mark.parametrize("kind", ["deck", "visible"])
+def test_position_replay_accepts_canonical_and_legacy_returns(kind):
+    start = _ten_token_game()
+    reserve = "reserve:L2" if kind == "deck" else f"reserve:C{int(start.board.visible[0][0])}"
+    base = game_to_spn(start)
+    canonical = position_to_game(f"position {base} moves {reserve} return:W")
+    legacy = position_to_game(f"position {base} moves {reserve}/return:W")
     for game in (canonical, legacy):
         assert not game.board.waiting_return
         assert int(game.board.current_player) == 1
@@ -101,8 +138,9 @@ def test_position_replay_accepts_canonical_and_legacy_deck_returns():
     assert canonical.board.hash() == legacy.board.hash()
 
 
-def test_spn_infers_the_return_phase_from_the_movers_token_count():
-    game = _return_phase_game()
+@pytest.mark.parametrize("kind", ["deck", "visible"])
+def test_spn_infers_the_return_phase_from_the_movers_token_count(kind):
+    game = _return_phase_game(kind=kind)
     restored = spn_to_game(game_to_spn(game, reveal_hidden_reserved_ids=True))
     assert restored.board.waiting_return
     assert restored.board.pending_decision == 1
@@ -142,7 +180,7 @@ def _service_with_ten_tokens():
 
 def test_service_records_legacy_shorthand_as_two_canonical_plies():
     service, session = _service_with_ten_tokens()
-    assert service.require_record(session)["meta"]["Format"] == "Splendor KIFU v1.1"
+    assert service.require_record(session)["meta"]["Format"] == "Splendor KIFU v1.2"
     index, canonical, game = service.apply_usi(session, "reserve:L2/return:W")
     assert canonical == "reserve:L2 return:W"
     assert index == 0  # return:W is the first of the six return choices
@@ -166,30 +204,39 @@ def test_service_rejects_unresolvable_shorthand_without_side_effects():
     assert service.require_record(session)["moves"] == []
 
 
-def test_v4_layout_and_v3_mapping_are_consistent():
-    assert E4.ACTION_SIZE == 3121
-    assert (E4.OFFSET_RESERVE_DECK, E4.OFFSET_PURCHASE) == (1064, 1067)
-    assert (E4.OFFSET_VISIT_NOBLE, E4.OFFSET_RETURN_GEM, E4.OFFSET_PASS) == (
-        3102,
-        3114,
-        3120,
+def test_v5_layout():
+    assert E5.ACTION_SIZE == 3049
+    assert (E5.OFFSET_TAKE_DIFFERENT, E5.OFFSET_TAKE_SAME) == (0, 840)
+    assert (E5.OFFSET_RESERVE_VISIBLE, E5.OFFSET_RESERVE_DECK, E5.OFFSET_PURCHASE) == (
+        980,
+        992,
+        995,
     )
-    table = np.asarray(E4.v3_to_v4_table())
-    assert table.shape == (E3.ACTION_SIZE,)
-    assert table.tolist() == [E4.v3_to_v4_id(i) for i in range(E3.ACTION_SIZE)]
-    # Every V3 id maps; the 21 deck reservations (3 plain, 18 with returns)
-    # collapse onto the 3 V4 deck ids, and nothing maps into RETURN_GEM.
-    assert (table >= 0).all()
-    assert set(table.tolist()) == set(range(E4.ACTION_SIZE)) - set(
-        range(E4.OFFSET_RETURN_GEM, E4.OFFSET_PASS)
+    assert (E5.OFFSET_VISIT_NOBLE, E5.OFFSET_RETURN_GEM, E5.OFFSET_PASS) == (
+        3030,
+        3042,
+        3048,
     )
-    deck_ids = range(E4.OFFSET_RESERVE_DECK, E4.OFFSET_PURCHASE)
-    assert int(np.isin(table, list(deck_ids)).sum()) == 3 + 18
-    for v3_id, v4_id in enumerate(table.tolist()):
-        if v4_id not in deck_ids:
-            assert E4.v4_to_v3_id(v4_id) == v3_id
-    for color in range(6):
-        assert E4.v4_to_v3_id(E4.OFFSET_RETURN_GEM + color) == -1
+    assert E5.schema_version() == 5
+    assert E5.schema_fingerprint() == (
+        "csplendor.action.v5;size=3049;layout=840,140,12,3,2035,12,6,1"
+    )
+    assert not hasattr(cs, "ActionEncoderV4")
+
+
+def test_v5_visible_reservations_are_keyed_by_board_slot():
+    game = cs.Game(seed=11)
+    for level in range(3):
+        for slot in range(4):
+            action_id = E5.OFFSET_RESERVE_VISIBLE + level * 4 + slot
+            action = E5.decode(action_id, game)
+            assert action.type == cs.ActionType.RESERVE_VISIBLE
+            assert int(action.card_id) == int(game.board.visible[level][slot])
+            assert list(map(int, action.return_gems)) == [0] * 6
+            assert E5.encode(action, game) == action_id
+    with_return = E5.decode(E5.OFFSET_RESERVE_VISIBLE, game)
+    with_return.return_gems = [1, 0, 0, 0, 0, 0]
+    assert E5.encode(with_return, game) == -1
 
 
 def _walk_positions(seeds=(3, 5, 8), plies=40):
@@ -197,7 +244,8 @@ def _walk_positions(seeds=(3, 5, 8), plies=40):
         game = _ten_token_game(seed)
         rng = np.random.default_rng(seed)
         yield game
-        assert game.apply(_deck_reserve(game, seed % 3), True)
+        reserve = _deck_reserve(game, seed % 3) if seed % 2 else _visible_reserve(game)
+        assert game.apply(reserve, True)
         for _ in range(plies):
             yield game
             if game.is_game_over():
@@ -206,22 +254,22 @@ def _walk_positions(seeds=(3, 5, 8), plies=40):
             assert game.apply(actions[int(rng.integers(len(actions)))], True)
 
 
-def test_v4_mask_ids_and_decode_agree_including_the_return_phase():
+def test_v5_mask_ids_and_decode_agree_including_the_return_phase():
     seen_return_phase = False
     for game in _walk_positions():
-        mask = np.asarray(E4.get_action_mask(game), dtype=bool)
-        ids = list(E4.legal_action_ids(game))
+        mask = np.asarray(E5.get_action_mask(game), dtype=bool)
+        ids = list(E5.legal_action_ids(game))
         assert sorted(ids) == np.flatnonzero(mask).tolist()
-        assert len(ids) == len({E4.encode(a, game) for a in game.legal_actions})
-        for v4_id in ids:
-            action = E4.decode_and_match(v4_id, game)
+        assert len(ids) == len({E5.encode(a, game) for a in game.legal_actions})
+        for v5_id in ids:
+            action = E5.decode_and_match(v5_id, game)
             assert action is not None
-            assert E4.encode(action, game) == v4_id
+            assert E5.encode(action, game) == v5_id
         if game.board.waiting_return:
             seen_return_phase = True
             gems = game.board.players[game.board.current_player].gems
             assert sorted(ids) == [
-                E4.OFFSET_RETURN_GEM + color for color in range(6) if gems[color]
+                E5.OFFSET_RETURN_GEM + color for color in range(6) if gems[color]
             ]
             assert not np.asarray(E3.get_action_mask(game)).any()
     assert seen_return_phase
@@ -248,6 +296,7 @@ def test_search_state_dim_adds_two_pending_decision_features():
     [
         (_ten_token_game, (0.0, 0.0)),
         (_return_phase_game, (1.0, 0.0)),
+        (lambda: _return_phase_game(kind="visible"), (1.0, 0.0)),
         (_noble_choice_game, (0.0, 1.0)),
     ],
 )
@@ -263,21 +312,22 @@ def test_search_features_flag_the_pending_decision(make_game, flags):
     # index 314 = waiting_return, index 315 = waiting_noble
     assert tuple(features[0, 314:].tolist()) == flags
     if flags[0]:
-        assert sorted(ids.tolist()) == [E4.OFFSET_RETURN_GEM + c for c in range(6)]
-        assert cs.v4_semantic_group_id(int(ids[0])) >= 133
+        assert sorted(ids.tolist()) == [E5.OFFSET_RETURN_GEM + c for c in range(6)]
+        assert cs.v5_semantic_group_id(int(ids[0])) >= 133
 
 
-def _deck_mate_fixture():
+def _mate_fixture(kind="deck"):
     """Player 0 needs one gold for reserved card 15 (W4, 1 point).
 
-    No card is visible, so the gold is reachable only through a deck
-    reservation, which reaches eleven tokens and must be followed by a
-    return.  The return belongs to the reservation and is not a move.
+    The gold is reachable only through a reservation (of the deck, or of the
+    single board card 4), which reaches eleven tokens and must be followed by
+    a return.  The return belongs to the reservation and is not a move.
     """
     game = cs.Game(seed=0)
     board = game.board
     board.bank = [0, 0, 0, 0, 0, 5]
-    board.visible = [[-1] * 4, [-1] * 4, [-1] * 4]
+    first = [4, -1, -1, -1] if kind == "visible" else [-1] * 4
+    board.visible = [first, [-1] * 4, [-1] * 4]
     board.decks = [[0, 1, 2, 3], [], []]
     board.nobles = []
     board.current_player = 0
@@ -298,8 +348,9 @@ def _deck_mate_fixture():
     return game
 
 
+@pytest.mark.parametrize("kind", ["deck", "visible"])
 @pytest.mark.parametrize("solver_name", ["exhaustive", "dfpn"])
-def test_python_solvers_do_not_count_the_return_as_a_move(solver_name):
+def test_python_solvers_do_not_count_the_return_as_a_move(solver_name, kind):
     from scripts.dfpn_mate_solver import solve_game_dfpn
     from scripts.mate_solver import MATE, SolverOptions, solve_game
 
@@ -310,8 +361,8 @@ def test_python_solvers_do_not_count_the_return_as_a_move(solver_name):
         time_limit=30.0,
         include_proof=False,
     )
-    assert solve(_deck_mate_fixture(), 0, 1, options).status != MATE
-    result = solve(_deck_mate_fixture(), 0, 2, options)
+    assert solve(_mate_fixture(kind), 0, 1, options).status != MATE
+    result = solve(_mate_fixture(kind), 0, 2, options)
     assert result.status == MATE
     assert result.depth == 2
 
@@ -330,17 +381,18 @@ def _two_noble_game(gems):
     return game, nobles
 
 
-def test_return_precedes_the_noble_choice_of_the_same_player():
+@pytest.mark.parametrize("kind", ["deck", "visible"])
+def test_return_precedes_the_noble_choice_of_the_same_player(kind):
     game, nobles = _two_noble_game([2, 2, 2, 2, 2, 0])
-    assert game.apply(_deck_reserve(game), True)
+    assert game.apply(_reserve(game, kind), True)
     assert game.board.pending_decision == 1 and int(game.current_player) == 0
 
     assert game.apply(game.legal_actions[0], True)
     assert game.board.pending_decision == 2 and int(game.current_player) == 0
     choices = game.legal_actions
     assert {int(a.noble_choice) for a in choices} == set(nobles)
-    assert sorted(E4.legal_action_ids(game)) == sorted(
-        E4.OFFSET_VISIT_NOBLE + n for n in nobles
+    assert sorted(E5.legal_action_ids(game)) == sorted(
+        E5.OFFSET_VISIT_NOBLE + n for n in nobles
     )
 
     assert game.apply(choices[0], True)
@@ -362,7 +414,7 @@ def _drive(session):
         session.apply(ids, offsets, priors, np.zeros(len(slots), dtype=np.float32))
 
 
-@pytest.mark.parametrize("phase", ["noble", "return", "before_reserve"])
+@pytest.mark.parametrize("phase", ["noble", "return", "visible_return", "before_reserve"])
 def test_search_handles_consecutive_decisions_of_one_player(phase):
     game, nobles = _two_noble_game([2, 2, 2, 2, 2, 0])
     if phase == "noble":
@@ -371,6 +423,8 @@ def test_search_handles_consecutive_decisions_of_one_player(phase):
         assert game.board.waiting_noble
     elif phase == "return":
         assert game.apply(_deck_reserve(game), True)
+    elif phase == "visible_return":
+        assert game.apply(_visible_reserve(game), True)
     config = cs.V3SearchConfig()
     config.num_simulations = 64
     config.leaf_batch_size = 4
@@ -378,8 +432,8 @@ def test_search_handles_consecutive_decisions_of_one_player(phase):
     session.add_game(game, game.current_player, seed=3)
     _drive(session)
     visits = session.root_visits(0)
-    legal = set(E4.legal_action_ids(game))
+    legal = set(E5.legal_action_ids(game))
     assert visits and set(visits) <= legal
     assert sum(visits.values()) == 63
     if phase == "noble":
-        assert legal == {E4.OFFSET_VISIT_NOBLE + n for n in nobles}
+        assert legal == {E5.OFFSET_VISIT_NOBLE + n for n in nobles}

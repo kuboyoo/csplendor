@@ -42,9 +42,9 @@ V1に `waiting_noble`・`waiting_return`・`final_round` の独立した特徴�
 | Python `ActionEncoder` / native `ActionEncoderCpp` | 48 | 基本行動。返却・支払いを圧縮。返却フェーズはslot 0..5を返却色に再利用 |
 | `ActionEncoderV2` | 4869 | 場・予約スロットを基準に全選択肢を表現 |
 | `ActionEncoderV3` | 3133 | 購入をカードID、貴族を貴族IDで表現。返却フェーズは表現不可 |
-| `ActionEncoderV4` | 3121 | V3の山札予約返却を分離し、`RETURN_GEM` 6枠を追加 |
+| `ActionEncoderV5` | 3049 | 予約の返却を分離し、`RETURN_GEM` 6枠を持つ |
 
-全行動policyにはV4を利用します。山札予約で11枚になると同じ手番のまま返却フェーズ（`board.waiting_return`）に入り、合法手は `RETURN_GEM` だけになります。V2/V3はこれを表現できず、返却フェーズのマスクは空、`encode` は `-1` です。詳細は [V2仕様](action_space_v2.md) / [V3仕様](action_space_v3.md) / [V4仕様](action_space_v4.md)。V3で学習したpolicyの移行（`v3_to_v4_table()`）もV4仕様にあります。`Game.legal_actions` の添字や `Action.pack()` の整数と、policyの行動IDは別物です。
+全行動policyにはV5を利用します。予約（場札・山札）で11枚になると同じ手番のまま返却フェーズ（`board.waiting_return`）に入り、補充された場札・引いたカードを見てから返す色を選びます。この間の合法手は `RETURN_GEM` だけです。V2/V3はこれを表現できず、返却フェーズのマスクは空、`encode` は `-1` です。詳細は [V2仕様](action_space_v2.md) / [V3仕様](action_space_v3.md) / [V5仕様](action_space_v5.md)。旧V4（3121枠）は削除し、V4で学習したpolicyの移行手段は提供しません。`Game.legal_actions` の添字や `Action.pack()` の整数と、policyの行動IDは別物です。
 
 ```python
 import numpy as np
@@ -52,20 +52,20 @@ import csplendor as cs
 
 game = cs.Game(seed=42)
 game.simple_payment_mode = False
-mask = cs.ActionEncoderV4.get_action_mask(game)
+mask = cs.ActionEncoderV5.get_action_mask(game)
 action_id = int(np.flatnonzero(mask)[0])
-action = cs.ActionEncoderV4.decode(action_id, game)
-assert cs.ActionEncoderV4.encode(action, game) == action_id
+action = cs.ActionEncoderV5.decode(action_id, game)
+assert cs.ActionEncoderV5.encode(action, game) == action_id
 assert game.apply(action)
 ```
 
-policy の教師データや推論で合法手の ID 列が必要な場合は、`cs.ActionEncoderV4.legal_action_ids(game)`（V3 ID は `cs.ActionEncoderV3.legal_action_ids(game)`）を使えます（`game.legal_actions` と同じ順の int32 配列）。Python で1手ずつ `encode` するより約20倍速く、結果は同じです。
+policy の教師データや推論で合法手の ID 列が必要な場合は、`cs.ActionEncoderV5.legal_action_ids(game)`（V3 ID は `cs.ActionEncoderV3.legal_action_ids(game)`）を使えます（`game.legal_actions` と同じ順の int32 配列）。Python で1手ずつ `encode` するより約20倍速く、結果は同じです。
 
-着手する局面のマスクでpolicyを制限します。終局時はV2/V3/V4のマスクが全ゼロです。モデルには行動schemaのversion・fingerprintと支払いモードも保存してください。
+着手する局面のマスクでpolicyを制限します。終局時はV2/V3/V5のマスクが全ゼロです。モデルには行動schemaのversion・fingerprintと支払いモードも保存してください。
 
 ## 内蔵MCTSとの接続
 
-内蔵C++ MCTSは48枠の `ActionEncoderCpp` を使用します。V4の3121枠policyには `V3SearchSession`（[V3探索](mcts_v3.md)。IDはV4）または明示的な変換が必要です。48枠では返却・支払いの全パターンを独立した枝として選べません。
+内蔵C++ MCTSは48枠の `ActionEncoderCpp` を使用します。V5の3049枠policyには `V3SearchSession`（[V3探索](mcts_v3.md)。IDはV5）または明示的な変換が必要です。48枠では返却・支払いの全パターンを独立した枝として選べません。
 
 48枠の区分は異色取得 `0..9`、同色取得 `10..14`、公開予約 `15..26`、山札予約 `27..29`、場から購入 `30..41`、予約から購入 `42..44`、貴族選択 `45..47` です。返却フェーズ中だけ、slot `0..5` を白・青・緑・赤・黒・金の返却に再利用します。
 

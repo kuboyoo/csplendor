@@ -133,8 +133,9 @@ void test_state_schema_and_reachable_golden() {
     }
   }
   check(states == 768);
-  // Rules version 2 (deck-reservation return phase) changes the walk.
-  check(digest == 0xd4995d01579b5067ULL);
+  // Rules version 5 (every reservation is followed by RETURN_GEM) changes
+  // the walk.
+  check(digest == 0xf74e65c6fb123827ULL);
 }
 
 } // namespace

@@ -8,6 +8,10 @@
 > **Header**: `src/action_encoder_v2.h`
 > **Python**: `csplendor.ActionEncoderV2`
 
+> **Note (2026-10-18)**: 予約（場札・山札）の返却は別の `RETURN_GEM` 行動（返却フェーズ）になった。
+> V2はこれを表現できず、返却フェーズではマスクが空、`encode` は `-1` を返す。予約枠で合法になるのは
+> 返却なし（`ret_pattern = 0`）だけである。全行動policyには [ActionEncoderV5](action_space_v5.md)（3049枠）を使う。
+
 ## Overview
 
 ActionEncoderV2 maps every distinct legal Splendor action to a unique integer ID.

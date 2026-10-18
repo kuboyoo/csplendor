@@ -14,9 +14,9 @@
 - `internal`: top-level Python API へ昇格させない。C++ header は同一リポジトリ内で
   利用できるが、外部互換性を保証しない。
 
-`GemType`、`ActionType`、`Action::pack()`、48/V2/V3/V4 action ID、196 feature、
-snapshot version は分類によらず数値契約である。変更する場合は新しい version と
-移行手順を先に追加し、既存 version の意味を変更しない。
+`GemType`、`ActionType`、`Action::pack()`、48/V2/V3/V5 action ID、196 feature、
+snapshot version は分類によらず数値契約である。変更する場合は新しい version として追加し、
+既存 version の意味を書き換えない。開発中のため旧 version は移行手順なしで削除してよい（例: V4 → V5）。
 
 ## 状態プロファイルと不変条件
 

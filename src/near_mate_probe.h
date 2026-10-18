@@ -7,7 +7,7 @@
 // and free of Python so the Python wrapper (csplendor.search_near_mate) and the
 // WASM build share one result.
 
-#include "action_encoder_v4.h"
+#include "action_encoder_v5.h"
 #include "game.h"
 #include "reveal_verified_solver.h"
 
@@ -60,7 +60,7 @@ struct NearMateSearchResult {
   std::vector<NearMateDepthBound> bounds;
   bool has_best_action = false;
   uint64_t best_action = 0; // Action::pack() of the proven query's best move
-  int best_action_id = -1;  // its ActionEncoderV4 id (attacker to move only)
+  int best_action_id = -1;  // its ActionEncoderV5 id (attacker to move only)
   std::vector<NearMateRootAction> root_actions;
   std::vector<NearMateReveal> best_action_reveals;
   bool undecided = false;
@@ -178,7 +178,7 @@ inline NearMateSearchResult near_mate_search(
   if (result.has_best_action && game.current_player() == config.attacker) {
     for (const Action &action : game.legal_actions()) {
       if (action.pack() == result.best_action) {
-        result.best_action_id = ActionEncoderV4::encode(action, game);
+        result.best_action_id = ActionEncoderV5::encode(action, game);
         break;
       }
     }

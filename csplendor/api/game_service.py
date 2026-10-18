@@ -66,7 +66,7 @@ class GameSessionService:
         return {
             "session_id": session_id,
             "meta": {
-                "Format": "Splendor KIFU v1.1",
+                "Format": "Splendor KIFU v1.2",
                 "Players": "2",
                 "Player0": "Player0",
                 "Player1": "Player1",

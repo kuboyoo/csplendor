@@ -59,8 +59,8 @@ def test_information_state_is_versioned_and_changes_with_public_semantics():
     game = csplendor.Game(seed=3)
     key = game.serialize_information_state(0)
 
-    assert csplendor.Game.information_state_format_version() == 5
-    assert csplendor.Game.information_state_rules_version() == 4
+    assert csplendor.Game.information_state_format_version() == 6
+    assert csplendor.Game.information_state_rules_version() == 5
     assert key[:8] == b"CSPLINFO"
     assert key != game.serialize_information_state(1)
 
@@ -108,5 +108,5 @@ def test_information_state_has_a_golden_encoding():
     key = csplendor.Game(seed=42).serialize_information_state(0)
     assert len(key) < 256
     assert hashlib.sha256(key).hexdigest() == (
-        "040f1dcbba8de9e2caba6c2c9a45a7b6419514470b597fc215440057119407c6"
+        "9f4c51b5493a609ee8360e7ec9eeda568a115f303cc3638fee0b3cd4ac812373"
     )

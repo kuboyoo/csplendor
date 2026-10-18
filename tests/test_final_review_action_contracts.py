@@ -10,6 +10,7 @@ from csplendor import (
     ActionEncoderCpp,
     ActionEncoderV2,
     ActionEncoderV3,
+    ActionEncoderV5,
     ActionType,
     Game,
     get_card,
@@ -142,7 +143,11 @@ def test_seeded_playouts_keep_pack_apply_and_full_encoder_parity():
 
             for action in actions:
                 assert _signature(Action.unpack(int(action.pack()))) == _signature(action)
-                for encoder in (ActionEncoderV2, ActionEncoderV3):
+                encoders = (ActionEncoderV2, ActionEncoderV3, ActionEncoderV5)
+                if game.board.waiting_return:  # only V5 has RETURN_GEM ids
+                    assert ActionEncoderV3.encode(action, game) == -1
+                    encoders = (ActionEncoderV5,)
+                for encoder in encoders:
                     action_id = encoder.encode(action, game)
                     assert 0 <= action_id < encoder.ACTION_SIZE
                     assert _signature(

@@ -12,7 +12,7 @@ namespace {
 constexpr uint64_t FNV_OFFSET = 14695981039346656037ULL;
 constexpr uint64_t FNV_PRIME = 1099511628211ULL;
 // Rules version 2: deck reservations carry no return (RETURN_GEM follows).
-constexpr uint64_t REACHABLE_ACTION_DIGEST = 0x24c13545495dde01ULL;
+constexpr uint64_t REACHABLE_ACTION_DIGEST = 0x11d6c09783dab001ULL;
 
 void check(bool condition) {
   if (!condition)
@@ -342,8 +342,8 @@ void test_reachable_differential_and_golden() {
     }
   }
 
-  check(state_count == 2784);
-  check(action_count == 95541);
+  check(state_count == 2777);
+  check(action_count == 87280);
   check(digest == REACHABLE_ACTION_DIGEST);
 }
 

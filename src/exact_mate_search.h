@@ -6,7 +6,7 @@
 // and every concrete reveal. Free of Python so the WASM build can call it;
 // root_mate_probe uses it for its endgame sweep.
 
-#include "action_encoder_v4.h"
+#include "action_encoder_v5.h"
 #include "card_data.h"
 #include "game.h"
 #include "noble_data.h"
@@ -62,7 +62,7 @@ struct ExactMateSearchResult {
   std::vector<RevealVerifiedLineEntry> line; // principal line of the mate
   bool has_winning_root_action = false;
   uint64_t winning_root_action = 0; // Action::pack()
-  int winning_root_action_id = -1;  // ActionEncoderV4 id (attacker to move)
+  int winning_root_action_id = -1;  // ActionEncoderV5 id (attacker to move)
   uint64_t nodes = 0;
   double elapsed_ms = 0.0;
 };
@@ -132,7 +132,7 @@ inline ExactMateSearchResult exact_mate_search(const Game &game,
     if (game.current_player() == config.attacker)
       for (const Action &action : game.legal_actions())
         if (action.pack() == result.winning_root_action) {
-          result.winning_root_action_id = ActionEncoderV4::encode(action, game);
+          result.winning_root_action_id = ActionEncoderV5::encode(action, game);
           break;
         }
   }

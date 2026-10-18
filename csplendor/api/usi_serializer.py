@@ -55,17 +55,9 @@ def action_to_usi(action, game=None) -> str:
             f"/return:{returned}" if returned else ""
         )
     if action.type == CoreActionType.RESERVE_VISIBLE:
-        base = f"reserve:C{safe_int(action.card_id)}"
-        returned = counts_to_letters(
-            list(action.return_gems), include_gold=True
-        )
-        return base + (f"/return:{returned}" if returned else "")
+        return f"reserve:C{safe_int(action.card_id)}"
     if action.type == CoreActionType.RESERVE_DECK:
-        base = f"reserve:L{safe_int(action.deck_level) + 1}"
-        returned = counts_to_letters(
-            list(action.return_gems), include_gold=True
-        )
-        return base + (f"/return:{returned}" if returned else "")
+        return f"reserve:L{safe_int(action.deck_level) + 1}"
     if action.type == CoreActionType.PURCHASE:
         base = f"buy:C{safe_int(action.card_id)}"
         payment = compute_purchase_payment(action, game)

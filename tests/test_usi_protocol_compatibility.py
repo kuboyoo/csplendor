@@ -67,7 +67,7 @@ def test_kifu_codec_has_stable_text_and_parse_contract():
 def test_kifu_codec_round_trips_time_control_and_time_forfeit():
     text = build_kifu_text(
         headers={
-            "Format": "Splendor KIFU v1.1",
+            "Format": "Splendor KIFU v1.2",
             "Players": "2",
             "TimeControl": "150+30/150",
         },
@@ -91,7 +91,7 @@ def test_kifu_codec_round_trips_time_control_and_time_forfeit():
 
 def test_kifu_codec_round_trips_resign():
     text = build_kifu_text(
-        headers={"Format": "Splendor KIFU v1.1"},
+        headers={"Format": "Splendor KIFU v1.2"},
         position="startpos 2",
         moves=[{"player": 0, "usi": "take:WUG"}],
         result="P1_WIN",
@@ -109,7 +109,7 @@ def test_kifu_codec_round_trips_resign():
 )
 def test_kifu_codec_keeps_per_player_time_control(value):
     text = build_kifu_text(
-        headers={"Format": "Splendor KIFU v1.1", "TimeControl": value},
+        headers={"Format": "Splendor KIFU v1.2", "TimeControl": value},
         position="startpos 2",
         moves=[],
         result="DRAW",

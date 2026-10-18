@@ -20,7 +20,10 @@ def _assert_state_invariants(game):
     assert board.current_player in (0, 1)
     assert board.turn >= 0
     assert all(int(gem) >= 0 for gem in board.bank)
-    assert all(sum(player.gems) <= 10 for player in board.players)
+    for index, player in enumerate(board.players):
+        # A pending reservation return is the only time a player holds 11.
+        pending = board.waiting_return and index == board.current_player
+        assert sum(player.gems) == 11 if pending else sum(player.gems) <= 10
 
     card_ids = _card_ids_in_state(board)
     assert len(card_ids) == 90

@@ -32,7 +32,7 @@ python scripts/dfpn_mate_solver.py \
 
 証明 DAG は `proof_tree.verification.proof_dag` に返ります。攻撃側は証明に採用した手、守備側は全合法応手、山札予約は全ドロー結果を保持します。既定の `compact` 形式では、同じ action/child に進む複数の具体めくれカードをカードID bitset の reveal group としてまとめ、edge は action template と reveal group への参照で保存します。具体カード集合は保持するため、全めくれに対する応手情報は失いません。従来の辞書型 DAG が必要な場合は `--proof-dag-format v1`、比較用に両方出す場合は `--proof-dag-format both` を指定します。complete DAG は返却前に全 edge を合法手として再走査し、検査済みなら `validated: true` になります。上限超過時も詰み判定結果は維持し、DAG のみ破棄して理由を返します。
 
-完全DAGが大きすぎる場合は、`csplendor.expand_mate_frontier()` で現在局面の1層だけを検証・展開できます。攻撃側ノードでは証明手1手の全めくれ、守備側ノードでは全合法手の全めくれを返します。各 edge の `child_state` は、SPNに含まれない終局・最終ラウンド・貴族選択待ち・山札予約後の返却待ちも保持する版付きスナップショットです。山札予約後の返却は予約手の一部で、詰み深さを消費しません。次の呼び出しでは `load_mate_frontier_game(state=...)` で復元します。
+完全DAGが大きすぎる場合は、`csplendor.expand_mate_frontier()` で現在局面の1層だけを検証・展開できます。攻撃側ノードでは証明手1手の全めくれ、守備側ノードでは全合法手の全めくれを返します。各 edge の `child_state` は、SPNに含まれない終局・最終ラウンド・貴族選択待ち・予約後の返却待ちも保持する版付きスナップショットです。予約後の返却は予約手の一部で、詰み深さを消費しません。次の呼び出しでは `load_mate_frontier_game(state=...)` で復元します。
 
 ```python
 import csplendor as cs
@@ -108,7 +108,7 @@ AI が手を選ぶ前に root で詰みを探る処理を、C++ の1関数 `root
 config = cs.RootMateProbeConfig()          # 既定値は下表
 result = cs.root_mate_probe(game, config, previous_value=0.72, time_limit_seconds=0.3)
 if result.proven:
-    action = cs.Action.unpack(result.action_code)   # result.action_id は V4 の行動ID
+    action = cs.Action.unpack(result.action_code)   # result.action_id は V5 の行動ID
 ```
 
 手順（攻め方 = 手番のプレイヤー）:
@@ -137,7 +137,7 @@ if result.proven:
 | `min_points` | 9 | `proven` | root の手まで特定した詰みか |
 | `trigger_value` | `0.6`（`None` 可） | `value_proven` | 詰み（手の有無を問わない） |
 | `endgame_points` | 10 | `depth` | 詰みの深さ（攻め方の手数。無ければ -1） |
-| `max_nodes` / `time_limit_ms` | 20,000 / 20 | `action_code` / `action_id` | 詰みの初手（pack 値 / V4 の行動ID。無ければ -1） |
+| `max_nodes` / `time_limit_ms` | 20,000 / 20 | `action_code` / `action_id` | 詰みの初手（pack 値 / V5 の行動ID。無ければ -1） |
 | `endgame_max_nodes` / `endgame_time_limit_ms` | 2,000,000 / 150 | `nodes` / `elapsed_ms` | 4 と 5 の合計 |
 | `min_depth` / `max_depth` | 1 / 3 | `stop_reason` | 停止理由（探らなかった場合は空文字列） |
 | `endgame_exact_depth` | 2 | `value_triggered` | 評価値で発火したか |
@@ -164,7 +164,7 @@ Python に依存しません。`root_mate_probe` の終盤の厳密探索もこ�
   `stop_reason` は `mate_proven` / `max_depth_reached` / `cumulative node limit exceeded` /
   `cumulative time limit exceeded` / ソルバーの未決着理由 / 証明の種類で、Python 版と同じ文字列。
   `mate_depth`・`verified_no_mate_through_depth`（無ければ -1）、`winning_root_action`（pack 値）と
-  `winning_root_action_id`（V4。無ければ -1）、`nodes`、`elapsed_ms` も返す。
+  `winning_root_action_id`（V5。無ければ -1）、`nodes`、`elapsed_ms` も返す。
 - 設定 `ExactMateSearchConfig` は `attacker`、`min_depth`、`max_depth`、`max_nodes`、`time_limit_seconds`、
   `max_memo_states` を持つ。証明DAG・`required_root_action`・順序表・並列化は扱わない（Python 版を使う）。
 
@@ -257,7 +257,7 @@ Python に依存しないので、WASM（embind）からも同じ結果で呼べ
 `max_nodes`、`time_limit_seconds`（全問い合わせの累計）、`no_take_probe`、`line_transplant`、`max_memo_states`
 を持ちます。結果 `NearMateSearchResult` は `lower`/`upper`、`lower_depth`/`upper_depth`（無ければ -1）、
 深さごとの区間 `bounds`（`depth`、`lower`、`upper`、`decided`）、`best_action`（pack 値）と `best_action_id`
-（V4 の行動ID。無ければ -1）、最善手のめくれ `best_action_reveals`（Python の `losing_reveals` は値が 1 未満の
+（V5 の行動ID。無ければ -1）、最善手のめくれ `best_action_reveals`（Python の `losing_reveals` は値が 1 未満の
 ものだけ）、`root_actions`、`undecided`、`stop_reason`、`attempts`（`depth`、`threshold`、`verdict`、`nodes`、
 `elapsed_ms`、`unknown_reason`）、`nodes`、`elapsed_ms` です。手順・停止理由の文字列は Python 版と同じです。
 
