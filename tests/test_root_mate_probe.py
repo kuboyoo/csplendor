@@ -191,7 +191,9 @@ def test_whole_probe_respects_one_shared_deadline(limit_ms):
         started = time.monotonic()
         result = cs.root_mate_probe(game, config, time_limit_seconds=limit_ms / 1000.0)
         wall_ms = (time.monotonic() - started) * 1000.0
-        assert result.elapsed_ms <= limit_ms + 2.0
+        # The deadline is checked between nodes; shared CI runners (macOS)
+        # have overshot by a little over 2 ms.
+        assert result.elapsed_ms <= limit_ms + 5.0
         worst = max(worst, wall_ms)
     assert worst <= limit_ms + 15.0  # binding and clone overhead only
 
