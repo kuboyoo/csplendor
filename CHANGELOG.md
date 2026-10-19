@@ -1,5 +1,23 @@
 # 変更履歴 / Changelog
 
+## 未出荷：V3 探索のサンプル型 chance 節点の漸進的拡幅（2026-10-20）
+
+- `V3SearchConfig` に `chance_widening_base`（C）と `chance_widening_alpha`（α）を足した（既定はどちらも 0）。両方が正のとき、
+  サンプル型 chance 節点が持つ結果の子を k(n) = ceil(C · n^α)（n は節点の訪問数、評価待ちの仮訪問を含む）に抑える。
+  世界がめくる次のカードが既存の子でなく子の数が k(n) 以上なら、行動の前に `force_next_draw` で訪問数が最少の既存の子の
+  カードを山札の先頭に置く。値の集計は変えない。列挙済みの chance 節点と `merge_own_deck_reveal` で分岐しない予約には効かない
+  （`doc/mcts_v3.md`）。
+- どちらかが 0 なら無効で、探索の出力は従来とビット単位で同じ（`tests/test_mcts_v3.py` が aaa9578 の出力を固定している）。
+  負の値は `V3SearchSession` の構築で `ValueError`。`stats()` に強制回数 `chance_widenings` を足した。
+
+English: V3 search gains progressive widening of sampled chance nodes
+(`chance_widening_base`, `chance_widening_alpha`; both default 0 = off and
+bit-identical to before). A chance node keeps at most ceil(C · n^α) revealed-card
+children; a world about to reveal a card outside that set is forced
+(`force_next_draw`) to the least-visited existing child before the action is
+applied. Enumerated chance nodes and merged own-deck reservations are
+unaffected; `stats()["chance_widenings"]` counts the forced reveals.
+
 ## 未出荷：購入済みカードを集合で持つ（2026-10-19）
 
 - `PlayerState.purchased_cards` を購入順を持たない90ビットのカードIDの集合（`CardSet`、`src/card_set.h`）にした。

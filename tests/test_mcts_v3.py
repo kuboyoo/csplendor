@@ -1,3 +1,7 @@
+import json
+import math
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -419,7 +423,7 @@ def _deck_reserve_root(seed=81):
     return game, reserve
 
 
-def _search_through_deck_reserve(merge, enumeration_depth=0, simulations=121, max_depth=300):
+def _search_through_deck_reserve(merge, enumeration_depth=0, simulations=121, max_depth=300, widening=(0.0, 0.0)):
     """Every root simulation goes through the observer's deck reservation."""
     config = cs.V3SearchConfig()
     config.max_depth = max_depth
@@ -427,6 +431,7 @@ def _search_through_deck_reserve(merge, enumeration_depth=0, simulations=121, ma
     config.leaf_batch_size = 4
     config.merge_own_deck_reveal = merge
     config.chance_enumeration_depth = enumeration_depth
+    config.chance_widening_base, config.chance_widening_alpha = widening
     game, reserve = _deck_reserve_root()
     session = cs.V3SearchSession(config)
     session.add_game(game, game.current_player, seed=5)
@@ -484,3 +489,81 @@ def test_merge_own_deck_reveal_is_off_by_default_and_keeps_the_search():
         drive(session, value=0.1)
         traces.append((session.root_visits(0), session.stats()))
     assert traces[0] == traces[1]
+
+
+GOLDEN_SEARCH = Path(__file__).parent / "data" / "v3_search_golden_aaa9578.json"
+
+
+def _golden_search(widening=(0.0, 0.0), simulations=64):
+    """Root statistics of four fixed searches (three openings, one purchase position)."""
+    config = cs.V3SearchConfig()
+    config.num_simulations = simulations
+    config.leaf_batch_size = 8
+    config.chance_widening_base, config.chance_widening_alpha = widening
+    session = cs.V3SearchSession(config)
+    games = [cs.Game(seed=seed) for seed in (11, 12, 13)] + [_purchase_position()]
+    for index, game in enumerate(games):
+        session.add_game(game, game.current_player, seed=500 + index)
+    drive(session, 0.1)
+    rows = []
+    for index in range(len(games)):
+        visits = {int(k): int(v) for k, v in session.root_visits(index).items()}
+        values = {int(k): float(np.float32(v)) for k, v in session.root_action_values(index).items()}
+        rows.append({
+            "visits": visits,
+            "values": values,
+            "root_value": float(np.float32(session.root_value(index))),
+            "chosen": min(visits, key=lambda a: (-visits[a], a)),
+        })
+    return rows, {k: int(v) for k, v in session.stats().items()}
+
+
+def test_chance_widening_is_off_by_default_and_reproduces_the_search_before_it():
+    """Default 0/0 must be bit-identical to the search recorded at csplendor aaa9578 (no widening code)."""
+    config = cs.V3SearchConfig()
+    assert config.chance_widening_base == 0.0 and config.chance_widening_alpha == 0.0
+    golden = json.loads(GOLDEN_SEARCH.read_text())
+    for widening in ((0.0, 0.0), (1.0, 0.0), (0.0, 0.5)):  # either value 0 disables it
+        rows, stats = _golden_search(widening)
+        assert stats.pop("chance_widenings") == 0
+        assert stats == golden["stats"]
+        for row, expected in zip(rows, golden["games"]):
+            assert row["visits"] == {int(k): v for k, v in expected["visits"].items()}
+            assert row["values"] == {int(k): v for k, v in expected["values"].items()}
+            assert row["root_value"] == expected["root_value"]
+            assert row["chosen"] == expected["chosen"]
+
+
+def test_chance_widening_changes_the_search_and_rejects_negative_settings():
+    rows, stats = _golden_search((1.0, 0.5), simulations=400)
+    assert stats["chance_widenings"] > 0 and stats["simulations"] == 4 * 400
+    assert [row["visits"] for row in rows] != [row["visits"] for row in _golden_search(simulations=400)[0]]
+    for widening in ((-1.0, 0.5), (1.0, -0.5)):
+        config = cs.V3SearchConfig()
+        config.chance_widening_base, config.chance_widening_alpha = widening
+        with pytest.raises(ValueError):
+            cs.V3SearchSession(config)
+
+
+@pytest.mark.parametrize("widening", [(1.0, 0.5), (1.0, 0.3), (2.0, 0.5)])
+def test_chance_widening_caps_the_reveals_of_a_sampled_chance_node(widening):
+    # One ply deep: the leaves are the root plus one opponent node per distinct
+    # drawn card below the reservation. Without widening the 120 worlds draw
+    # far more than k(n) distinct cards (all deck cards can be forced at the
+    # opening, so every forced reveal succeeds).
+    simulations = 121
+    split, _, _ = _search_through_deck_reserve(merge=False, max_depth=1, simulations=simulations)
+    widened, _, _ = _search_through_deck_reserve(merge=False, max_depth=1, simulations=simulations, widening=widening)
+    base, alpha = widening
+    cap = math.ceil(base * (simulations - 2) ** alpha)  # n of the last simulation
+    assert 2 < widened.stats()["leaves"] <= 1 + cap < split.stats()["leaves"]
+    assert widened.stats()["chance_widenings"] > 0
+    assert widened.simulations(0) == simulations
+
+
+def test_chance_widening_leaves_enumerated_and_merged_chance_nodes_alone():
+    enumerated, _, _ = _search_through_deck_reserve(merge=False, enumeration_depth=1, max_depth=1, widening=(1.0, 0.5))
+    assert enumerated.stats()["chance_enumerations"] >= 1
+    assert enumerated.stats()["chance_widenings"] == 0
+    merged, _, _ = _search_through_deck_reserve(merge=True, max_depth=1, widening=(1.0, 0.5))
+    assert merged.stats()["leaves"] == 2 and merged.stats()["chance_widenings"] == 0

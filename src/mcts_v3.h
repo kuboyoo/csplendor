@@ -24,6 +24,8 @@
 //   evaluate all outcomes in one batch, and start
 //   from the exact (optionally risk-weighted) expectation; later simulations
 //   can back up control-variate corrected values above such nodes.
+//   Optionally (chance_widening_base/alpha) sampled chance nodes keep at
+//   most ceil(C * n^alpha) distinct reveals (progressive widening).
 // - Optional two-level selection: PUCT over "semantic groups" (the decision
 //   before payment/return details), then PUCT inside the chosen group.
 // - Virtual loss keeps the leaves of one batch distinct. A node selected twice
@@ -105,6 +107,13 @@ struct Config {
   // v - v0(reveal) + mean(v0) above the node, removing the variance of which
   // reveal the sampled world happened to produce.
   bool chance_control_variate = false;
+  // Progressive widening of sampled chance nodes: a node keeps at most
+  // ceil(chance_widening_base * n^chance_widening_alpha) distinct reveals
+  // (n = its visits including virtual ones). A world about to reveal another
+  // card is forced (force_next_draw) to the least-visited existing reveal
+  // before the action is applied. Either value 0 = off (doc/mcts_v3.md).
+  float chance_widening_base = 0.0f;
+  float chance_widening_alpha = 0.0f;
   // Worker threads used by Session::collect/apply. Games are independent, so
   // each game's leaves are produced by one thread and concatenated in slot
   // order: rows, RNG streams and trees are identical for every thread count.
@@ -273,6 +282,7 @@ struct Stats {
   uint64_t rollout_games = 0;
   uint64_t chance_enumerations = 0;
   uint64_t chance_rows = 0;
+  uint64_t chance_widenings = 0; // reveals forced by progressive widening
 
   Stats &operator+=(const Stats &other) {
     simulations += other.simulations;
@@ -285,6 +295,7 @@ struct Stats {
     rollout_games += other.rollout_games;
     chance_enumerations += other.chance_enumerations;
     chance_rows += other.chance_rows;
+    chance_widenings += other.chance_widenings;
     return *this;
   }
 };
@@ -436,6 +447,9 @@ public:
             chance_needs_enumeration(nodes_[current].edges[chosen_edge].child);
         if (may_enumerate)
           before_ = world.clone_light();
+        else if (chance_widening())
+          widen_reveal(world, chosen_action, actor,
+                       nodes_[current].edges[chosen_edge].child, stats);
         const int32_t revealed = apply_with_reveal(world, chosen_action, actor);
         ++depth;
         const uint8_t mover = static_cast<uint8_t>(world.current_player());
@@ -1113,6 +1127,46 @@ private:
     return false;
   }
 
+  bool chance_widening() const {
+    return config_.chance_widening_base > 0.0f && config_.chance_widening_alpha > 0.0f;
+  }
+
+  // Progressive widening (doc/mcts_v3.md): once the sampled chance node below
+  // `action` holds k(n) = ceil(C * n^alpha) reveals, a world about to reveal a
+  // card outside them is forced to the least-visited existing reveal (ties:
+  // lowest card id; a card this world cannot place falls through to the next).
+  void widen_reveal(Game &world, const Action &action, uint8_t actor,
+                    int32_t chance_index, Stats &stats) {
+    if (chance_index < 0 || !reveals_to_observer(action, actor))
+      return;
+    const Node &chance = nodes_[chance_index];
+    if (chance.enumerated || chance.edges.empty())
+      return;
+    const int level = reveal_level(world, action);
+    if (level < 0 || world.board.decks[level].empty())
+      return;
+    if (chance.find(world.board.decks[level].back()) != nullptr)
+      return; // the world's own reveal is an existing child
+    const double n = static_cast<double>(chance.visits) + chance.virtual_visits;
+    const double cap =
+        std::ceil(config_.chance_widening_base * std::pow(n, config_.chance_widening_alpha));
+    if (static_cast<double>(chance.edges.size()) < cap)
+      return;
+    widening_order_.clear();
+    for (const Edge &edge : chance.edges) {
+      int64_t visits = 0;
+      if (edge.child >= 0)
+        visits = static_cast<int64_t>(nodes_[edge.child].visits) + nodes_[edge.child].virtual_visits;
+      widening_order_.emplace_back(visits, edge.key);
+    }
+    std::sort(widening_order_.begin(), widening_order_.end());
+    for (const auto &entry : widening_order_)
+      if (force_next_draw(world, level, entry.second)) {
+        ++stats.chance_widenings;
+        return;
+      }
+  }
+
   struct ChancePending {
     std::vector<int32_t> path; // root .. chance node
     int outstanding = 0;
@@ -1462,6 +1516,7 @@ private:
   std::vector<Node> nodes_;
   std::vector<LegalAction> legal_;
   Game before_;
+  std::vector<std::pair<int64_t, int32_t>> widening_order_; // (visits, card)
   std::vector<std::pair<int32_t, float>> corrections_;
   std::vector<std::pair<int32_t, ChancePending>> chance_pending_;
   std::vector<const Edge *> edge_cache_;
@@ -1486,6 +1541,8 @@ public:
       throw std::invalid_argument("max_depth must be positive");
     if (config.num_threads < 1)
       throw std::invalid_argument("num_threads must be positive");
+    if (config.chance_widening_base < 0.0f || config.chance_widening_alpha < 0.0f)
+      throw std::invalid_argument("chance widening settings must not be negative");
   }
 
   const Config &config() const { return config_; }
