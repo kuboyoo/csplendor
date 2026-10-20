@@ -23,9 +23,9 @@ void check(bool condition, const char *what) {
   }
 }
 
-// Malformed offsets are rejected before any tree is touched (they used to
-// be read as huge size_t slices), and an empty batch is a no-op at any
-// thread count.
+// Malformed offsets (a negative start, a row with no legal id) are rejected
+// before any tree is touched (they used to be read out of bounds), and an
+// empty batch is a no-op at any thread count.
 void check_invalid_offsets_are_rejected(const std::vector<Game> &roots) {
   for (int threads : {1, 2}) {
     Config config;
@@ -47,6 +47,16 @@ void check_invalid_offsets_are_rejected(const std::vector<Game> &roots) {
       rejected = true;
     }
     check(rejected, "negative first offset rejected");
+    offsets = batch.offsets;
+    offsets[1] = offsets[0]; // a row with no legal id
+    rejected = false;
+    try {
+      session.apply(batch.legal_ids.data(), batch.legal_ids.size(),
+                    offsets.data(), batch.rows(), priors.data(), values.data());
+    } catch (const std::invalid_argument &) {
+      rejected = true;
+    }
+    check(rejected, "empty row rejected");
     while (batch.rows() != 0) {
       priors.assign(batch.legal_ids.size(), 1.0f);
       values.assign(batch.rows(), 0.0f);

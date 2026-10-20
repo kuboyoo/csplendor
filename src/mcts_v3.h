@@ -1630,8 +1630,8 @@ public:
   size_t pending() const { return pending_.size(); }
 
   // `offsets` has rows + 1 entries delimiting each row's slice of the
-  // `legal_count` legal ids (and priors). They are validated before any tree
-  // is touched.
+  // `legal_count` legal ids (and priors); every row holds at least one id.
+  // They are validated before any tree is touched.
   void apply(const int32_t *legal_ids, size_t legal_count,
              const int32_t *offsets, size_t rows, const float *priors,
              const float *values) {
@@ -1640,8 +1640,8 @@ public:
     if (offsets[0] != 0 || static_cast<size_t>(offsets[rows]) != legal_count)
       throw std::invalid_argument("offsets must start at 0 and end at the legal id count");
     for (size_t row = 0; row < rows; ++row)
-      if (offsets[row + 1] < offsets[row])
-        throw std::invalid_argument("offsets must not decrease");
+      if (offsets[row + 1] <= offsets[row])
+        throw std::invalid_argument("offsets must increase (every row needs a legal id)");
     if (worker_count(games_.size()) > 1 &&
         apply_parallel(legal_ids, offsets, rows, priors, values))
       return;

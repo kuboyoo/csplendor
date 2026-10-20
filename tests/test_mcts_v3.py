@@ -580,7 +580,7 @@ def _collected_session(num_threads=1, games=1, simulations=8, rollout_samples=0)
     return session
 
 
-@pytest.mark.parametrize("broken", ["negative_start", "late_start", "decreasing", "past_the_end"])
+@pytest.mark.parametrize("broken", ["negative_start", "late_start", "decreasing", "empty_row", "past_the_end"])
 def test_apply_rejects_bad_offsets_before_touching_any_tree(broken):
     session = _collected_session(games=2)
     _, ids, offsets, slots = session.collect()
@@ -594,6 +594,8 @@ def test_apply_rejects_bad_offsets_before_touching_any_tree(broken):
         bad[0] = 1
     elif broken == "decreasing":
         bad[1] = len(ids) + 1
+    elif broken == "empty_row":
+        bad[1] = bad[0]
     else:
         bad[-1] = len(ids) + 1
     with pytest.raises(ValueError, match="offsets"):
@@ -601,6 +603,24 @@ def test_apply_rejects_bad_offsets_before_touching_any_tree(broken):
     session.apply(ids, offsets, priors, values)  # the pending leaf is intact
     drive(session)
     assert session.simulations(0) == session.simulations(1) == 8
+
+
+@pytest.mark.parametrize("threads", [1, 2])
+def test_apply_rejects_an_empty_rollout_row_before_touching_any_rollout(threads):
+    session = _collected_session(num_threads=threads, games=2, simulations=48, rollout_samples=3)
+    while True:
+        features, ids, offsets, slots = session.collect()
+        assert len(slots) > 0
+        if session.simulations(0) == session.simulations(1) == 48:
+            break  # a rollout batch: its rows pick the next move from the priors
+        uniform_apply(session, features, ids, offsets, slots)
+    bad = np.array(offsets, dtype=np.int32)
+    bad[-2] = bad[-1]  # the last row keeps no legal id
+    with pytest.raises(ValueError, match="offsets"):
+        session.apply(ids, bad, np.ones(len(ids), np.float32), np.zeros(len(slots), np.float32))
+    uniform_apply(session, features, ids, offsets, slots)  # the rollouts are intact
+    drive(session)
+    assert session.rollout_result(0) is not None and session.rollout_result(1) is not None
 
 
 def test_empty_batch_apply_is_a_no_op_for_every_thread_count():

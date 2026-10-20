@@ -2,8 +2,9 @@
 
 ## 未出荷：レビューで見つかった6件の不具合の修正（2026-10-20）
 
-- `V3SearchSession.apply()` は `offsets` が 0 から始まり、減らず、`legal_ids` の長さで終わることを、木に触れる前に
-  確かめる（違反は `ValueError`）。不正な先頭値が配列外の読み出しになっていた。C++ の `Session::apply` は
+- `V3SearchSession.apply()` は `offsets` が 0 から始まり、行ごとに増え（合法手0の行を拒否）、`legal_ids` の長さで
+  終わることを、木に触れる前に確かめる（違反は `ValueError`）。不正な先頭値や合法手0の rollout 行が配列外の
+  読み出しになっていた。C++ の `Session::apply` は
   合法手 ID の総数を受け取る。
 - 空のバッチの `apply()` が `num_threads >= 2` で `ValueError: vector::reserve` になっていたのを直した（何もしない）。
 - 木の探索予算をその回の `collect()` の中（終局・深さ打ち切りの逆伝播）で使い切った対局も、同じ `collect()` で
