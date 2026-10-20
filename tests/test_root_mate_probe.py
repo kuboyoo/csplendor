@@ -238,3 +238,37 @@ def test_budget_and_certificate_stops_match_reference(max_nodes, stop_reason):
     native = _native(game, config)
     assert native["stop_reason"] == stop_reason
     assert native == _reference_probe(game, config)
+
+
+# warm_start_time_ms / warm_start_time_seconds = 0 removes only the warm
+# start's own cap. Before the fix it reached the solver as "no limit", and a
+# depth-4 warm start from the opening ran for hundreds of milliseconds past a
+# 5 ms limit; the bound below leaves room for slow shared CI runners.
+UNCAPPED_WARM_LIMIT_MS = 5.0
+UNCAPPED_WARM_BOUND_MS = 100.0
+
+
+def test_an_uncapped_warm_start_still_stops_at_the_shared_deadline():
+    config = cs.RootMateProbeConfig()
+    config.min_points = config.endgame_points = 0
+    config.max_nodes = 0
+    config.min_depth = config.max_depth = 4
+    config.warm_start_nodes = 10_000_000
+    config.warm_start_time_ms = 0.0
+    result = cs.root_mate_probe(
+        cs.Game(0), config, time_limit_seconds=UNCAPPED_WARM_LIMIT_MS / 1000.0
+    )
+    assert result.attempted
+    assert result.elapsed_ms <= UNCAPPED_WARM_BOUND_MS
+
+
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_an_uncapped_session_warm_start_still_stops_at_the_deadline(jobs):
+    session = cs.MateSearchSession(
+        0, jobs=jobs, warm_start_nodes=10_000_000, warm_start_time_seconds=0.0
+    )
+    search = session.search_anytime if jobs == 1 else session.search
+    started = time.monotonic()
+    search(cs.Game(0), min_depth=4, max_depth=4,
+           time_limit_seconds=UNCAPPED_WARM_LIMIT_MS / 1000.0)
+    assert (time.monotonic() - started) * 1000.0 <= UNCAPPED_WARM_BOUND_MS

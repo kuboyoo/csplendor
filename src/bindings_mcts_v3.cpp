@@ -189,13 +189,13 @@ void bind_mcts_v3(py::module_ &m) {
             if (priors.shape(0) != legal_ids.shape(0))
               throw std::invalid_argument("priors must align with legal_ids");
             const int32_t *offset_data = offsets.data();
-            if (rows && offset_data[rows] != legal_ids.shape(0))
-              throw std::invalid_argument("offsets do not cover legal_ids");
             const int32_t *legal_data = legal_ids.data();
+            const size_t legal_count = static_cast<size_t>(legal_ids.shape(0));
             const float *prior_data = priors.data();
             const float *value_data = values.data();
             py::gil_scoped_release release;
-            session.apply(legal_data, offset_data, rows, prior_data, value_data);
+            session.apply(legal_data, legal_count, offset_data, rows, prior_data,
+                          value_data);
           },
           py::arg("legal_ids"), py::arg("offsets"), py::arg("priors"),
           py::arg("values"),

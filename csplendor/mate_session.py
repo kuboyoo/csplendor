@@ -203,9 +203,12 @@ class MateSearchSession:
                     max(1, warm_nodes),
                     max(1, depth_node_share // 4),
                 )
+            # A warm-start time of 0 has no cap of its own; the deadline still
+            # applies (the solver reads 0 seconds as unlimited).
             warm_time = self.warm_start_time_seconds
             if deadline is not None:
-                warm_time = min(warm_time, depth_time_share / 4.0)
+                share = depth_time_share / 4.0
+                warm_time = min(warm_time, share) if warm_time > 0 else share
             # A one-node lookup is enough to recover a previously completed
             # root even when background cache growth is disabled.
             if warm_nodes == 0 and warm_time == 0.0:
@@ -433,7 +436,11 @@ class MateSearchSession:
                 else:
                     warm_nodes = self.warm_start_nodes
                 if deadline is not None:
-                    warm_time = min(remaining_time, self.warm_start_time_seconds)
+                    warm_time = (
+                        min(remaining_time, self.warm_start_time_seconds)
+                        if self.warm_start_time_seconds > 0
+                        else remaining_time
+                    )
                 else:
                     warm_time = self.warm_start_time_seconds
 

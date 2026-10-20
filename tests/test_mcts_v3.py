@@ -567,3 +567,74 @@ def test_chance_widening_leaves_enumerated_and_merged_chance_nodes_alone():
     assert enumerated.stats()["chance_widenings"] == 0
     merged, _, _ = _search_through_deck_reserve(merge=True, max_depth=1, widening=(1.0, 0.5))
     assert merged.stats()["leaves"] == 2 and merged.stats()["chance_widenings"] == 0
+
+
+def _collected_session(num_threads=1, games=1, simulations=8, rollout_samples=0):
+    config = cs.V3SearchConfig()
+    config.num_simulations = simulations
+    config.num_threads = num_threads
+    config.rollout_samples = rollout_samples
+    session = cs.V3SearchSession(config)
+    for seed in range(1, games + 1):
+        session.add_game(cs.Game(seed), 0, seed)
+    return session
+
+
+@pytest.mark.parametrize("broken", ["negative_start", "late_start", "decreasing", "past_the_end"])
+def test_apply_rejects_bad_offsets_before_touching_any_tree(broken):
+    session = _collected_session(games=2)
+    _, ids, offsets, slots = session.collect()
+    assert len(slots) >= 2 and len(ids) > 1
+    priors = np.ones(len(ids), np.float32)
+    values = np.zeros(len(slots), np.float32)
+    bad = np.array(offsets, dtype=np.int32)
+    if broken == "negative_start":
+        bad[0] = -1
+    elif broken == "late_start":
+        bad[0] = 1
+    elif broken == "decreasing":
+        bad[1] = len(ids) + 1
+    else:
+        bad[-1] = len(ids) + 1
+    with pytest.raises(ValueError, match="offsets"):
+        session.apply(ids, bad, priors, values)
+    session.apply(ids, offsets, priors, values)  # the pending leaf is intact
+    drive(session)
+    assert session.simulations(0) == session.simulations(1) == 8
+
+
+def test_empty_batch_apply_is_a_no_op_for_every_thread_count():
+    for threads in (1, 2):
+        session = _collected_session(num_threads=threads, games=2, simulations=1)
+        drive(session)
+        _, ids, offsets, slots = session.collect()
+        assert len(slots) == 0
+        session.apply(ids, offsets, np.ones(len(ids), np.float32), np.zeros(0, np.float32))
+        assert session.all_done()
+
+
+def _final_reply_position():
+    """Final round, P1 to move: most simulations end at a terminal node."""
+    game = cs.Game(0)
+    for _ in range(600):
+        if game.board.final_round and game.current_player == 1 and not (
+            game.board.waiting_return or game.board.waiting_noble
+        ):
+            return game
+        actions = game.legal_actions
+        purchases = [a for a in actions if a.type == cs.ActionType.PURCHASE]
+        assert game.apply((purchases or actions)[0], False)
+    raise AssertionError("no final-round position")
+
+
+def test_rollouts_start_in_the_collect_that_finishes_the_tree():
+    config = cs.V3SearchConfig()
+    config.num_simulations = 48
+    config.rollout_samples = 3
+    config.rollout_horizon = 4
+    session = cs.V3SearchSession(config)
+    session.add_game(_final_reply_position(), 1, 123)
+    drive(session)  # the documented loop: stop at the first empty batch
+    assert session.simulations(0) == 48
+    assert session.all_done()
+    assert session.rollout_result(0) is not None

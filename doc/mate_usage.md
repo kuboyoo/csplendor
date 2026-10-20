@@ -124,6 +124,8 @@ if result.proven:
 4. **探り**: 深さ `min_depth`〜`max_depth` を浅い順に、正の詰み証明だけを探す
    （`MateSearchSession.search_anytime` と同じ予算配分。各深さは残り予算を残りの深さ数で割った分を使い、
    その 1/4 までを置換表の温め（`warm_start_nodes`・`warm_start_time_ms` が上限）に使う）。
+   `warm_start_time_ms = 0` は温め独自の時間上限を設けないだけで、時間上限があればその 1/4 で打ち切る。
+   下位の探索には 0（無制限）を渡さず、共有の締め切りの残りから正の時間を渡す。
 5. **終盤の厳密探索**: 4 で詰みが出ず「終盤」なら、深さ 1〜`endgame_exact_depth` を攻め方の全手・
    具体的なめくれで調べる（`search_reveal_verified_mate_depths` と同じ）。ノード上限は選んだ予算、
    時間は **4 と共有する1つの締め切りの残り** で、残りが無ければ実行しない。
@@ -255,7 +257,10 @@ near = cs.search_near_mate(game, attacker=1, min_depth=1, max_depth=3,
 Python に依存しないので、WASM（embind）からも同じ結果で呼べます。C++ の設定 `NearMateSearchConfig` は
 `attacker`、`min_depth`、`max_depth`、`thresholds`（既定 1.0/0.9/0.75/0.5。高い順に並べ替え、重複は除く）、
 `max_nodes`、`time_limit_seconds`（全問い合わせの累計）、`no_take_probe`、`line_transplant`、`max_memo_states`
-を持ちます。結果 `NearMateSearchResult` は `lower`/`upper`、`lower_depth`/`upper_depth`（無ければ -1）、
+を持ちます。`no_take_probe=True` で閾値を満たせなかった問い合わせは、省いた手があるので反証にならず、
+`verdict` は `inconclusive` で上限を下げません（下の閾値と次の深さは続けて試し、詰みが出なければ
+`stop_reason` は `restricted_probe_exhausted`）。root も他の節点と同じ終局・深さの判定に従い、終局済みなら攻め方の勝ちで 1、それ以外で 0、
+攻め方の手番で深さ 0 なら 0 です。結果 `NearMateSearchResult` は `lower`/`upper`、`lower_depth`/`upper_depth`（無ければ -1）、
 深さごとの区間 `bounds`（`depth`、`lower`、`upper`、`decided`）、`best_action`（pack 値）と `best_action_id`
 （V5 の行動ID。無ければ -1）、最善手のめくれ `best_action_reveals`（Python の `losing_reveals` は値が 1 未満の
 ものだけ）、`root_actions`、`undecided`、`stop_reason`、`attempts`（`depth`、`threshold`、`verdict`、`nodes`、

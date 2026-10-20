@@ -2135,8 +2135,11 @@ private:
     NearMateResult result;
     result.attacker = attacker_;
     result.depth = depth_;
-    if (game.current_player() != attacker_) {
-      // A defender-to-move root is the minimum over its replies.
+    if (game.current_player() != attacker_ || game.is_game_over() ||
+        depth_ <= 0) {
+      // A defender-to-move root is the minimum over its replies; finished
+      // games and an exhausted depth take the same terminal/depth rules as
+      // every other node.
       try {
         DepthPath path(path_reserve_capacity(depth_));
         result.value = win_probability(game, path, depth_, alpha, beta);

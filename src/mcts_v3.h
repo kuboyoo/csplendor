@@ -342,17 +342,22 @@ public:
 
   // Run selections until `max_leaves` fresh leaves are pending or the budget
   // is exhausted. Terminal and depth-limited simulations back up immediately.
+  // Once the tree is done (possibly by those backups in this very call) the
+  // rollout rows are collected, so an empty batch always means "no work".
   void collect(int max_leaves, Batch &batch, std::vector<PendingLeaf> &pending,
                Stats &stats) {
-    if (tree_done()) {
-      if (config_.rollout_samples > 0) {
-        if (rollout_phase_ == RolloutPhase::NotStarted)
-          start_rollouts(stats);
-        if (rollout_phase_ == RolloutPhase::Running)
-          collect_rollouts(batch, pending, stats);
-      }
-      return;
+    if (!tree_done())
+      collect_tree(max_leaves, batch, pending, stats);
+    if (tree_done() && config_.rollout_samples > 0) {
+      if (rollout_phase_ == RolloutPhase::NotStarted)
+        start_rollouts(stats);
+      if (rollout_phase_ == RolloutPhase::Running)
+        collect_rollouts(batch, pending, stats);
     }
+  }
+
+  void collect_tree(int max_leaves, Batch &batch,
+                    std::vector<PendingLeaf> &pending, Stats &stats) {
     int produced = 0;
     while (produced < max_leaves && completed_ + pending_count_ < budget_) {
       Game world = config_.determinization
@@ -1624,10 +1629,19 @@ public:
 
   size_t pending() const { return pending_.size(); }
 
-  void apply(const int32_t *legal_ids, const int32_t *offsets, size_t rows,
-             const float *priors, const float *values) {
+  // `offsets` has rows + 1 entries delimiting each row's slice of the
+  // `legal_count` legal ids (and priors). They are validated before any tree
+  // is touched.
+  void apply(const int32_t *legal_ids, size_t legal_count,
+             const int32_t *offsets, size_t rows, const float *priors,
+             const float *values) {
     if (rows != pending_.size())
       throw std::invalid_argument("evaluation rows do not match pending leaves");
+    if (offsets[0] != 0 || static_cast<size_t>(offsets[rows]) != legal_count)
+      throw std::invalid_argument("offsets must start at 0 and end at the legal id count");
+    for (size_t row = 0; row < rows; ++row)
+      if (offsets[row + 1] < offsets[row])
+        throw std::invalid_argument("offsets must not decrease");
     if (worker_count(games_.size()) > 1 &&
         apply_parallel(legal_ids, offsets, rows, priors, values))
       return;
@@ -1661,6 +1675,8 @@ private:
   // caller is one of them). Each task index runs exactly once; the exception
   // of the lowest failing index is rethrown after every worker has joined.
   template <typename Task> void run_tasks(size_t tasks, Task &&task) {
+    if (tasks == 0)
+      return;
     std::vector<std::exception_ptr> errors(tasks);
     std::atomic<size_t> next{0};
     auto worker = [&]() {

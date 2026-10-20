@@ -1,5 +1,26 @@
 # 変更履歴 / Changelog
 
+## 未出荷：レビューで見つかった6件の不具合の修正（2026-10-20）
+
+- `V3SearchSession.apply()` は `offsets` が 0 から始まり、減らず、`legal_ids` の長さで終わることを、木に触れる前に
+  確かめる（違反は `ValueError`）。不正な先頭値が配列外の読み出しになっていた。C++ の `Session::apply` は
+  合法手 ID の総数を受け取る。
+- 空のバッチの `apply()` が `num_threads >= 2` で `ValueError: vector::reserve` になっていたのを直した（何もしない）。
+- 木の探索予算をその回の `collect()` の中（終局・深さ打ち切りの逆伝播）で使い切った対局も、同じ `collect()` で
+  rollout を始める。空のバッチで止める実行ループで rollout が抜け落ちていた。
+- `near_mate_search`: `no_take_probe=True` で閾値を満たせなかった問い合わせは反証にしない（`verdict` は
+  `inconclusive`、上限は下げず、詰みが無ければ `stop_reason` は `restricted_probe_exhausted`）。確率1の局面を
+  「75%未満」と報告していた。
+- 準詰み探索の攻め方の root も終局・深さの共通判定を通す。深さ 0 で勝率1、勝って終わった局面で勝率0を返していた。
+- `root_mate_probe` と `MateSearchSession` で温めの時間上限 0（独自の上限なし）が下位の探索に「無制限」として渡り、
+  全体の締め切りを越えていたのを直した。時間上限があれば常に締め切りの残りから正の時間を渡す。
+
+English: fixes six review findings — offset validation in V3SearchSession.apply
+(out-of-bounds read), empty-batch apply with threads, rollouts starting in the
+collect that finishes the tree, restricted near-mate misses no longer lowering the
+upper bound, terminal/depth rules at the attacker root of the near-mate search,
+and an uncapped warm start no longer ignoring the shared deadline.
+
 ## 未出荷：V3 探索のサンプル型 chance 節点の漸進的拡幅（2026-10-20）
 
 - `V3SearchConfig` に `chance_widening_base`（C）と `chance_widening_alpha`（α）を足した（既定はどちらも 0）。両方が正のとき、

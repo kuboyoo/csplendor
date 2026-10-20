@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <random>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -19,6 +20,44 @@ void check(bool condition, const char *what) {
   if (!condition) {
     std::fprintf(stderr, "check failed: %s\n", what);
     std::abort();
+  }
+}
+
+// Malformed offsets are rejected before any tree is touched (they used to
+// be read as huge size_t slices), and an empty batch is a no-op at any
+// thread count.
+void check_invalid_offsets_are_rejected(const std::vector<Game> &roots) {
+  for (int threads : {1, 2}) {
+    Config config;
+    config.num_simulations = 4;
+    config.num_threads = threads;
+    Session session(config);
+    for (size_t slot = 0; slot < 2; ++slot)
+      session.add_game(roots[slot], 0, slot + 1, false, -1);
+    Batch batch = session.collect();
+    std::vector<float> priors(batch.legal_ids.size(), 1.0f);
+    std::vector<float> values(batch.rows(), 0.0f);
+    std::vector<int32_t> offsets = batch.offsets;
+    offsets[0] = -1;
+    bool rejected = false;
+    try {
+      session.apply(batch.legal_ids.data(), batch.legal_ids.size(),
+                    offsets.data(), batch.rows(), priors.data(), values.data());
+    } catch (const std::invalid_argument &) {
+      rejected = true;
+    }
+    check(rejected, "negative first offset rejected");
+    while (batch.rows() != 0) {
+      priors.assign(batch.legal_ids.size(), 1.0f);
+      values.assign(batch.rows(), 0.0f);
+      session.apply(batch.legal_ids.data(), batch.legal_ids.size(),
+                    batch.offsets.data(), batch.rows(), priors.data(),
+                    values.data());
+      batch = session.collect();
+    }
+    session.apply(batch.legal_ids.data(), batch.legal_ids.size(),
+                  batch.offsets.data(), 0, priors.data(), values.data());
+    check(session.pending() == 0, "empty batch applied");
   }
 }
 
@@ -73,7 +112,8 @@ Trace run(const Config &base, int threads, const std::vector<Game> &roots) {
       std::memcpy(&bits, &batch.features[row * batch.state_dim + 7], sizeof(bits));
       values[row] = static_cast<float>(mix(bits, row) % 1001) / 1000.0f - 0.5f;
     }
-    session.apply(batch.legal_ids.data(), batch.offsets.data(), batch.rows(),
+    session.apply(batch.legal_ids.data(), batch.legal_ids.size(),
+                  batch.offsets.data(), batch.rows(),
                   priors.data(), values.data());
   }
   for (size_t slot = 0; slot < roots.size(); ++slot) {
@@ -148,5 +188,6 @@ int main() {
     for (int threads : {2, 4, 16})
       same(sequential, run(current, threads, roots));
   }
+  check_invalid_offsets_are_rejected(roots);
   return 0;
 }

@@ -89,6 +89,11 @@ public:
     return std::max(0.0, std::chrono::duration<double>(deadline_ - Clock::now()).count());
   }
   bool time_exhausted() const { return timed_ && seconds_left() <= 0.0; }
+  // Solvers read 0 seconds as "no limit", so a timed budget always hands out
+  // a positive share of the time left (a spent budget gives the smallest).
+  double seconds_share(double parts) const {
+    return timed_ ? std::max(1e-6, seconds_left() / parts) : 0.0;
+  }
   void spend(uint64_t nodes) { used_ += nodes; }
   uint64_t used() const { return used_; }
 
@@ -135,14 +140,16 @@ inline SweepResult anytime_sweep(const Game &game, int attacker,
     }
     const uint64_t depth_nodes =
         budget.node_limited() ? std::max<uint64_t>(1, budget.nodes_left() / attempts_left) : 0;
-    const double depth_seconds = budget.timed() ? budget.seconds_left() / attempts_left : 0.0;
+    const double depth_seconds = budget.seconds_share(attempts_left);
     uint64_t warm_nodes = config.warm_start_nodes;
     if (budget.node_limited())
       warm_nodes = std::min<uint64_t>(std::max<uint64_t>(1, warm_nodes),
                                       std::max<uint64_t>(1, depth_nodes / 4));
+    // warm_start_time_ms = 0 means no cap of its own, never past the deadline.
     double warm_seconds = warm_start_seconds;
     if (budget.timed())
-      warm_seconds = std::min(warm_seconds, depth_seconds / 4.0);
+      warm_seconds = warm_seconds > 0.0 ? std::min(warm_seconds, depth_seconds / 4.0)
+                                        : depth_seconds / 4.0;
     if (warm_nodes == 0 && warm_seconds == 0.0)
       warm_nodes = 1;
 
@@ -170,7 +177,7 @@ inline SweepResult anytime_sweep(const Game &game, int attacker,
     }
     const uint64_t attempt_nodes =
         budget.node_limited() ? std::max<uint64_t>(1, budget.nodes_left() / attempts_left) : 0;
-    const double attempt_seconds = budget.timed() ? budget.seconds_left() / attempts_left : 0.0;
+    const double attempt_seconds = budget.seconds_share(attempts_left);
     RevealVerifiedSolver solver(attacker, depth, attempt_nodes, attempt_seconds);
     const RevealVerifiedSearchResult raw = solver.solve(game);
     budget.spend(raw.stats.nodes);
@@ -239,7 +246,7 @@ inline RootMateProbeResult root_mate_probe(const Game &game, const RootMateProbe
     exact_config.min_depth = 1;
     exact_config.max_depth = config.endgame_exact_depth;
     exact_config.max_nodes = max_nodes;
-    exact_config.time_limit_seconds = budget.seconds_left();
+    exact_config.time_limit_seconds = budget.seconds_share(1);
     exact_config.max_memo_states = std::max<uint64_t>(1, max_nodes);
     const ExactMateSearchResult exact = exact_mate_search(game, exact_config);
     result.nodes += exact.nodes;

@@ -1,3 +1,5 @@
+import random
+
 import pytest
 
 import csplendor as cs
@@ -105,3 +107,52 @@ def test_required_root_action_evaluates_only_that_move():
     assert worse["value"] <= 1.0
     with pytest.raises(ValueError):
         cs.near_mate_probability_cpp(game, attacker=0, depth=5, required_root_action=999_999_999)
+
+
+def _purchase_first_position(seed, min_points):
+    """Seeded purchase-preferring legal play until the mover has min_points..14."""
+    rng = random.Random(seed)
+    game = cs.Game(seed)
+    for _ in range(600):
+        board = game.board
+        if (
+            not board.waiting_return
+            and not board.waiting_noble
+            and min_points <= board.get_player(game.current_player).points <= 14
+        ):
+            return game
+        actions = game.legal_actions
+        purchases = [a for a in actions if a.type == cs.ActionType.PURCHASE]
+        assert game.apply(rng.choice(purchases or actions), False)
+    raise AssertionError("no position with the requested points")
+
+
+def test_a_restricted_probe_that_misses_refutes_nothing():
+    game = _purchase_first_position(23, 12)
+    attacker = int(game.current_player)
+    full = cs.search_near_mate(game, attacker=attacker, min_depth=2, max_depth=2, max_nodes=200_000)
+    assert full["lower"] == full["upper"] == 1.0
+    probe = cs.search_near_mate(
+        game, attacker=attacker, min_depth=2, max_depth=2, max_nodes=200_000, no_take_probe=True
+    )
+    assert probe["lower"] < 1.0 and probe["upper"] == 1.0  # the skipped takes may win
+    assert probe["stop_reason"] == "restricted_probe_exhausted"
+    verdicts = {a["threshold"]: a["verdict"] for a in probe["attempts"]}
+    assert verdicts[1.0] == "inconclusive" and "refuted" not in verdicts.values()
+
+
+def test_the_attacker_root_obeys_the_depth_limit_and_finished_games():
+    game = _purchase_first_position(4, 14)
+    attacker = int(game.current_player)
+    assert not game.is_game_over()
+    assert cs.near_mate_probability_cpp(game, attacker=attacker, depth=0)["value"] == 0.0
+
+    finished = cs.Game(0)
+    while not finished.is_game_over():
+        actions = finished.legal_actions
+        purchases = [a for a in actions if a.type == cs.ActionType.PURCHASE]
+        assert finished.apply((purchases or actions)[0], False)
+    winner = int(finished.winner)
+    for attacker in (0, 1):
+        result = cs.near_mate_probability_cpp(finished, attacker=attacker, depth=1)
+        assert result["complete"] and result["value"] == (1.0 if attacker == winner else 0.0)

@@ -96,9 +96,13 @@ inline NearMateSearchResult near_mate_search(
   result.thresholds = ladder;
   result.stop_reason = "max_depth_reached";
 
+  // A restricted (no_take_probe) query that misses a threshold has not seen
+  // every attacker move, so it refutes nothing: the threshold stays open.
+  bool restricted_inconclusive = false;
   for (int depth = config.min_depth; depth <= config.max_depth; ++depth) {
     double depth_upper = 1.0;
     bool depth_decided = true;
+    bool depth_cut = false;
     for (const double threshold : ladder) {
       if (threshold <= result.lower)
         break; // already proven at a shallower depth
@@ -114,6 +118,7 @@ inline NearMateSearchResult near_mate_search(
           (config.time_limit_seconds > 0.0 && remaining_time <= 0.0)) {
         result.stop_reason = "cumulative limit exceeded";
         depth_decided = false;
+        depth_cut = true;
         break;
       }
       RevealVerifiedSolver solver(config.attacker, depth, remaining_nodes,
@@ -128,9 +133,13 @@ inline NearMateSearchResult near_mate_search(
           solver.near_mate(game, false, std::max(0.0, threshold - 1e-6), threshold);
       result.nodes += raw.stats.nodes;
       const bool proven = raw.complete && raw.value >= threshold;
+      const bool restricted_miss = raw.complete && !proven && config.no_take_probe;
       result.attempts.push_back(NearMateAttempt{
           depth, threshold,
-          proven ? "proven" : raw.complete ? "refuted" : "undecided",
+          proven            ? "proven"
+          : restricted_miss ? "inconclusive"
+          : raw.complete    ? "refuted"
+                            : "undecided",
           raw.stats.nodes, raw.stats.elapsed_ms, raw.unknown_reason});
       if (proven) {
         result.lower = threshold;
@@ -141,11 +150,15 @@ inline NearMateSearchResult near_mate_search(
         result.root_actions = raw.root_actions;
         break;
       }
-      if (raw.complete) {
+      if (restricted_miss) {
+        restricted_inconclusive = true;
+        depth_decided = false;
+      } else if (raw.complete) {
         depth_upper = std::min(depth_upper, threshold);
       } else {
         result.undecided = true;
         depth_decided = false;
+        depth_cut = true;
         result.stop_reason =
             raw.unknown_reason.empty() ? "search limit exceeded" : raw.unknown_reason;
         break;
@@ -156,9 +169,11 @@ inline NearMateSearchResult near_mate_search(
       result.stop_reason = "mate_proven";
       break;
     }
-    if (!depth_decided)
+    if (depth_cut)
       break;
   }
+  if (restricted_inconclusive && result.stop_reason == "max_depth_reached")
+    result.stop_reason = "restricted_probe_exhausted";
 
   // The upper bound belongs to the deepest depth whose ladder was decided (a
   // deeper search can only raise the probability).
