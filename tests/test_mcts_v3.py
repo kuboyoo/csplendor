@@ -492,14 +492,16 @@ def test_merge_own_deck_reveal_is_off_by_default_and_keeps_the_search():
 
 
 GOLDEN_SEARCH = Path(__file__).parent / "data" / "v3_search_golden_aaa9578.json"
+GOLDEN_CHANCE_WIDENING = Path(__file__).parent / "data" / "v3_search_golden_2876824_chance_widening.json"
 
 
-def _golden_search(widening=(0.0, 0.0), simulations=64):
+def _golden_search(widening=(0.0, 0.0), simulations=64, action_widening=(0.0, 0.0)):
     """Root statistics of four fixed searches (three openings, one purchase position)."""
     config = cs.V3SearchConfig()
     config.num_simulations = simulations
     config.leaf_batch_size = 8
     config.chance_widening_base, config.chance_widening_alpha = widening
+    config.action_widening_base, config.action_widening_alpha = action_widening
     session = cs.V3SearchSession(config)
     games = [cs.Game(seed=seed) for seed in (11, 12, 13)] + [_purchase_position()]
     for index, game in enumerate(games):
@@ -518,20 +520,83 @@ def _golden_search(widening=(0.0, 0.0), simulations=64):
     return rows, {k: int(v) for k, v in session.stats().items()}
 
 
+def _assert_golden(rows, stats, golden):
+    assert stats == golden["stats"]
+    for row, expected in zip(rows, golden["games"]):
+        assert row["visits"] == {int(k): v for k, v in expected["visits"].items()}
+        assert row["values"] == {int(k): v for k, v in expected["values"].items()}
+        assert row["root_value"] == expected["root_value"]
+        assert row["chosen"] == expected["chosen"]
+
+
+OFF_SETTINGS = ((0.0, 0.0), (1.0, 0.0), (0.0, 0.5))  # either value 0 disables a widening
+
+
 def test_chance_widening_is_off_by_default_and_reproduces_the_search_before_it():
     """Default 0/0 must be bit-identical to the search recorded at csplendor aaa9578 (no widening code)."""
     config = cs.V3SearchConfig()
     assert config.chance_widening_base == 0.0 and config.chance_widening_alpha == 0.0
     golden = json.loads(GOLDEN_SEARCH.read_text())
-    for widening in ((0.0, 0.0), (1.0, 0.0), (0.0, 0.5)):  # either value 0 disables it
+    for widening in OFF_SETTINGS:
         rows, stats = _golden_search(widening)
         assert stats.pop("chance_widenings") == 0
-        assert stats == golden["stats"]
-        for row, expected in zip(rows, golden["games"]):
-            assert row["visits"] == {int(k): v for k, v in expected["visits"].items()}
-            assert row["values"] == {int(k): v for k, v in expected["values"].items()}
-            assert row["root_value"] == expected["root_value"]
-            assert row["chosen"] == expected["chosen"]
+        assert stats.pop("action_widenings") == 0
+        _assert_golden(rows, stats, golden)
+
+
+def test_action_widening_is_off_by_default_and_reproduces_the_search_before_it():
+    """Default 0/0 must be bit-identical to csplendor 2876824 (chance widening only), with and without chance widening."""
+    config = cs.V3SearchConfig()
+    assert config.action_widening_base == 0.0 and config.action_widening_alpha == 0.0
+    plain = json.loads(GOLDEN_SEARCH.read_text())
+    chance = json.loads(GOLDEN_CHANCE_WIDENING.read_text())
+    for action_widening in OFF_SETTINGS:
+        rows, stats = _golden_search(action_widening=action_widening)
+        assert stats.pop("chance_widenings") == 0
+        assert stats.pop("action_widenings") == 0
+        _assert_golden(rows, stats, plain)
+        rows, stats = _golden_search((1.0, 0.5), simulations=400, action_widening=action_widening)
+        assert stats.pop("action_widenings") == 0
+        _assert_golden(rows, stats, chance)
+
+
+def test_action_widening_changes_the_search_and_rejects_negative_settings():
+    rows, stats = _golden_search(action_widening=(1.0, 0.5), simulations=400)
+    assert stats["action_widenings"] > 0 and stats["simulations"] == 4 * 400
+    assert [row["visits"] for row in rows] != [row["visits"] for row in _golden_search(simulations=400)[0]]
+    for widening in ((-1.0, 0.5), (1.0, -0.5)):
+        config = cs.V3SearchConfig()
+        config.action_widening_base, config.action_widening_alpha = widening
+        with pytest.raises(ValueError):
+            cs.V3SearchSession(config)
+
+
+@pytest.mark.parametrize("widening", [(1.0, 0.5), (1.0, 0.3), (2.0, 0.5)])
+def test_action_widening_caps_the_actions_a_decision_node_selects(widening):
+    # Depth 1: every simulation selects one root action, so the distinct root
+    # actions visited are exactly the actions the root was allowed to select.
+    simulations = 64
+
+    def visited(action_widening):
+        config = cs.V3SearchConfig()
+        config.num_simulations = simulations
+        config.max_depth = 1
+        config.leaf_batch_size = 4
+        config.action_widening_base, config.action_widening_alpha = action_widening
+        session = cs.V3SearchSession(config)
+        game = cs.Game(seed=11)
+        session.add_game(game, game.current_player, seed=7)
+        drive(session, value=0.1)
+        counts = session.root_visits(0)
+        assert sum(counts.values()) == simulations - 1  # the root's own evaluation
+        return sum(1 for v in counts.values() if v > 0), session.stats()
+
+    base, alpha = widening
+    cap = math.ceil(base * (simulations - 1) ** alpha)  # n of the last selection
+    plain, _ = visited((0.0, 0.0))
+    capped, stats = visited(widening)
+    assert 1 <= capped <= cap < plain
+    assert stats["action_widenings"] > 0
 
 
 def test_chance_widening_changes_the_search_and_rejects_negative_settings():

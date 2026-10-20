@@ -58,6 +58,17 @@
   併用すると root 近くは列挙、それより深い節点は拡幅になります。`merge_own_deck_reveal = true` で chance 節点を作らない
   観測者の山札予約には効きません（分岐しないものは拡幅もしない）。木の再利用（`try_advance`）は実際のめくれが子に
   ないと木を捨てるので、拡幅中は再利用に失敗する手が増えます。`stats()` の `chance_widenings` で強制した回数を確認できます。
+- **決定節点の漸進的拡幅（任意、2026-10-20 追加。chance 側と合わせて二重の漸進的拡幅、DPW）**: `action_widening_base = C_a`、
+  `action_widening_alpha = α_a`（既定はどちらも 0）。両方が正のとき、平坦な PUCT（`semantic_groups = false`）は、展開済みの
+  決定節点（root を含む）で、その世界の合法手のうち事前確率で上位 k(n) = ceil(C_a · n^α_a)（n はその節点の訪問数。
+  評価待ちの仮訪問を含む）件だけを候補にして PUCT を行います。順位は（事前確率 降順、行動 ID 昇順）で、同点でも
+  候補はちょうど k(n) 件です。展開時に見えなかった手は `unseen_action_prior` の事前確率で順位に入ります。root の
+  Dirichlet ノイズは事前確率に混ぜた後の値で順位を決めるので、ノイズで持ち上がった手は候補に入ります。
+  root の訪問数の下限（`set_root_visit_floor`）は候補の制限より先に処理され、影響を受けません。
+  訪問数・価値の集計、FPU の訪問質量、`dynamic_cpuct` の分散は従来どおり全合法手で数えます。
+  どちらかが 0 なら無効で、探索の出力は拡幅のない実装とビット単位で同じです（負の値は `V3SearchSession` の構築で
+  `ValueError`）。`semantic_groups = true` の二段階選択には効きません。`stats()` の `action_widenings` は、上限が
+  合法手を実際に除いた選択の回数です。chance 側の拡幅とは独立で、両方を入れたものが DPW です。
 - **二段階選択（任意）**: `semantic_groups=true` で「支払い・返却を畳んだ主判断」（139 群）で
   PUCT を行い、選んだ群の中でもう一度 PUCT を行います。既定は平坦な PUCT です。
 - **virtual loss**: 1 バッチ内の葉が重ならないように、収集中の経路に仮訪問を加えます。

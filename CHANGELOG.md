@@ -1,5 +1,23 @@
 # 変更履歴 / Changelog
 
+## 未出荷：V3 探索の決定節点の漸進的拡幅（DPW、2026-10-20）
+
+- `V3SearchConfig` に `action_widening_base`（C_a）と `action_widening_alpha`（α_a）を足した（既定はどちらも 0）。両方が正のとき、
+  平坦な PUCT は展開済みの決定節点（root を含む）で、その世界の合法手のうち事前確率が上位 k(n) = ceil(C_a · n^α_a)
+  （n は節点の訪問数、仮訪問を含む。順位は事前確率 降順・ID 昇順）件だけを候補にする。値の集計・FPU・`dynamic_cpuct` は
+  変えない。chance 節点の拡幅と合わせると二重の漸進的拡幅（DPW）になる（`doc/mcts_v3.md`）。
+- どちらかが 0 なら無効で、探索の出力は 7973a67 とビット単位で同じ（`tests/test_mcts_v3.py` が aaa9578 の出力と、
+  chance 拡幅ありの 2876824 の出力 `tests/data/v3_search_golden_2876824_chance_widening.json` を固定している）。
+  負の値は `V3SearchSession` の構築で `ValueError`。`stats()` に `action_widenings`（上限が合法手を除いた選択の回数）を足した。
+
+English: V3 search gains progressive widening of decision nodes
+(`action_widening_base`, `action_widening_alpha`; both default 0 = off and
+bit-identical to 2876824). Flat PUCT at a node with n visits considers only its
+ceil(C_a · n^α_a) highest-prior legal actions of the current world (ties by
+lower action id). Together with the chance-node widening this is double
+progressive widening (DPW). `stats()["action_widenings"]` counts the selections
+where the cap excluded legal actions.
+
 ## 未出荷：レビューで見つかった6件の不具合の修正（2026-10-20）
 
 - `V3SearchSession.apply()` は `offsets` が 0 から始まり、減らず、`legal_ids` の長さで終わることを、木に触れる前に

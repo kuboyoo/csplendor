@@ -25,7 +25,9 @@
 //   from the exact (optionally risk-weighted) expectation; later simulations
 //   can back up control-variate corrected values above such nodes.
 //   Optionally (chance_widening_base/alpha) sampled chance nodes keep at
-//   most ceil(C * n^alpha) distinct reveals (progressive widening).
+//   most ceil(C * n^alpha) distinct reveals (progressive widening), and
+//   (action_widening_base/alpha) decision nodes select only among their
+//   ceil(C_a * n^alpha_a) highest-prior legal actions (double PW).
 // - Optional two-level selection: PUCT over "semantic groups" (the decision
 //   before payment/return details), then PUCT inside the chosen group.
 // - Virtual loss keeps the leaves of one batch distinct. A node selected twice
@@ -114,6 +116,13 @@ struct Config {
   // before the action is applied. Either value 0 = off (doc/mcts_v3.md).
   float chance_widening_base = 0.0f;
   float chance_widening_alpha = 0.0f;
+  // Progressive widening of decision nodes (with the above: double
+  // progressive widening): flat PUCT at a node with n visits (including
+  // virtual ones) considers only the ceil(action_widening_base *
+  // n^action_widening_alpha) legal actions of this world with the highest
+  // prior (ties: lower action id). Either value 0 = off (doc/mcts_v3.md).
+  float action_widening_base = 0.0f;
+  float action_widening_alpha = 0.0f;
   // Worker threads used by Session::collect/apply. Games are independent, so
   // each game's leaves are produced by one thread and concatenated in slot
   // order: rows, RNG streams and trees are identical for every thread count.
@@ -283,6 +292,7 @@ struct Stats {
   uint64_t chance_enumerations = 0;
   uint64_t chance_rows = 0;
   uint64_t chance_widenings = 0; // reveals forced by progressive widening
+  uint64_t action_widenings = 0; // selections where the action cap excluded legal actions
 
   Stats &operator+=(const Stats &other) {
     simulations += other.simulations;
@@ -296,6 +306,7 @@ struct Stats {
     chance_enumerations += other.chance_enumerations;
     chance_rows += other.chance_rows;
     chance_widenings += other.chance_widenings;
+    action_widenings += other.action_widenings;
     return *this;
   }
 };
@@ -433,7 +444,7 @@ public:
           choice = select_floor(node, legal_);
         if (choice == legal_.size())
           choice = config_.semantic_groups ? select_grouped(node, legal_)
-                                           : select_flat(node, legal_);
+                                           : select_flat(node, legal_, stats);
         const int32_t chosen_id = legal_[choice].id;
         const Action chosen_action = legal_[choice].action;
         // Edge positions stay valid until this node's edge list is modified;
@@ -936,7 +947,43 @@ private:
       q -= config_.virtual_loss * child.virtual_visits / std::max(1, allocated);
   }
 
-  size_t select_flat(const Node &node, const std::vector<LegalAction> &legal) {
+  bool action_widening() const {
+    return config_.action_widening_base > 0.0f && config_.action_widening_alpha > 0.0f;
+  }
+
+  // Progressive widening of a decision node (doc/mcts_v3.md): the k(n) =
+  // ceil(C_a * n^alpha_a) legal actions ranked first by (prior desc, id asc)
+  // are eligible. Fills eligible_ (parallel to legal); returns false when
+  // every legal action is eligible (eligible_ untouched).
+  bool widen_actions(const Node &node, const std::vector<LegalAction> &legal, Stats &stats) {
+    const double n = static_cast<double>(node.visits) + node.virtual_visits;
+    const double cap =
+        std::ceil(config_.action_widening_base * std::pow(n, config_.action_widening_alpha));
+    if (cap >= static_cast<double>(legal.size()))
+      return false;
+    const size_t k = std::max<size_t>(1, static_cast<size_t>(cap));
+    ranked_.clear();
+    for (size_t index = 0; index < legal.size(); ++index) {
+      const Edge *edge = edge_cache_[index];
+      ranked_.emplace_back(edge ? edge->prior : config_.unseen_action_prior, legal[index].id);
+    }
+    const auto first = [](const std::pair<float, int32_t> &a, const std::pair<float, int32_t> &b) {
+      return a.first > b.first || (a.first == b.first && a.second < b.second);
+    };
+    std::nth_element(ranked_.begin(), ranked_.begin() + (k - 1), ranked_.end(), first);
+    const std::pair<float, int32_t> last = ranked_[k - 1];
+    eligible_.clear();
+    for (size_t index = 0; index < legal.size(); ++index) {
+      const Edge *edge = edge_cache_[index];
+      const std::pair<float, int32_t> entry(edge ? edge->prior : config_.unseen_action_prior,
+                                            legal[index].id);
+      eligible_.push_back(entry == last || first(entry, last));
+    }
+    ++stats.action_widenings;
+    return true;
+  }
+
+  size_t select_flat(const Node &node, const std::vector<LegalAction> &legal, Stats &stats) {
     edge_cache_.clear();
     double visited_mass = 0.0;
     size_t cursor = 0;
@@ -949,6 +996,7 @@ private:
           visited_mass += edge->prior;
       }
     }
+    const bool widened = action_widening() && widen_actions(node, legal, stats);
     const double fpu =
         node.q() - config_.fpu_reduction * std::sqrt(std::max(0.0, visited_mass));
     const double total = std::sqrt(
@@ -957,6 +1005,8 @@ private:
     size_t best = 0;
     double best_score = -1e300;
     for (size_t index = 0; index < legal.size(); ++index) {
+      if (widened && !eligible_[index])
+        continue;
       const Edge *edge = edge_cache_[index];
       const double prior = edge ? edge->prior : config_.unseen_action_prior;
       double q;
@@ -1522,6 +1572,8 @@ private:
   std::vector<LegalAction> legal_;
   Game before_;
   std::vector<std::pair<int64_t, int32_t>> widening_order_; // (visits, card)
+  std::vector<std::pair<float, int32_t>> ranked_; // (prior, action) for action widening
+  std::vector<char> eligible_;                    // per legal action, after widen_actions
   std::vector<std::pair<int32_t, float>> corrections_;
   std::vector<std::pair<int32_t, ChancePending>> chance_pending_;
   std::vector<const Edge *> edge_cache_;
@@ -1548,6 +1600,8 @@ public:
       throw std::invalid_argument("num_threads must be positive");
     if (config.chance_widening_base < 0.0f || config.chance_widening_alpha < 0.0f)
       throw std::invalid_argument("chance widening settings must not be negative");
+    if (config.action_widening_base < 0.0f || config.action_widening_alpha < 0.0f)
+      throw std::invalid_argument("action widening settings must not be negative");
   }
 
   const Config &config() const { return config_; }

@@ -74,6 +74,8 @@ void bind_mcts_v3(py::module_ &m) {
       .def_readwrite("chance_control_variate", &Config::chance_control_variate)
       .def_readwrite("chance_widening_base", &Config::chance_widening_base)
       .def_readwrite("chance_widening_alpha", &Config::chance_widening_alpha)
+      .def_readwrite("action_widening_base", &Config::action_widening_base)
+      .def_readwrite("action_widening_alpha", &Config::action_widening_alpha)
       .def_readwrite("num_threads", &Config::num_threads)
       .def_property_readonly("state_dim", &Config::state_dim);
 
@@ -285,6 +287,7 @@ void bind_mcts_v3(py::module_ &m) {
         result["chance_enumerations"] = stats.chance_enumerations;
         result["chance_rows"] = stats.chance_rows;
         result["chance_widenings"] = stats.chance_widenings;
+        result["action_widenings"] = stats.action_widenings;
         result["rollout_games"] = stats.rollout_games;
         return result;
       });

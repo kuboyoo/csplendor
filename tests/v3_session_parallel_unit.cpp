@@ -170,7 +170,7 @@ int main() {
   Config config;
   config.num_simulations = 96;
   config.leaf_batch_size = 8;
-  for (int variant = 0; variant < 4; ++variant) {
+  for (int variant = 0; variant < 5; ++variant) {
     Config current = config;
     current.semantic_groups = variant == 1;
     current.determinization = variant != 2;
@@ -180,9 +180,13 @@ int main() {
       current.rollout_horizon = 6;
       current.chance_enumeration_depth = 1;
     }
-    if (variant == 3) {
+    if (variant == 3 || variant == 4) {
       current.chance_widening_base = 1.0f;
       current.chance_widening_alpha = 0.5f;
+    }
+    if (variant == 4) {
+      current.action_widening_base = 1.0f;
+      current.action_widening_alpha = 0.5f;
     }
     const Trace sequential = run(current, 1, roots);
     for (int threads : {2, 4, 16})
