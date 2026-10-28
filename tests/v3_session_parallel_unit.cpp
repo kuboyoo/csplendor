@@ -109,18 +109,23 @@ Trace run(const Config &base, int threads, const std::vector<Game> &roots) {
     trace.slots.push_back(batch.slots);
     if (batch.rows() == 0)
       break;
-    // Deterministic pseudo-network that depends only on the batch contents.
+    // Deterministic pseudo-network that is a pure function of each row (its
+    // features and legal ids), never of the row's place in the batch, so the
+    // evaluation cache reproduces it exactly.
     priors.assign(batch.legal_ids.size(), 0.0f);
-    for (size_t i = 0; i < priors.size(); ++i)
-      priors[i] = static_cast<float>(
-                      mix(static_cast<uint64_t>(batch.legal_ids[i]), i) % 997) /
-                      997.0f +
-                  1e-3f;
     values.assign(batch.rows(), 0.0f);
     for (size_t row = 0; row < batch.rows(); ++row) {
       uint32_t bits = 0;
       std::memcpy(&bits, &batch.features[row * batch.state_dim + 7], sizeof(bits));
-      values[row] = static_cast<float>(mix(bits, row) % 1001) / 1000.0f - 0.5f;
+      uint32_t more = 0;
+      std::memcpy(&more, &batch.features[row * batch.state_dim + 3], sizeof(more));
+      const uint64_t seed = mix(bits, more);
+      for (int32_t i = batch.offsets[row]; i < batch.offsets[row + 1]; ++i)
+        priors[static_cast<size_t>(i)] =
+            static_cast<float>(mix(static_cast<uint64_t>(batch.legal_ids[i]), seed) % 997) /
+                997.0f +
+            1e-3f;
+      values[row] = static_cast<float>(mix(seed, bits) % 1001) / 1000.0f - 0.5f;
     }
     session.apply(batch.legal_ids.data(), batch.legal_ids.size(),
                   batch.offsets.data(), batch.rows(),
@@ -180,6 +185,7 @@ int main() {
   Config config;
   config.num_simulations = 96;
   config.leaf_batch_size = 8;
+  Trace plain;
   for (int variant = 0; variant < 4; ++variant) {
     Config current = config;
     current.semantic_groups = variant == 1;
@@ -197,7 +203,26 @@ int main() {
     const Trace sequential = run(current, 1, roots);
     for (int threads : {2, 4, 16})
       same(sequential, run(current, threads, roots));
+    if (variant == 0)
+      plain = sequential;
   }
+  // The evaluation cache drops repeated rows from the batches but leaves the
+  // search itself untouched, at every thread count.
+  Config cached = config;
+  cached.eval_cache_entries = 4096;
+  const Trace sequential = run(cached, 1, roots);
+  check(sequential.root_visits == plain.root_visits, "cached root edges and visits");
+  check(sequential.simulations == plain.simulations, "cached simulations");
+  check(sequential.leaves == plain.leaves, "cached leaves");
+  check(sequential.nodes == plain.nodes, "cached nodes");
+  size_t plain_rows = 0, cached_rows = 0;
+  for (const auto &slots : plain.slots)
+    plain_rows += slots.size();
+  for (const auto &slots : sequential.slots)
+    cached_rows += slots.size();
+  check(cached_rows < plain_rows, "cache removes rows");
+  for (int threads : {2, 4, 16})
+    same(sequential, run(cached, threads, roots));
   check_invalid_offsets_are_rejected(roots);
   return 0;
 }

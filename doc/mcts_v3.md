@@ -66,6 +66,26 @@
   持たなかった手には `unseen_action_prior`（既定 1e-3）を与えます。
 - **終局・深さ上限**: 終局は勝敗（±1、引き分け 0）、`max_depth` 到達は `draw_value` で逆伝播します。
   強制パスは PASS（3048）を唯一の合法手として扱います。
+- **評価キャッシュ（任意、2026-10-28 追加）**: `eval_cache_entries = N`（既定 0 = 無効）で、session は評価済みの行の結果
+  （事前確率の生値と価値）を、行の内容（特徴量 `state_dim` 個の float と合法手 ID 列のバイト列）と slot の `model` の
+  128 ビットハッシュを key に保持します。`collect()` で作った葉の行が key に一致する結果を持つとき、その行はバッチに入れません。
+  葉は従来どおり仮訪問を付けた pending のままで、`leaf_batch_size` の数にも数えます（1 回の `collect()` が進める
+  シミュレーション数は変わらず、返す行数だけが減ります）。`apply()` は受け取った行を pending の葉に先頭から順に当てはめ、
+  キャッシュに当たった葉には保持していた結果を同じ順序で入れます。したがって木の更新順・乱数列・訪問数は、評価器が
+  行の内容だけで決まる純関数である限り、キャッシュなしの探索とビット単位で同じです（GPU のバッチ推論はバッチの形で
+  丸めが変わることがあり、その差は推論側の非決定性の範囲）。`apply()` の行数は当たりを除いた数でなければ `ValueError` です。
+  結果は `apply()` のたびに新しい行の分だけ登録し、N 件を超えたら全部捨てます（当たりは直近の数万〜数十万行の中にあるため
+  LRU は持たない）。1 回の `collect()` の行がすべて当たって空になったときは、session がその葉を内部で `apply()` と同じ
+  順序で確定してから次の葉を集めるので、「空のバッチ = 全対局に残りの評価がない」は保たれます。同じ `collect()` の中に
+  同じ内容の行が 2 回出たときは両方バッチに入れます（実測で全行の 0.07%）。`add_game` / `reset_game` / `advance_game` の
+  `model`（既定 0）は key に混ぜる整数で、1 つの session で複数の網に行を振り分ける呼び出し側（dlsplendor の league 対局）は
+  網ごとに違う値を渡します。rollout の行と列挙型 chance 節点の行も同じ key で扱います。`stats()` の `cache_hits`
+  （バッチに入れなかった葉の数）と `cache_entries`（保持中の件数）で効き目を確認できます。1 件のメモリは
+  合法手 1 つあたり 4 バイト＋約 64 バイト（`mallinfo2` の実測で合法手 40 の行が約 224 バイト）。dlsplendor の収集設定（6,400 探索、
+  速い手 200、続き 2 本、葉 8）での実測は重複行 8.0%（同一対局の相手観測者の木 3.8%、同一探索内の transposition 2.9%、
+  続きとの重複 0.9%、同一観測者の次の探索 0.4%）で、当たりの 99% は同時に進む 4 局で 9.1 万行以内にあった。
+  キャッシュを有効にした実測（同設定、2 局、c4A 網を CPU で）では葉の 8.0% が当たり、当たりの 99% は直前の 5,300 行以内、
+  1 局で約 15 万件を登録した。1 プロセスで 32 局を同時に進める収集なら 2^18 件（約 60 MB）で当たりをほぼ拾えます。
 - **対局単位のマルチスレッド（任意、2026-10-04 追加）**: `num_threads`（既定 1）を 2 以上にすると、
   `collect()` / `apply()` が対局ごとに独立したスレッドで処理されます。各対局は自分の木・乱数・作業領域だけを
   使い、葉は slot 順に連結され、`apply()` も対局ごとに行の順序を保ちます。そのため、バッチの並び・乱数列・
@@ -94,8 +114,9 @@ config = cs.V3SearchConfig()
 config.num_simulations = 800
 config.leaf_batch_size = 32
 config.num_threads = 4              # 任意。既定 1（結果はスレッド数によらず同一）
+config.eval_cache_entries = 1 << 18 # 任意。既定 0 = 無効（2^18 件で約 60 MB）
 session = cs.V3SearchSession(config)
-slot = session.add_game(game, observer=game.current_player, seed=1, root_noise=False)
+slot = session.add_game(game, observer=game.current_player, seed=1, root_noise=False, model=0)
 while not session.all_done():
     features, legal_ids, offsets, slots = session.collect()   # features: (N, 316)、legal_ids は V5 ID
     if len(slots) == 0:
@@ -116,8 +137,12 @@ session.reset_game(slot, next_game, observer, seed)
 `tests/test_mcts_v3.py`: 予算どおりの訪問数、root の訪問手が合法手集合に含まれること、
 同一 seed の再現性、バッチ形状、価値の符号（深さ 1 のみの構成で厳密検証）、root ノイズ、
 二段階選択、不正な観測者の拒否、`num_threads` を変えても同じ探索結果になること。
+評価キャッシュ: 行の内容だけで決まる評価器でキャッシュの有無が根の訪問数・行動価値・`stats()` でビット一致すること
+（拡幅・`advance_game`・`reset_game`・rollout・chance 列挙を含む）、同じ根を後から登録した slot の行が `cache_hits` になり
+全行が当たる回でも `collect()` が空を返さないこと、当たりを含めた行数の `apply()` が `ValueError` になること、
+`model` の違う slot には当たらないこと、容量を超えたら `cache_entries` が戻ること。
 `tests/v3_session_parallel_unit.cpp`: スレッド数 1/2/4/16 で全バッチと木がビット一致すること
-（rollout・chance 列挙を含む構成も対象。ThreadSanitizer でも実行）。
+（rollout・chance 列挙・評価キャッシュを含む構成も対象。ThreadSanitizer でも実行）。
 
 速度の目安（dlsplendor 側の計測、Ryzen 9 7900X＋RTX 4060 Ti、selfplay21 の 3.4M パラメータ網、
 800 探索、64 局同時、1 Python thread）: 約 5,400 局/時、約 6.5 万 sim/秒。

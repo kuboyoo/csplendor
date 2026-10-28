@@ -75,6 +75,7 @@ void bind_mcts_v3(py::module_ &m) {
       .def_readwrite("chance_widening_base", &Config::chance_widening_base)
       .def_readwrite("chance_widening_alpha", &Config::chance_widening_alpha)
       .def_readwrite("num_threads", &Config::num_threads)
+      .def_readwrite("eval_cache_entries", &Config::eval_cache_entries)
       .def_property_readonly("state_dim", &Config::state_dim);
 
   py::class_<Session>(
@@ -86,32 +87,37 @@ void bind_mcts_v3(py::module_ &m) {
       .def(
           "add_game",
           [](Session &session, const Game &root, int observer, uint64_t seed,
-             bool root_noise, int num_simulations) {
+             bool root_noise, int num_simulations, int model) {
             return session.add_game(root, observer, seed, root_noise,
-                                    num_simulations);
+                                    num_simulations, model);
           },
           py::arg("game"), py::arg("observer"), py::arg("seed"),
           py::arg("root_noise") = false, py::arg("num_simulations") = -1,
-          "Register a root position; returns its slot index")
+          py::arg("model") = 0,
+          "Register a root position; returns its slot index (`model` tells "
+          "the evaluation cache apart when the session feeds several networks)")
       .def(
           "reset_game",
           [](Session &session, int slot, const Game &root, int observer,
-             uint64_t seed, bool root_noise, int num_simulations) {
+             uint64_t seed, bool root_noise, int num_simulations, int model) {
             session.reset_game(slot, root, observer, seed, root_noise,
-                               num_simulations);
+                               num_simulations, model);
           },
           py::arg("slot"), py::arg("game"), py::arg("observer"), py::arg("seed"),
           py::arg("root_noise") = false, py::arg("num_simulations") = -1,
+          py::arg("model") = 0,
           "Replace the tree of a slot with a new root position")
       .def(
           "advance_game",
           [](Session &session, int slot, const Game &root, std::vector<int32_t> actions,
-             int observer, uint64_t seed, bool root_noise, int num_simulations) {
+             int observer, uint64_t seed, bool root_noise, int num_simulations,
+             int model) {
             return session.advance_game(slot, root, actions, observer, seed, root_noise,
-                                        num_simulations);
+                                        num_simulations, model);
           },
           py::arg("slot"), py::arg("game"), py::arg("actions"), py::arg("observer"),
           py::arg("seed"), py::arg("root_noise") = false, py::arg("num_simulations") = -1,
+          py::arg("model") = 0,
           "Re-root the slot's tree along the played actions when possible "
           "(returns True), else reset it")
       .def(
@@ -169,7 +175,8 @@ void bind_mcts_v3(py::module_ &m) {
                                   vector_array(batch.slots));
           },
           "Descend every active tree; returns (features[N,D], legal_ids[M], "
-          "offsets[N+1], slots[N]) for the pending leaves")
+          "offsets[N+1], slots[N]) for the pending leaves not served by the "
+          "evaluation cache")
       .def(
           "apply",
           [](Session &session,
@@ -286,6 +293,8 @@ void bind_mcts_v3(py::module_ &m) {
         result["chance_rows"] = stats.chance_rows;
         result["chance_widenings"] = stats.chance_widenings;
         result["rollout_games"] = stats.rollout_games;
+        result["cache_hits"] = stats.cache_hits;
+        result["cache_entries"] = stats.cache_entries;
         return result;
       });
 
