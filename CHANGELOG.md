@@ -1,24 +1,5 @@
 # 変更履歴 / Changelog
 
-## 未出荷：V3 探索の評価キャッシュ（2026-10-28）
-
-- `V3SearchConfig.eval_cache_entries`（既定 0 = 無効）を足した。正のとき `V3SearchSession` は評価済みの行の結果を
-  行の内容（特徴量と合法手 ID 列）と slot の `model` のハッシュで保持し、同じ内容の葉は `collect()` のバッチに入れず、
-  `apply()` で保持結果を同じ順序で入れる。葉は pending のまま `leaf_batch_size` に数えるので、評価器が行の純関数なら
-  探索はキャッシュなしとビット単位で同じ。全行が当たった回は session が内部で確定して集め直す（空のバッチの意味は不変）。
-  容量を超えたら全消去（`doc/mcts_v3.md`）。
-- `add_game` / `reset_game` / `advance_game` に `model`（既定 0）を足した。1 つの session で複数の網を使う呼び出し側が
-  網ごとに違う値を渡す。`stats()` に `cache_hits` と `cache_entries` を足した。
-- 既定（0）では行数・結果とも従来と完全に同じ。dlsplendor の収集設定の実測では重複行は全体の 8.0%。
-
-English: V3 search gains an optional evaluation cache (`eval_cache_entries`,
-default 0 = off). Rows whose content (features and legal ids, plus the slot's
-`model`) was evaluated before are left out of the collected batch and receive
-the stored result inside `apply()` in the original order, so the search is
-bit-identical to the uncached one for a pure evaluator. `add_game`/`reset_game`/
-`advance_game` take `model` (default 0); `stats()` reports `cache_hits` and
-`cache_entries`. In dlsplendor's collection settings 8.0% of the rows are duplicates.
-
 ## 未出荷：レビューで見つかった6件の不具合の修正（2026-10-20）
 
 - `V3SearchSession.apply()` は `offsets` が 0 から始まり、行ごとに増え（合法手0の行を拒否）、`legal_ids` の長さで

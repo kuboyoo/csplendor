@@ -47,10 +47,7 @@
 #include <cstdint>
 #include <random>
 #include <stdexcept>
-#include <cstddef>
-#include <cstring>
 #include <thread>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -121,13 +118,6 @@ struct Config {
   // each game's leaves are produced by one thread and concatenated in slot
   // order: rows, RNG streams and trees are identical for every thread count.
   int num_threads = 1;
-  // Evaluation cache (doc/mcts_v3.md): results of evaluated rows, keyed by
-  // the row's content (features and legal ids) and the slot's model. A leaf
-  // whose row is cached is left out of the batch and receives the stored
-  // result inside apply(), in the original order, so the search is
-  // bit-identical for a pure evaluator. The table is cleared when it holds
-  // this many entries. 0 = off.
-  int eval_cache_entries = 0;
 
   int state_dim() const {
     return TOTAL_FEATURES +
@@ -260,106 +250,16 @@ struct LegalAction {
   Action action;
 };
 
-// 128-bit content hash of one evaluation row (features, legal ids, model).
-struct EvalKey {
-  uint64_t a = 0;
-  uint64_t b = 0;
-  bool operator==(const EvalKey &other) const { return a == other.a && b == other.b; }
-};
-
-struct EvalKeyHash {
-  size_t operator()(const EvalKey &key) const noexcept { return static_cast<size_t>(key.a); }
-};
-
-inline uint64_t mix64(uint64_t x) {
-  x ^= x >> 31;
-  x *= 0x7fb5d329728ea185ULL;
-  x ^= x >> 27;
-  x *= 0x81dadef4bc2dd44dULL;
-  x ^= x >> 33;
-  return x;
-}
-
-// Two independent lanes over the row bytes in 8-byte words; the tail word is
-// zero padded. Collisions of both lanes are negligible for any table size.
-inline EvalKey hash_row(const float *features, size_t dim, const int32_t *ids,
-                        size_t count, uint64_t seed) {
-  uint64_t a = mix64(seed ^ 0x243f6a8885a308d3ULL);
-  uint64_t b = mix64(seed + 0x13198a2e03707344ULL);
-  uint64_t index = 0;
-  auto feed = [&](const unsigned char *bytes, size_t length) {
-    for (size_t pos = 0; pos < length; pos += 8, ++index) {
-      uint64_t word = 0;
-      std::memcpy(&word, bytes + pos, std::min<size_t>(8, length - pos));
-      a = (a ^ mix64(word ^ (index * 0x9e3779b97f4a7c15ULL))) * 0xff51afd7ed558ccdULL;
-      b = (b ^ mix64(word + (index * 0xc2b2ae3d27d4eb4fULL))) * 0xc4ceb9fe1a85ec53ULL;
-    }
-  };
-  feed(reinterpret_cast<const unsigned char *>(features), dim * sizeof(float));
-  feed(reinterpret_cast<const unsigned char *>(ids), count * sizeof(int32_t));
-  EvalKey key;
-  key.a = mix64(a ^ (dim << 32 | count));
-  key.b = mix64(b + (dim << 32 | count));
-  return key;
-}
-
-// Stored results: value then priors of each row, in one pool that is cleared
-// together with the index when the capacity is reached. Reads during
-// collect() never overlap the writes of apply().
-class EvalCache {
-public:
-  explicit EvalCache(size_t capacity) : capacity_(capacity) {}
-  bool enabled() const { return capacity_ > 0; }
-  size_t size() const { return index_.size(); }
-
-  bool find(const EvalKey &key, size_t count, float &value, const float *&priors) const {
-    auto it = index_.find(key);
-    if (it == index_.end() || it->second.count != count)
-      return false;
-    value = pool_[it->second.offset];
-    priors = &pool_[it->second.offset + 1];
-    return true;
-  }
-
-  void insert(const EvalKey &key, float value, const float *priors, size_t count) {
-    if (index_.size() >= capacity_) {
-      index_.clear();
-      pool_.clear();
-    }
-    const Entry entry{pool_.size(), count};
-    if (!index_.emplace(key, entry).second)
-      return; // the same row twice in one batch
-    pool_.push_back(value);
-    pool_.insert(pool_.end(), priors, priors + count);
-  }
-
-private:
-  struct Entry {
-    size_t offset;
-    size_t count;
-  };
-  size_t capacity_;
-  std::unordered_map<EvalKey, Entry, EvalKeyHash> index_;
-  std::vector<float> pool_;
-};
-
 struct PendingLeaf {
-  int slot = -1;
-  int32_t node = -1;         // tree node, or rollout world index when rollout
+  int slot;
+  int32_t node;              // tree node, or rollout world index when rollout
   std::vector<int32_t> path; // empty for rollout rows
-  uint32_t generation = 0;
+  uint32_t generation;
   bool rollout = false;
   int32_t chance = -1; // enumerated child of this chance node (no backup)
   // Control-variate corrections applied above the listed path nodes when
   // this leaf's value is backed up (player-0 perspective).
   std::vector<std::pair<int32_t, float>> corrections;
-  // Evaluation cache: the row's key, and for a cached leaf (no batch row)
-  // the stored result together with the legal ids of the row.
-  EvalKey key;
-  bool cached = false;
-  std::vector<int32_t> cached_ids;
-  std::vector<float> cached_priors;
-  float cached_value = 0.0f;
 };
 
 struct Batch {
@@ -383,8 +283,6 @@ struct Stats {
   uint64_t chance_enumerations = 0;
   uint64_t chance_rows = 0;
   uint64_t chance_widenings = 0; // reveals forced by progressive widening
-  uint64_t cache_hits = 0;       // leaves served by the evaluation cache
-  uint64_t cache_entries = 0;    // rows the cache holds (set by collect)
 
   Stats &operator+=(const Stats &other) {
     simulations += other.simulations;
@@ -398,7 +296,6 @@ struct Stats {
     chance_enumerations += other.chance_enumerations;
     chance_rows += other.chance_rows;
     chance_widenings += other.chance_widenings;
-    cache_hits += other.cache_hits;
     return *this;
   }
 };
@@ -406,12 +303,10 @@ struct Stats {
 class GameSearch {
 public:
   GameSearch(const Config &config, const Game &root, int observer, uint64_t seed,
-             bool root_noise, int num_simulations, int model = 0,
-             const EvalCache *cache = nullptr)
+             bool root_noise, int num_simulations)
       : config_(config), root_(root.clone_light()), observer_(observer),
         rng_(seed), root_noise_(root_noise),
-        budget_(num_simulations > 0 ? num_simulations : config.num_simulations),
-        model_(model), cache_(cache) {
+        budget_(num_simulations > 0 ? num_simulations : config.num_simulations) {
     if (observer < 0 || observer >= Board::NUM_PLAYERS)
       throw std::invalid_argument("observer must identify a player");
     if (root_.is_game_over())
@@ -498,17 +393,14 @@ public:
             return; // this game waits for the outstanding evaluation
           }
           // Fresh leaf: encode from this world, then hold it with virtual loss.
-          PendingLeaf leaf;
-          leaf.slot = slot_;
-          leaf.node = current;
-          leaf.path = path;
-          leaf.generation = generation_;
-          leaf.corrections = corrections_;
-          emit_leaf(world, batch, leaf, stats);
+          encode_leaf(world, batch);
+          batch.slots.push_back(slot_);
           for (int32_t index : path)
             ++nodes_[index].virtual_visits;
           node.pending = true;
           ++pending_count_;
+          PendingLeaf leaf{slot_, current, path, generation_, false, -1, {}};
+          leaf.corrections = corrections_;
           pending.push_back(std::move(leaf));
           ++produced;
           ++stats.leaves;
@@ -708,7 +600,7 @@ public:
   // Retained visits stay in the statistics; the new budget counts fresh
   // simulations only, like the Python search's reused root.
   bool try_advance(const Game &new_root, const std::vector<int32_t> &actions,
-                   uint64_t seed, bool root_noise, int num_simulations, int model) {
+                   uint64_t seed, bool root_noise, int num_simulations) {
     if (pending_count_ != 0 || actions.empty() || new_root.is_game_over())
       return false;
     Game replay = root_.clone_light();
@@ -759,7 +651,6 @@ public:
     rng_.seed(seed);
     root_noise_ = root_noise;
     root_noised_ = false;
-    model_ = model;
     reused_visits_ = static_cast<int>(candidate.visits);
     floors_.clear();
     budget_ = num_simulations > 0 ? num_simulations : config_.num_simulations;
@@ -918,35 +809,6 @@ private:
       return -1;
     }
     return NO_REVEAL;
-  }
-
-  // Encode the row of `world` into the batch, or, when the evaluation cache
-  // holds its result, into the leaf itself (the row is then left out of the
-  // batch and the leaf settles inside apply() in its collected order).
-  void emit_leaf(const Game &world, Batch &batch, PendingLeaf &leaf, Stats &stats) const {
-    const size_t feature_start = batch.features.size();
-    const size_t id_start = batch.legal_ids.size();
-    encode_leaf(world, batch);
-    const size_t count = batch.legal_ids.size() - id_start;
-    if (cache_ != nullptr && cache_->enabled()) {
-      leaf.key = hash_row(batch.features.data() + feature_start,
-                          batch.features.size() - feature_start,
-                          batch.legal_ids.data() + id_start, count,
-                          static_cast<uint64_t>(static_cast<int64_t>(model_)));
-      const float *priors = nullptr;
-      if (cache_->find(leaf.key, count, leaf.cached_value, priors)) {
-        leaf.cached = true;
-        leaf.cached_ids.assign(batch.legal_ids.begin() + static_cast<std::ptrdiff_t>(id_start),
-                               batch.legal_ids.end());
-        leaf.cached_priors.assign(priors, priors + count);
-        batch.features.resize(feature_start);
-        batch.legal_ids.resize(id_start);
-        batch.offsets.pop_back();
-        ++stats.cache_hits;
-        return;
-      }
-    }
-    batch.slots.push_back(slot_);
   }
 
   void encode_leaf(const Game &world, Batch &batch) const {
@@ -1367,13 +1229,11 @@ private:
             child.player == actor ? child.terminal_value : -child.terminal_value;
         continue;
       }
+      encode_leaf(world, batch);
+      batch.slots.push_back(slot_);
       child.pending = true;
-      PendingLeaf leaf;
-      leaf.slot = slot_;
-      leaf.node = edge->child;
-      leaf.generation = generation_;
+      PendingLeaf leaf{slot_, edge->child, {}, generation_, false, -1, {}};
       leaf.chance = chance_index;
-      emit_leaf(world, batch, leaf, stats);
       pending.push_back(std::move(leaf));
       ++record.outstanding;
       ++stats.chance_rows;
@@ -1581,12 +1441,13 @@ private:
         continue;
       }
       any_live = true;
+      encode_leaf(world, batch);
+      batch.slots.push_back(slot_);
       PendingLeaf leaf;
       leaf.slot = slot_;
       leaf.node = static_cast<int32_t>(index);
       leaf.generation = generation_;
       leaf.rollout = true;
-      emit_leaf(world, batch, leaf, stats);
       pending.push_back(std::move(leaf));
       ++rollout_pending_;
       ++stats.rollout_rows;
@@ -1656,8 +1517,6 @@ private:
   int pending_count_ = 0;
   int slot_ = -1;
   uint32_t generation_ = 0;
-  int model_ = 0;                    // mixed into the evaluation cache key
-  const EvalCache *cache_ = nullptr; // owned by the Session
   int32_t root_index_ = -1;
   std::vector<Node> nodes_;
   std::vector<LegalAction> legal_;
@@ -1680,9 +1539,7 @@ private:
 
 class Session {
 public:
-  explicit Session(const Config &config)
-      : config_(config),
-        cache_(static_cast<size_t>(std::max(0, config.eval_cache_entries))) {
+  explicit Session(const Config &config) : config_(config) {
     if (config.num_simulations < 1 || config.leaf_batch_size < 1)
       throw std::invalid_argument("simulations and leaf batch must be positive");
     if (config.max_depth < 1)
@@ -1691,30 +1548,21 @@ public:
       throw std::invalid_argument("num_threads must be positive");
     if (config.chance_widening_base < 0.0f || config.chance_widening_alpha < 0.0f)
       throw std::invalid_argument("chance widening settings must not be negative");
-    if (config.eval_cache_entries < 0)
-      throw std::invalid_argument("eval_cache_entries must not be negative");
   }
-
-  // The games keep a pointer to the session's cache.
-  Session(const Session &) = delete;
-  Session &operator=(const Session &) = delete;
 
   const Config &config() const { return config_; }
   int state_dim() const { return config_.state_dim(); }
 
-  // `model` tells the evaluation cache apart when one session feeds several
-  // networks (the caller routes rows by slot).
   int add_game(const Game &root, int observer, uint64_t seed, bool root_noise,
-               int num_simulations, int model = 0) {
-    games_.emplace_back(config_, root, observer, seed, root_noise, num_simulations,
-                        model, &cache_);
+               int num_simulations) {
+    games_.emplace_back(config_, root, observer, seed, root_noise, num_simulations);
     const int slot = static_cast<int>(games_.size() - 1);
     games_.back().set_slot(slot);
     return slot;
   }
 
   void reset_game(int slot, const Game &root, int observer, uint64_t seed,
-                  bool root_noise, int num_simulations, int model = 0) {
+                  bool root_noise, int num_simulations) {
     check_slot(slot);
     // Drop pending leaves of the old tree: their results are ignored later
     // because the generation changes with the new GameSearch.
@@ -1723,20 +1571,19 @@ public:
         leaf.generation = ~0u;
     const uint32_t generation = games_[slot].generation() + 1;
     games_[slot] = GameSearch(config_, root, observer, seed, root_noise,
-                              num_simulations, model, &cache_);
+                              num_simulations);
     games_[slot].set_slot(slot);
     games_[slot].set_generation(generation);
   }
 
   // Reuse the slot's tree when possible; otherwise behave like reset_game.
   bool advance_game(int slot, const Game &root, const std::vector<int32_t> &actions,
-                    int observer, uint64_t seed, bool root_noise, int num_simulations,
-                    int model = 0) {
+                    int observer, uint64_t seed, bool root_noise, int num_simulations) {
     check_slot(slot);
     if (games_[slot].observer() == observer &&
-        games_[slot].try_advance(root, actions, seed, root_noise, num_simulations, model))
+        games_[slot].try_advance(root, actions, seed, root_noise, num_simulations))
       return true;
-    reset_game(slot, root, observer, seed, root_noise, num_simulations, model);
+    reset_game(slot, root, observer, seed, root_noise, num_simulations);
     return false;
   }
 
@@ -1761,67 +1608,9 @@ public:
     return games_[slot];
   }
 
-  // A round whose leaves were all served by the cache yields no row; those
-  // leaves are settled here (in their collected order, as apply() would) and
-  // the next round is collected, so an empty batch still means "no work".
   Batch collect() {
     if (!pending_.empty())
       throw std::logic_error("apply the previous batch before collecting again");
-    for (;;) {
-      Batch batch = collect_round();
-      if (batch.rows() > 0 || pending_.empty()) {
-        stats_.nodes = 0;
-        for (const auto &game : games_)
-          stats_.nodes += game.node_count();
-        stats_.cache_entries = cache_.size();
-        return batch;
-      }
-      settle(nullptr, nullptr, nullptr, nullptr);
-    }
-  }
-
-  size_t pending() const { return pending_.size(); }
-
-  // `offsets` has rows + 1 entries delimiting each row's slice of the
-  // `legal_count` legal ids (and priors); every row holds at least one id.
-  // `rows` is the number of collected rows (pending leaves served by the
-  // cache have none). They are validated before any tree is touched.
-  void apply(const int32_t *legal_ids, size_t legal_count,
-             const int32_t *offsets, size_t rows, const float *priors,
-             const float *values) {
-    size_t expected = 0;
-    for (const PendingLeaf &leaf : pending_)
-      expected += leaf.cached ? 0 : 1;
-    if (rows != expected)
-      throw std::invalid_argument("evaluation rows do not match pending leaves");
-    if (offsets[0] != 0 || static_cast<size_t>(offsets[rows]) != legal_count)
-      throw std::invalid_argument("offsets must start at 0 and end at the legal id count");
-    for (size_t row = 0; row < rows; ++row)
-      if (offsets[row + 1] <= offsets[row])
-        throw std::invalid_argument("offsets must increase (every row needs a legal id)");
-    if (cache_.enabled()) {
-      size_t row = 0;
-      for (const PendingLeaf &leaf : pending_) {
-        if (leaf.cached)
-          continue;
-        const size_t start = static_cast<size_t>(offsets[row]);
-        cache_.insert(leaf.key, values[row], priors + start,
-                      static_cast<size_t>(offsets[row + 1]) - start);
-        ++row;
-      }
-    }
-    settle(legal_ids, offsets, priors, values);
-  }
-
-  const Stats &stats() const { return stats_; }
-
-private:
-  void check_slot(int slot) const {
-    if (slot < 0 || static_cast<size_t>(slot) >= games_.size())
-      throw std::out_of_range("game slot out of range");
-  }
-
-  Batch collect_round() {
     Batch batch;
     batch.state_dim = config_.state_dim();
     batch.offsets.push_back(0);
@@ -1832,44 +1621,50 @@ private:
     } else {
       collect_parallel(batch);
     }
+    stats_.nodes = 0;
+    for (const auto &game : games_)
+      stats_.nodes += game.node_count();
     return batch;
   }
 
-  // Install every pending leaf's result: cached leaves carry their own, the
-  // others take the next batch row (row_of_). The arguments may be null when
-  // every pending leaf is cached.
-  void settle(const int32_t *legal_ids, const int32_t *offsets,
-              const float *priors, const float *values) {
-    row_of_.assign(pending_.size(), -1);
-    int32_t next = 0;
-    for (size_t index = 0; index < pending_.size(); ++index)
-      if (!pending_[index].cached)
-        row_of_[index] = next++;
+  size_t pending() const { return pending_.size(); }
+
+  // `offsets` has rows + 1 entries delimiting each row's slice of the
+  // `legal_count` legal ids (and priors); every row holds at least one id.
+  // They are validated before any tree is touched.
+  void apply(const int32_t *legal_ids, size_t legal_count,
+             const int32_t *offsets, size_t rows, const float *priors,
+             const float *values) {
+    if (rows != pending_.size())
+      throw std::invalid_argument("evaluation rows do not match pending leaves");
+    if (offsets[0] != 0 || static_cast<size_t>(offsets[rows]) != legal_count)
+      throw std::invalid_argument("offsets must start at 0 and end at the legal id count");
+    for (size_t row = 0; row < rows; ++row)
+      if (offsets[row + 1] <= offsets[row])
+        throw std::invalid_argument("offsets must increase (every row needs a legal id)");
     if (worker_count(games_.size()) > 1 &&
-        apply_parallel(legal_ids, offsets, priors, values))
+        apply_parallel(legal_ids, offsets, rows, priors, values))
       return;
-    for (size_t index = 0; index < pending_.size(); ++index)
-      apply_leaf(index, legal_ids, offsets, priors, values, stats_.simulations);
+    for (size_t row = 0; row < rows; ++row) {
+      const PendingLeaf &leaf = pending_[row];
+      const size_t start = static_cast<size_t>(offsets[row]);
+      const size_t count = static_cast<size_t>(offsets[row + 1]) - start;
+      if (leaf.generation == ~0u)
+        continue; // belonged to a tree that was reset
+      games_[leaf.slot].apply(leaf, legal_ids + start, count, priors + start,
+                              values[row]);
+      if (leaf.chance < 0)
+        ++stats_.simulations;
+    }
     pending_.clear();
   }
 
-  void apply_leaf(size_t index, const int32_t *legal_ids, const int32_t *offsets,
-                  const float *priors, const float *values, uint64_t &simulations) {
-    const PendingLeaf &leaf = pending_[index];
-    if (leaf.generation == ~0u)
-      return; // belonged to a tree that was reset
-    if (leaf.cached) {
-      games_[leaf.slot].apply(leaf, leaf.cached_ids.data(), leaf.cached_ids.size(),
-                              leaf.cached_priors.data(), leaf.cached_value);
-    } else {
-      const size_t row = static_cast<size_t>(row_of_[index]);
-      const size_t start = static_cast<size_t>(offsets[row]);
-      const size_t count = static_cast<size_t>(offsets[row + 1]) - start;
-      games_[leaf.slot].apply(leaf, legal_ids + start, count, priors + start,
-                              values[row]);
-    }
-    if (leaf.chance < 0)
-      ++simulations;
+  const Stats &stats() const { return stats_; }
+
+private:
+  void check_slot(int slot) const {
+    if (slot < 0 || static_cast<size_t>(slot) >= games_.size())
+      throw std::out_of_range("game slot out of range");
   }
 
   size_t worker_count(size_t tasks) const {
@@ -1929,7 +1724,6 @@ private:
         if (games_[index].done())
           return;
         Part &part = parts[index];
-        part.batch.state_dim = config_.state_dim();
         part.batch.offsets.push_back(0);
         games_[index].collect(config_.leaf_batch_size, part.batch,
                               part.pending, part.stats);
@@ -1970,33 +1764,42 @@ private:
       std::rethrow_exception(failure);
   }
 
-  // The pending leaves of one game are contiguous (collect concatenates per
-  // slot) and are applied in order by a single thread, so every tree sees
-  // the same update sequence as the sequential loop.
-  // Returns false, without applying anything, when a game's leaves are not
+  // Rows of one game are contiguous (collect concatenates per slot) and are
+  // applied in row order by a single thread, so every tree sees the same
+  // update sequence as the sequential loop.
+  // Returns false, without applying anything, when a game's rows are not
   // contiguous; the caller then uses the sequential loop.
   bool apply_parallel(const int32_t *legal_ids, const int32_t *offsets,
-                      const float *priors, const float *values) {
-    std::vector<std::pair<size_t, size_t>> segments; // [begin, end) leaves
+                      size_t rows, const float *priors, const float *values) {
+    std::vector<std::pair<size_t, size_t>> segments; // [begin, end) rows
     std::vector<bool> seen(games_.size(), false);
-    const size_t leaves = pending_.size();
-    for (size_t index = 0; index < leaves;) {
-      const int slot = pending_[index].slot;
+    for (size_t row = 0; row < rows;) {
+      const int slot = pending_[row].slot;
       if (slot < 0 || static_cast<size_t>(slot) >= games_.size() || seen[slot])
         return false;
       seen[slot] = true;
-      size_t end = index + 1;
-      while (end < leaves && pending_[end].slot == slot)
+      size_t end = row + 1;
+      while (end < rows && pending_[end].slot == slot)
         ++end;
-      segments.emplace_back(index, end);
-      index = end;
+      segments.emplace_back(row, end);
+      row = end;
     }
     std::vector<uint64_t> simulations(segments.size(), 0);
     std::exception_ptr failure;
     try {
       run_tasks(segments.size(), [&](size_t index) {
-        for (size_t leaf = segments[index].first; leaf < segments[index].second; ++leaf)
-          apply_leaf(leaf, legal_ids, offsets, priors, values, simulations[index]);
+        for (size_t row = segments[index].first; row < segments[index].second;
+             ++row) {
+          const PendingLeaf &leaf = pending_[row];
+          const size_t start = static_cast<size_t>(offsets[row]);
+          const size_t count = static_cast<size_t>(offsets[row + 1]) - start;
+          if (leaf.generation == ~0u)
+            continue; // belonged to a tree that was reset
+          games_[leaf.slot].apply(leaf, legal_ids + start, count,
+                                  priors + start, values[row]);
+          if (leaf.chance < 0)
+            ++simulations[index];
+        }
       });
     } catch (...) {
       failure = std::current_exception();
@@ -2010,10 +1813,8 @@ private:
   }
 
   Config config_;
-  EvalCache cache_;
   std::vector<GameSearch> games_;
   std::vector<PendingLeaf> pending_;
-  std::vector<int32_t> row_of_; // batch row of each pending leaf, -1 if cached
   Stats stats_;
 };
 
