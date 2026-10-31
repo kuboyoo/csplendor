@@ -31,9 +31,13 @@
 // - Virtual loss keeps the leaves of one batch distinct. A node selected twice
 //   while still pending ends that game's collection for the round.
 //
-// Not implemented here on purpose: mate search, rollouts, tree reuse across
-// moves, opponent re-determinization inside a simulation, stall guards. The
-// Python driver adds temperature sampling and any of those on top.
+// - Tree reuse across moves (try_advance) re-roots on the node reached by the
+//   played public actions and compacts the node array to the new root's
+//   subtree, so unreachable subtrees are released every move.
+//
+// Not implemented here on purpose: mate search, opponent re-determinization
+// inside a simulation, stall guards. The Python driver adds temperature
+// sampling and any of those on top.
 
 #include "action.h"
 #include "action_encoder_v5.h"
@@ -598,7 +602,8 @@ public:
   // derived from the actual transitions (public board refills, the observer's
   // own deck reservations), never from the opponent's hidden information.
   // Retained visits stay in the statistics; the new budget counts fresh
-  // simulations only, like the Python search's reused root.
+  // simulations only, like the Python search's reused root. Only the new
+  // root's subtree is kept (compact_to).
   bool try_advance(const Game &new_root, const std::vector<int32_t> &actions,
                    uint64_t seed, bool root_noise, int num_simulations) {
     if (pending_count_ != 0 || actions.empty() || new_root.is_game_over())
@@ -640,18 +645,18 @@ public:
       }
       current = next;
     }
-    Node &candidate = nodes_[current];
+    const Node &candidate = nodes_[current];
     if (candidate.kind != NodeKind::Decision || !candidate.expanded ||
         candidate.player != new_root.current_player() ||
         replay.board.observable_hash(static_cast<uint8_t>(observer_)) !=
             new_root.board.observable_hash(static_cast<uint8_t>(observer_)))
       return false;
-    root_index_ = current;
+    compact_to(current);
     root_ = new_root.clone_light();
     rng_.seed(seed);
     root_noise_ = root_noise;
     root_noised_ = false;
-    reused_visits_ = static_cast<int>(candidate.visits);
+    reused_visits_ = static_cast<int>(nodes_[root_index_].visits);
     floors_.clear();
     budget_ = num_simulations > 0 ? num_simulations : config_.num_simulations;
     completed_ = 0;
@@ -660,7 +665,7 @@ public:
     rollout_worlds_.clear();
     ++generation_;
     if (root_noise_)
-      add_root_noise(candidate);
+      add_root_noise(nodes_[root_index_]);
     return true;
   }
 
@@ -760,6 +765,31 @@ private:
     node.player = player;
     nodes_.push_back(std::move(node));
     return static_cast<int32_t>(nodes_.size() - 1);
+  }
+
+  // Keep only the nodes reachable from `new_root`, renumbered breadth-first
+  // (new_root becomes 0), and release the old array. Called with no pending
+  // evaluation, so root_index_ and Edge::child are the only node indices.
+  void compact_to(int32_t new_root) {
+    std::vector<int32_t> remap(nodes_.size(), -1);
+    std::vector<int32_t> order{new_root};
+    remap[new_root] = 0;
+    for (size_t k = 0; k < order.size(); ++k)
+      for (const Edge &edge : nodes_[order[k]].edges)
+        if (edge.child >= 0 && remap[edge.child] < 0) {
+          remap[edge.child] = static_cast<int32_t>(order.size());
+          order.push_back(edge.child);
+        }
+    std::vector<Node> kept;
+    kept.reserve(std::max<size_t>(order.size(), 4096));
+    for (int32_t index : order) {
+      kept.push_back(std::move(nodes_[index]));
+      for (Edge &edge : kept.back().edges)
+        if (edge.child >= 0)
+          edge.child = remap[edge.child];
+    }
+    nodes_.swap(kept);
+    root_index_ = 0;
   }
 
   static float terminal_value(const Game &world, uint8_t player) {

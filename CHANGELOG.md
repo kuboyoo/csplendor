@@ -79,6 +79,18 @@ move-assignment), VISIT_NOBLE depth labels in root split/frontier/proof DAG
 poisoning NativeMateSearchSession, and caps mate transposition tables at
 DEFAULT_MAX_MEMO_STATES (2M) by default.
 
+## 未出荷：V3 探索の木の再利用で未到達の部分木を解放する（2026-10-31）
+
+- `V3SearchSession.advance_game()`（`GameSearch::try_advance`）が再利用に成功したとき、新しい root から辿れる節点だけを
+  新しい配列に幅優先順（root が 0）で詰め直し、`Edge::child` を付け替えて古い配列を解放する。これまでは root の添字を
+  移すだけで、選ばれなかった手の部分木が 1 局の間ずっと残り、6,400 探索の自己対局でメモリが増え続けていた。
+- 探索結果（root の訪問数・行動価値・事前確率・root 価値・乱数の消費）は詰め直す前（a00c5f2）とビット単位で同じ
+  （`tests/data/v3_reuse_golden_a00c5f2.json`）。`node_count()` は再利用直後に新しい root の部分木の大きさになる。
+
+English: tree reuse in the V3 search now compacts the node array to the new
+root's subtree (breadth-first renumbering) and releases the rest; search
+results are bit-identical to a00c5f2.
+
 ## 未出荷：レビューで見つかった6件の不具合の修正（2026-10-20）
 
 - `V3SearchSession.apply()` は `offsets` が 0 から始まり、行ごとに増え（合法手0の行を拒否）、`legal_ids` の長さで
