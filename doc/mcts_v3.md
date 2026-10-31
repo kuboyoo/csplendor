@@ -58,6 +58,19 @@
   併用すると root 近くは列挙、それより深い節点は拡幅になります。`merge_own_deck_reveal = true` で chance 節点を作らない
   観測者の山札予約には効きません（分岐しないものは拡幅もしない）。木の再利用（`try_advance`）は実際のめくれが子に
   ないと木を捨てるので、拡幅中は再利用に失敗する手が増えます。`stats()` の `chance_widenings` で強制した回数を確認できます。
+- **手をまたぐ木の再利用とメモリ（2026-10-31 更新）**: `advance_game(slot, game, actions, observer, seed, ...)` は、
+  前回の root から実際に指された公開行動列 `actions`（両者の手）をたどり、行き着いた展開済みの決定節点を新しい root に
+  します（`GameSearch::try_advance`）。めくれは実際の遷移（場の補充、観測者自身の山札予約）から求め、相手の伏せ情報は
+  使いません。たどれない（未展開・めくれが子にない・観測ハッシュが違う・観測者が違う・評価待ちの葉がある）ときは
+  `reset_game` と同じく新しい木で始めます。引き継いだ訪問は統計に残り、`budget_` は新規の探索回数で `completed_` を
+  0 に戻すので、再利用は 1 手の評価回数を減らさず、引き継いだ訪問の分だけ木が大きく（読みが深く）なります。
+  再利用に成功すると、新しい root から辿れる節点だけを新しい配列に幅優先順（root が 0）で詰め直し、`Edge::child` の
+  添字を付け替えて古い配列を解放します。選ばれなかった手や相手が選ばなかった手の部分木はここで手放すので、
+  1 局の間に節点が増え続けることはなく、`node_count()` は新しい root の部分木の大きさになります。詰め直しは添字の
+  振り直しだけで、節点の統計（訪問数・価値・事前確率・列挙値）と乱数の消費は変えないため、続きの探索は詰め直さない
+  場合とビット単位で同じです。節点の添字を持つのは `root_index_` と評価待ちの葉（`PendingLeaf` の `node`/`path`/`chance`、
+  chance 列挙の待ち `chance_pending_`）で、評価待ちがある間は `try_advance` しないため、詰め直しの時点で付け替えが
+  必要なのは `root_index_` と `Edge::child` だけです（root の訪問下限 `floors_` は行動 ID を持ち、再利用時に消します）。
 - **二段階選択（任意）**: `semantic_groups=true` で「支払い・返却を畳んだ主判断」（139 群）で
   PUCT を行い、選んだ群の中でもう一度 PUCT を行います。既定は平坦な PUCT です。
 - **virtual loss**: 1 バッチ内の葉が重ならないように、収集中の経路に仮訪問を加えます。
@@ -73,8 +86,7 @@
   1 プロセスで多数の対局を探索する場合に有効です。複数プロセスで並列実行している場合は、プロセス数と合わせて
   CPU コア数を超えないようにしてください。
 
-含まれないもの: 詰み探索、rollout、手をまたぐ木の再利用、シミュレーション途中の相手手番での
-再決定化、反復回避。これらは呼び出し側（dlsplendor）で必要に応じて重ねます。
+含まれないもの: 詰み探索、シミュレーション途中の相手手番での再決定化、反復回避。これらは呼び出し側（dlsplendor）で必要に応じて重ねます。
 
 ## 入力特徴量
 
@@ -105,6 +117,9 @@ while not session.all_done():
 visits = session.root_visits(slot)          # {action_id: visits}
 q = session.root_action_values(slot)        # {action_id: root 視点の Q}
 session.reset_game(slot, next_game, observer, seed)
+# 木の再利用: 前回の root から指された V5 ID の列を渡す。失敗時は reset_game と同じ。
+reused = session.advance_game(slot, next_game, played_since_root, observer, seed)
+nodes = session.node_count(slot)            # 再利用後は新しい root の部分木の節点数
 ```
 
 `v5_semantic_group_id(action_id)` は V5 ID の主判断の群番号（139 群）を返し、探索の二段階選択はこれを使います。
@@ -115,7 +130,11 @@ session.reset_game(slot, next_game, observer, seed)
 
 `tests/test_mcts_v3.py`: 予算どおりの訪問数、root の訪問手が合法手集合に含まれること、
 同一 seed の再現性、バッチ形状、価値の符号（深さ 1 のみの構成で厳密検証）、root ノイズ、
-二段階選択、不正な観測者の拒否、`num_threads` を変えても同じ探索結果になること。
+二段階選択、不正な観測者の拒否、`num_threads` を変えても同じ探索結果になること、
+木の再利用で詰め直したあとの root 統計・続きの探索が詰め直す前の実装（a00c5f2）の記録とビット一致すること
+（`tests/data/v3_reuse_golden_a00c5f2.json`）。
+`tests/v3_reuse_compact_unit.cpp`: 再利用後の `node_count()` が新しい root から辿れる節点数に一致して旧木より小さいこと、
+詰め直した部分木が旧木の同じ部分木と（添字以外）同一であること。
 `tests/v3_session_parallel_unit.cpp`: スレッド数 1/2/4/16 で全バッチと木がビット一致すること
 （rollout・chance 列挙を含む構成も対象。ThreadSanitizer でも実行）。
 

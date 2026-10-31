@@ -658,3 +658,92 @@ def test_rollouts_start_in_the_collect_that_finishes_the_tree():
     assert session.simulations(0) == 48
     assert session.all_done()
     assert session.rollout_result(0) is not None
+
+
+GOLDEN_REUSE = Path(__file__).parent / "data" / "v3_reuse_golden_a00c5f2.json"
+
+
+def _reuse_net(features, ids, offsets, slots):
+    """Deterministic pseudo-network that depends only on the batch contents."""
+    priors = np.empty(len(ids), dtype=np.float32)
+    values = np.empty(len(slots), dtype=np.float32)
+    for row in range(len(slots)):
+        a, b = offsets[row], offsets[row + 1]
+        h = np.abs(np.sin(features[row, :64].astype(np.float64).sum() * 12.9898 + ids[a:b] * 0.37))
+        p = (h + 1e-3).astype(np.float32)
+        priors[a:b] = p / p.sum()
+        values[row] = np.float32(np.tanh(np.sin(float(features[row].astype(np.float64).sum()) * 3.1)) * 0.6)
+    return priors, values
+
+
+def _reuse_trace(variant, seed, simulations=96, plies=24):
+    """Self-play with one slot per observer and advance_game, as dlsplendor drives it."""
+    config = cs.V3SearchConfig()
+    config.num_simulations = simulations
+    config.leaf_batch_size = 16
+    if variant == "enum":
+        config.chance_enumeration_depth = 1
+        config.chance_control_variate = True
+    elif variant == "groups":
+        config.semantic_groups = True
+        config.dynamic_cpuct = True
+    elif variant == "widen":
+        config.chance_widening_base, config.chance_widening_alpha = 1.0, 0.5
+    session = cs.V3SearchSession(config)
+    game = cs.Game(seed=seed)
+    slots, root_ply, actions, rows = {}, {}, [], []
+    for ply in range(plies):
+        if game.is_game_over():
+            break
+        observer = game.current_player
+        search_seed = 1000 * seed + ply
+        if observer not in slots:
+            slots[observer] = session.add_game(game, observer, search_seed, ply < 2, simulations)
+            reused = False
+        else:
+            since = actions[root_ply[observer]:]
+            reused = session.advance_game(slots[observer], game, since, observer, search_seed, ply < 2, simulations)
+        slot = slots[observer]
+        root_ply[observer] = len(actions)
+        nodes_after_advance = session.node_count(slot)
+        reused_visits = session.reused_visits(slot)
+        while not session.done(slot):
+            features, ids, offsets, batch_slots = session.collect()
+            if len(batch_slots) == 0:
+                break
+            session.apply(ids, offsets, *_reuse_net(features, ids, offsets, batch_slots))
+        visits = {str(k): int(v) for k, v in session.root_visits(slot).items()}
+        rows.append({
+            "reused": bool(reused),
+            "reused_visits": reused_visits,
+            "nodes_after_advance": nodes_after_advance,
+            "visits": visits,
+            "values": {str(k): np.float32(v).tobytes().hex() for k, v in session.root_action_values(slot).items()},
+            "priors": {str(k): np.float32(v).tobytes().hex() for k, v in session.root_priors(slot).items()},
+            "root_value": np.float32(session.root_value(slot)).tobytes().hex(),
+        })
+        action = min(visits, key=lambda a: (-visits[a], int(a)))
+        game.apply(cs.ActionEncoderV5.decode_and_match(int(action), game))
+        actions.append(int(action))
+    return rows
+
+
+REUSE_VARIANTS = (("plain", 7), ("enum", 8), ("groups", 9), ("widen", 10))
+
+
+@pytest.mark.parametrize("variant,seed", REUSE_VARIANTS)
+def test_tree_reuse_compaction_keeps_the_search_and_releases_unreachable_nodes(variant, seed):
+    """Root statistics match csplendor a00c5f2 (reuse without compaction) bit for bit,
+    while a reused tree keeps only the subtree of the new root."""
+    golden = json.loads(GOLDEN_REUSE.read_text())[variant]
+    rows = _reuse_trace(variant, seed)
+    assert len(rows) == len(golden)
+    assert sum(row["reused"] for row in rows) >= 3
+    for row, expected in zip(rows, golden):
+        for key in ("reused", "reused_visits", "visits", "values", "priors", "root_value"):
+            assert row[key] == expected[key], key
+        if row["reused"]:
+            assert row["nodes_after_advance"] < expected["nodes_after_advance"]
+            assert row["nodes_after_advance"] >= row["reused_visits"]
+        else:
+            assert row["nodes_after_advance"] == expected["nodes_after_advance"] == 1
