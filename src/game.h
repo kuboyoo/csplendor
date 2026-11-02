@@ -26,6 +26,8 @@ public:
   std::vector<Board> board_history; // Simple undo support
   bool simple_payment_mode = false; // When true, only generate minimal gold payment patterns
   bool blank_refill_mode = false;   // When true, deck refill consumes top card but keeps board slot blank
+  // Upper-bound experiments: per reserved slot of the opponent, the chance that a search world keeps the true card.
+  std::array<float, 3> hidden_reserve_oracle_prob{};
 
   explicit Game(uint64_t seed = 0) { board.init(seed); }
 
@@ -62,6 +64,13 @@ public:
     CSPLENDOR_PERF_INC(DeterminizationCloneCalls);
     Game g = copy_current_state();
     g.board.randomize_decks_only(observer_player, seed);
+    return g;
+  }
+
+  Game partial_oracle_clone(uint8_t observer_player, uint64_t seed) const {
+    CSPLENDOR_PERF_INC(DeterminizationCloneCalls);
+    Game g = copy_current_state();
+    g.board.randomize_partial_oracle(observer_player, seed, hidden_reserve_oracle_prob);
     return g;
   }
 
@@ -297,6 +306,7 @@ private:
     copy.board = board;
     copy.simple_payment_mode = simple_payment_mode;
     copy.blank_refill_mode = blank_refill_mode;
+    copy.hidden_reserve_oracle_prob = hidden_reserve_oracle_prob;
     return copy;
   }
 

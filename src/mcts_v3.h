@@ -370,6 +370,8 @@ public:
       Game world = !config_.determinization ? root_.clone_light()
                    : config_.oracle_hidden_reserve
                        ? root_.decks_shuffled_clone(static_cast<uint8_t>(observer_), rng_())
+                   : root_.hidden_reserve_oracle_prob != std::array<float, 3>{}
+                       ? root_.partial_oracle_clone(static_cast<uint8_t>(observer_), rng_())
                        : root_.shuffled_clone(static_cast<uint8_t>(observer_), rng_());
       std::vector<int32_t> &path = path_;
       path.clear();
