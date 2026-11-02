@@ -789,3 +789,44 @@ def test_oracle_flag_is_off_by_default_and_settable():
     config.oracle_hidden_reserve = True
     probe = cs.RootMateProbeConfig()
     assert probe.oracle_hidden_reserve is False
+
+
+def _reserved_deck_game():
+    game = cs.Game(seed=11)
+    action = next(a for a in game.legal_actions if a.type == cs.ActionType.RESERVE_DECK)
+    game.apply(action)
+    return game
+
+
+def _hidden_layout(game):
+    return [list(deck) for deck in game.board.decks], list(game.board.players[0].reserved)
+
+
+def _decks_only(game, seed):
+    clone = game.clone_light()
+    clone.board.randomize_decks_only(1, seed)
+    return clone
+
+
+def test_partial_oracle_at_the_ends_matches_the_two_existing_worlds():
+    game = _reserved_deck_game()
+    game.hidden_reserve_oracle_prob = [0.0, 0.0, 0.0]
+    assert _hidden_layout(game.partial_oracle_clone(1, 5)) == _hidden_layout(game.shuffled_clone(1, 5))
+    game.hidden_reserve_oracle_prob = [1.0, 1.0, 1.0]
+    assert _hidden_layout(game.partial_oracle_clone(1, 5)) == _hidden_layout(_decks_only(game, 5))
+
+
+def test_partial_oracle_keeps_the_true_card_about_as_often_as_asked():
+    game = _reserved_deck_game()
+    true_card = int(game.board.players[0].reserved[0])
+    game.hidden_reserve_oracle_prob = [0.5, 0.5, 0.5]
+    level = next(c.level for c in cs.get_all_cards() if int(c.id) == true_card)
+    pool = len(game.board.observable_card_pool(1, int(level)))
+    kept = sum(int(game.partial_oracle_clone(1, seed).board.players[0].reserved[0]) == true_card for seed in range(2000))
+    assert abs(kept / 2000 - (0.5 + 0.5 / pool)) < 0.05
+
+
+def test_partial_oracle_probability_survives_a_clone():
+    game = _reserved_deck_game()
+    game.hidden_reserve_oracle_prob = [0.25, 0.0, 0.0]
+    assert list(game.clone_light().hidden_reserve_oracle_prob) == [0.25, 0.0, 0.0]

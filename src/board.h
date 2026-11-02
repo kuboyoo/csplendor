@@ -990,7 +990,31 @@ public:
         [&rng](auto first, auto last) {
           portable_mt19937_shuffle(first, last, rng);
         },
-        true);
+        {true, true, true});
+  }
+
+  // Upper-bound experiments: each hidden reservation keeps its true card with
+  // its own probability, otherwise it is redrawn with the deck. The coin flips
+  // do not touch the shuffle's generator, so all-zero equals
+  // randomize_hidden_information and all-one equals randomize_decks_only.
+  void randomize_partial_oracle(uint8_t observer_player, uint64_t seed,
+                                const std::array<float, 3> &keep_probability) {
+    std::array<bool, 3> kept{};
+    for (uint64_t slot = 0; slot < kept.size(); ++slot) {
+      uint64_t x = seed + 0x9e3779b97f4a7c15ULL * (slot + 1);
+      x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+      x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+      x ^= x >> 31;
+      kept[slot] = static_cast<double>(x >> 11) * 0x1p-53 <
+                   keep_probability[slot];
+    }
+    LazyMt19937 rng(static_cast<uint32_t>(seed));
+    randomize_hidden_information_impl(
+        observer_player,
+        [&rng](auto first, auto last) {
+          portable_mt19937_shuffle(first, last, rng);
+        },
+        kept);
   }
 
   void randomize_hidden_information_portable(uint8_t observer_player,
@@ -1006,7 +1030,7 @@ private:
   template <typename Shuffle>
   void randomize_hidden_information_impl(uint8_t observer_player,
                                          Shuffle shuffle,
-                                         bool keep_hidden_reservations = false) {
+                                         std::array<bool, 3> kept_reservations = {}) {
     if (observer_player >= NUM_PLAYERS)
       return;
     for (const auto &deck : decks) {
@@ -1030,7 +1054,7 @@ private:
 
       // Collect hidden reserved cards of this level
       for (int i = 0; i < 3; ++i) {
-        if (!keep_hidden_reservations && is_valid_card_id(p_opp.reserved[i]) &&
+        if (!kept_reservations[i] && is_valid_card_id(p_opp.reserved[i]) &&
             p_opp.reserved_is_hidden[i]) {
           if (get_card(p_opp.reserved[i]).level == l + 1) {
             pool.push_back_unchecked(p_opp.reserved[i]);

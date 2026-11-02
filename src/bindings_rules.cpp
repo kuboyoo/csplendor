@@ -182,6 +182,8 @@ void bind_rules(py::module_ &m) {
       .def_static(
           "information_state_rules_version",
           []() { return csplendor::information_state::RULES_VERSION; })
+      .def_readwrite("hidden_reserve_oracle_prob", &Game::hidden_reserve_oracle_prob)
+      .def("partial_oracle_clone", &Game::partial_oracle_clone, py::arg("observer_player"), py::arg("seed"))
       .def("shuffled_clone", &Game::shuffled_clone, py::arg("observer_player"),
            py::arg("seed"),
            "Create a clone with hidden information randomized from observer's "
