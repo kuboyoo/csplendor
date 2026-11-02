@@ -27,6 +27,9 @@ namespace csplendor {
 
 struct RootMateProbeConfig {
   bool enabled = true;
+  // Upper-bound experiment: probe also when the opponent holds a hidden
+  // reservation (the solver sees its true card).
+  bool oracle_hidden_reserve = false;
   int min_points = 9;
   // Probe below min_points when the attacker's previous root value reached
   // this; nullopt probes by points only.
@@ -216,7 +219,7 @@ inline RootMateProbeResult root_mate_probe(const Game &game, const RootMateProbe
                            previous_value && *previous_value >= *config.trigger_value;
   if (points < config.min_points && !result.value_triggered)
     return result;
-  if (opponent_holds_hidden_reserve(game, attacker)) {
+  if (!config.oracle_hidden_reserve && opponent_holds_hidden_reserve(game, attacker)) {
     result.stop_reason = "opponent_hidden_reserve";
     return result;
   }
