@@ -272,6 +272,7 @@ void bind_solvers(py::module_ &m) {
   py::class_<RootMateProbeConfig>(m, "RootMateProbeConfig")
       .def(py::init<>())
       .def_readwrite("enabled", &RootMateProbeConfig::enabled)
+      .def_readwrite("oracle_hidden_reserve", &RootMateProbeConfig::oracle_hidden_reserve)
       .def_readwrite("min_points", &RootMateProbeConfig::min_points)
       .def_readwrite("trigger_value", &RootMateProbeConfig::trigger_value)
       .def_readwrite("endgame_points", &RootMateProbeConfig::endgame_points)

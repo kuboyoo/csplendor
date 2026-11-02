@@ -747,3 +747,45 @@ def test_tree_reuse_compaction_keeps_the_search_and_releases_unreachable_nodes(v
             assert row["nodes_after_advance"] >= row["reused_visits"]
         else:
             assert row["nodes_after_advance"] == expected["nodes_after_advance"] == 1
+
+
+def _game_with_opponent_hidden_reserve():
+    game = cs.Game(seed=7)
+    deck_reserve = next(
+        action for action in game.legal_actions() if action.type == cs.ActionType.RESERVE_DECK
+    )
+    assert game.apply_trusted(deck_reserve, False)
+    assert any(game.board.players[0].reserved_is_hidden)
+    return game
+
+
+def test_oracle_deck_shuffle_keeps_the_opponents_hidden_reservation():
+    game = _game_with_opponent_hidden_reserve()
+    true_card = list(game.board.players[0].reserved)
+    level = cs.get_card(next(c for c in true_card if c >= 0)).level - 1
+    moved = kept = 0
+    for seed in range(40):
+        board = game.clone_light().board
+        board.randomize_decks_only(1, seed)
+        kept += list(board.players[0].reserved) == true_card
+        moved += list(board.decks[level]) != list(game.board.decks[level])
+    assert kept == 40 and moved > 30
+
+
+def test_normal_determinization_still_redraws_the_hidden_reservation():
+    game = _game_with_opponent_hidden_reserve()
+    true_card = list(game.board.players[0].reserved)
+    different = 0
+    for seed in range(40):
+        board = game.clone_light().board
+        board.randomize_hidden_information(1, seed)
+        different += list(board.players[0].reserved) != true_card
+    assert different > 30
+
+
+def test_oracle_flag_is_off_by_default_and_settable():
+    config = cs.V3SearchConfig()
+    assert config.oracle_hidden_reserve is False
+    config.oracle_hidden_reserve = True
+    probe = cs.RootMateProbeConfig()
+    assert probe.oracle_hidden_reserve is False

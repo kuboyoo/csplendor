@@ -88,6 +88,9 @@ struct Config {
   // Reshuffle the remaining (unknown to both players) deck order whenever the
   // side to move changes inside a simulation, as the Python search does.
   bool opponent_redeterminization = false;
+  // Upper-bound experiment: the search sees the true cards of the opponent's
+  // hidden reservations (only the decks are redrawn per simulation).
+  bool oracle_hidden_reserve = false;
   // The observer's own deck reservation creates no chance node either: the
   // drawn card stays inside the sampled world and the nodes below are shared,
   // so the opponent's statistics never learn which card was drawn
@@ -364,10 +367,10 @@ public:
                     std::vector<PendingLeaf> &pending, Stats &stats) {
     int produced = 0;
     while (produced < max_leaves && completed_ + pending_count_ < budget_) {
-      Game world = config_.determinization
-                       ? root_.shuffled_clone(static_cast<uint8_t>(observer_),
-                                              rng_())
-                       : root_.clone_light();
+      Game world = !config_.determinization ? root_.clone_light()
+                   : config_.oracle_hidden_reserve
+                       ? root_.decks_shuffled_clone(static_cast<uint8_t>(observer_), rng_())
+                       : root_.shuffled_clone(static_cast<uint8_t>(observer_), rng_());
       std::vector<int32_t> &path = path_;
       path.clear();
       path.push_back(root_index_);

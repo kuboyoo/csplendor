@@ -981,6 +981,18 @@ public:
         });
   }
 
+  // Upper-bound experiments: only the decks are redrawn, the opponent's hidden
+  // reservations keep their true cards.
+  void randomize_decks_only(uint8_t observer_player, uint64_t seed) {
+    LazyMt19937 rng(static_cast<uint32_t>(seed));
+    randomize_hidden_information_impl(
+        observer_player,
+        [&rng](auto first, auto last) {
+          portable_mt19937_shuffle(first, last, rng);
+        },
+        true);
+  }
+
   void randomize_hidden_information_portable(uint8_t observer_player,
                                               uint64_t seed) {
     PortableRng rng(seed);
@@ -993,7 +1005,8 @@ public:
 private:
   template <typename Shuffle>
   void randomize_hidden_information_impl(uint8_t observer_player,
-                                         Shuffle shuffle) {
+                                         Shuffle shuffle,
+                                         bool keep_hidden_reservations = false) {
     if (observer_player >= NUM_PLAYERS)
       return;
     for (const auto &deck : decks) {
@@ -1017,7 +1030,8 @@ private:
 
       // Collect hidden reserved cards of this level
       for (int i = 0; i < 3; ++i) {
-        if (is_valid_card_id(p_opp.reserved[i]) && p_opp.reserved_is_hidden[i]) {
+        if (!keep_hidden_reservations && is_valid_card_id(p_opp.reserved[i]) &&
+            p_opp.reserved_is_hidden[i]) {
           if (get_card(p_opp.reserved[i]).level == l + 1) {
             pool.push_back_unchecked(p_opp.reserved[i]);
             reserved_indices[reserved_count++] = i;

@@ -128,6 +128,7 @@ void bind_rules(py::module_ &m) {
       .def("observable_card_pool", &Board::observable_card_pool,
            py::arg("observer"), py::arg("level"),
            "Return the sorted observer-safe unknown pool for one tier")
+      .def("randomize_decks_only", &Board::randomize_decks_only, py::arg("observer_player"), py::arg("seed"))
       .def("randomize_hidden_information", &Board::randomize_hidden_information,
            py::arg("observer_player"), py::arg("seed"))
       .def("print_board", [](const Board &b) { cli::print_board(b); })

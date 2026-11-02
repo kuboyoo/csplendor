@@ -58,6 +58,13 @@ public:
     return g;
   }
 
+  Game decks_shuffled_clone(uint8_t observer_player, uint64_t seed) const {
+    CSPLENDOR_PERF_INC(DeterminizationCloneCalls);
+    Game g = copy_current_state();
+    g.board.randomize_decks_only(observer_player, seed);
+    return g;
+  }
+
   Game shuffled_clone_portable(uint8_t observer_player, uint64_t seed) const {
     CSPLENDOR_PERF_INC(DeterminizationCloneCalls);
     Game g = copy_current_state();
