@@ -752,7 +752,7 @@ def test_tree_reuse_compaction_keeps_the_search_and_releases_unreachable_nodes(v
 def _game_with_opponent_hidden_reserve():
     game = cs.Game(seed=7)
     deck_reserve = next(
-        action for action in game.legal_actions() if action.type == cs.ActionType.RESERVE_DECK
+        action for action in game.legal_actions if action.type == cs.ActionType.RESERVE_DECK
     )
     assert game.apply_trusted(deck_reserve, False)
     assert any(game.board.players[0].reserved_is_hidden)
