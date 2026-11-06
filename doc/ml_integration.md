@@ -35,6 +35,15 @@ V1に `waiting_noble`・`waiting_return`・`final_round` の独立した特徴�
 
 公開カード統計は `StateEncoder.encode_public_card_statistics(game, player, observer)` で別途取得できます。長さは `public_card_feature_size()` を参照し、モデル独自の入力と混同しないでください。
 
+学習の replay buffer は、特徴量（V5 では 316 個の float32、1,264 B）の代わりに局面のスナップショット
+（`Game.serialize_snapshot()`、約 200 B）を持てます。バッチを作るときに `StateEncoder.encode_snapshots(data, offsets, players,
+public_card_features=True, physical_seat_feature=True, pending_decision_features=True)` で、行 i の局面
+`data[offsets[i]:offsets[i+1]]` を手番 `players[i]` の視点（`player` と `observer` を同じにする）で符号化します。
+並びは `V3SearchSession` の葉と同じで、196 個の基本特徴量、公開カード統計、物理席（先手 -1・後手 +1）、
+保留中の判断（`waiting_return`・`waiting_noble`）の順です。結果は `(N, 次元)` の float32 配列で、変換中は GIL を
+解放します。公開カード統計を持たずに物理席だけ、物理席を持たずに保留中の判断だけ、という組み合わせ・負の offsets・
+範囲外の手番・壊れたスナップショットは `ValueError` です。
+
 ## 行動空間
 
 | エンコーダ | サイズ | 意味 |

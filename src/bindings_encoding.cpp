@@ -7,12 +7,15 @@
 #include "bindings_array.h"
 #include "encoding_schema.h"
 #include "game.h"
+#include "game_snapshot.h"
 #include "state_encoder.h"
 #include "types.h"
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <pybind11/numpy.h>
 #include <pybind11/stl.h>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -119,7 +122,53 @@ void bind_encoding(py::module_ &m) {
           py::arg("game"), py::arg("player"), py::arg("observer"),
           "Encode observer-safe posterior statistics for future card reveals")
       .def_static("public_card_feature_size",
-                  []() { return PUBLIC_CARD_FEATURE_SIZE; });
+                  []() { return PUBLIC_CARD_FEATURE_SIZE; })
+      .def_static(
+          "encode_snapshots",
+          [](py::array_t<uint8_t, py::array::c_style | py::array::forcecast> data,
+             py::array_t<int64_t, py::array::c_style | py::array::forcecast> offsets,
+             py::array_t<int8_t, py::array::c_style | py::array::forcecast> players,
+             bool public_card_features, bool physical_seat_feature,
+             bool pending_decision_features) {
+            if (physical_seat_feature && !public_card_features)
+              throw std::invalid_argument("the physical seat extends the public card features");
+            if (pending_decision_features && !physical_seat_feature)
+              throw std::invalid_argument("the pending decisions extend the physical seat");
+            const ModelInputLayout layout{public_card_features, physical_seat_feature,
+                                          pending_decision_features};
+            const py::ssize_t rows = players.size();
+            if (data.ndim() != 1 || offsets.ndim() != 1 || players.ndim() != 1 ||
+                offsets.size() != rows + 1)
+              throw std::invalid_argument("expected 1-D data, players and N + 1 offsets");
+            const int64_t *offset = offsets.data();
+            const int8_t *player = players.data();
+            if (offset[0] != 0 || offset[rows] != data.size())
+              throw std::invalid_argument("offsets must start at 0 and end at the data size");
+            for (py::ssize_t row = 0; row < rows; ++row) {
+              if (offset[row + 1] < offset[row])
+                throw std::invalid_argument("offsets must not decrease");
+              if (player[row] != 0 && player[row] != 1)
+                throw std::invalid_argument("players must be 0 or 1");
+            }
+            const py::ssize_t dim = static_cast<py::ssize_t>(layout.size());
+            py::array_t<float> result({rows, dim});
+            const char *bytes = reinterpret_cast<const char *>(data.data());
+            float *out = result.mutable_data();
+            {
+              py::gil_scoped_release release;
+              for (py::ssize_t row = 0; row < rows; ++row) {
+                const Game game = snapshot::deserialize(std::string_view(
+                    bytes + offset[row], static_cast<size_t>(offset[row + 1] - offset[row])));
+                StateEncoder::write_model_input(game, player[row], layout, out + row * dim);
+              }
+            }
+            return result;
+          },
+          py::arg("data"), py::arg("offsets"), py::arg("players"),
+          py::arg("public_card_features") = true, py::arg("physical_seat_feature") = true,
+          py::arg("pending_decision_features") = true,
+          "Encode game snapshots data[offsets[i]:offsets[i+1]] from players[i] "
+          "in the V3 search leaf layout; float32 (N, dim). Releases the GIL.");
 
   // ActionEncoderCpp bindings (native C++ implementation)
   py::class_<ActionEncoderCpp>(m, "ActionEncoderCpp")

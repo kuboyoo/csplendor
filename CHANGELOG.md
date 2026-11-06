@@ -79,6 +79,20 @@ move-assignment), VISIT_NOBLE depth labels in root split/frontier/proof DAG
 poisoning NativeMateSearchSession, and caps mate transposition tables at
 DEFAULT_MAX_MEMO_STATES (2M) by default.
 
+## 未出荷：探索木の辺を 16 バイトにし、スナップショットからまとめて符号化する（2026-11-07）
+
+- V3 探索の辺（`Edge`）を 20 バイトから 16 バイトにした。決定節点だけが使うノイズ前の事前確率と、chance 節点だけが
+  使う列挙値を同じ 4 バイトに重ねる。探索結果と `root_clean_priors()` はビット単位で同じ。
+- `StateEncoder.encode_snapshots(data, offsets, players, ...)` を足した。スナップショットの列を `V3SearchSession` の葉と
+  同じ並びの特徴量にまとめて符号化する（GIL を解放）。学習の replay buffer が特徴量ではなくスナップショットを持てる。
+  V3 探索の葉の符号化も同じ関数（`StateEncoder::append_model_input`）を通る。
+
+English: V3 search edges shrink from 20 to 16 bytes (the decision-only clean
+prior and the chance-only enumerated value share one slot; results are
+bit-identical). New `StateEncoder.encode_snapshots` batch-encodes game
+snapshots in the V3 leaf layout, so a replay buffer can keep snapshots
+instead of features.
+
 ## 未出荷：V3 探索の木の再利用で未到達の部分木を解放する（2026-10-31）
 
 - `V3SearchSession.advance_game()`（`GameSearch::try_advance`）が再利用に成功したとき、新しい root から辿れる節点だけを

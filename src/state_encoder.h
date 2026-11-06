@@ -6,6 +6,7 @@
 #include "encoding_schema.h"
 #include "game.h"
 #include "noble_data.h"
+#include <algorithm>
 #include <array>
 #include <cstdint>
 
@@ -39,8 +40,43 @@ static_assert(card_costs_fit_packed_sum(),
               "packed_positive_sum assumes per-colour card costs below 16");
 } // namespace state_encoder_detail
 
+// Optional extensions of the 196 canonical features in a network input.
+struct ModelInputLayout {
+  bool public_card_features = false;      // PUBLIC_CARD_FEATURE_SIZE statistics
+  bool physical_seat_feature = false;     // -1 first seat, +1 second seat
+  bool pending_decision_features = false; // waiting_return, waiting_noble
+  size_t size() const {
+    return TOTAL_FEATURES + (public_card_features ? PUBLIC_CARD_FEATURE_SIZE : 0) +
+           (physical_seat_feature ? 1 : 0) + (pending_decision_features ? 2 : 0);
+  }
+};
+
 class StateEncoder {
 public:
+  /**
+   * Network input of `player`, who is also the observer: the canonical
+   * features, then the extensions of `layout` in its field order. Writes
+   * layout.size() floats to `out`. The V3 search leaves and
+   * encode_snapshots share it.
+   */
+  static void write_model_input(const Game &game, int player,
+                                const ModelInputLayout &layout, float *out) {
+    const auto base =
+        encode_canonical(game, player, static_cast<int8_t>(player));
+    out = std::copy(base.begin(), base.end(), out);
+    if (layout.public_card_features) {
+      const auto extra = encode_public_card_statistics(
+          game, player, static_cast<uint8_t>(player));
+      out = std::copy(extra.begin(), extra.end(), out);
+    }
+    if (layout.physical_seat_feature)
+      *out++ = static_cast<float>(2 * player - 1);
+    if (layout.pending_decision_features) {
+      *out++ = game.board.waiting_return ? 1.0f : 0.0f;
+      *out++ = game.board.waiting_noble ? 1.0f : 0.0f;
+    }
+  }
+
   using Schema = csplendor::encoding::StateFeatureV1;
 
   static constexpr uint32_t schema_version() noexcept {
