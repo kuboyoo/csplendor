@@ -127,9 +127,9 @@ struct Config {
   int num_threads = 1;
 
   int state_dim() const {
-    return TOTAL_FEATURES +
-           (public_card_features ? PUBLIC_CARD_FEATURE_SIZE : 0) +
-           (physical_seat_feature ? 1 : 0) + (pending_decision_features ? 2 : 0);
+    return static_cast<int>(
+        ModelInputLayout{public_card_features, physical_seat_feature, pending_decision_features}
+            .size());
   }
 };
 
@@ -182,10 +182,13 @@ enum class NodeKind : uint8_t { Decision = 0, Chance = 1, Terminal = 2 };
 
 struct Edge {
   int32_t key = -1; // V5 action id, or revealed card id below a chance node
-  float prior = 0.0f;
-  float clean_prior = 0.0f; // prior before root noise (root edges only)
   int32_t child = -1;
-  float chance_value = 0.0f; // enumerated reveal value, chance actor's view
+  float prior = 0.0f;
+  // Each edge of a node uses one of them, by the node's kind.
+  union {
+    float clean_prior = 0.0f; // decision node: prior before root noise
+    float chance_value;       // chance node: enumerated reveal value, chance actor's view
+  };
 };
 
 struct Node {
@@ -847,26 +850,20 @@ private:
   }
 
   void encode_leaf(const Game &world, Batch &batch) const {
-    const int player = world.current_player();
-    const auto base = StateEncoder::encode_canonical(world, player,
-                                                     static_cast<int8_t>(player));
-    batch.features.insert(batch.features.end(), base.begin(), base.end());
-    if (config_.public_card_features) {
-      const auto extra = StateEncoder::encode_public_card_statistics(
-          world, player, static_cast<uint8_t>(player));
-      batch.features.insert(batch.features.end(), extra.begin(), extra.end());
-    }
-    if (config_.physical_seat_feature)
-      batch.features.push_back(static_cast<float>(2 * player - 1));
-    if (config_.pending_decision_features) {
-      batch.features.push_back(world.board.waiting_return ? 1.0f : 0.0f);
-      batch.features.push_back(world.board.waiting_noble ? 1.0f : 0.0f);
-    }
+    const size_t start = batch.features.size();
+    batch.features.resize(start + static_cast<size_t>(config_.state_dim()));
+    StateEncoder::write_model_input(world, world.current_player(), model_input_layout(),
+                                    batch.features.data() + start);
     auto sink = [&batch](int id, const Action &) {
       batch.legal_ids.push_back(id);
     };
     ActionEncoderV5::for_each_legal_with_id(world, sink);
     batch.offsets.push_back(static_cast<int32_t>(batch.legal_ids.size()));
+  }
+
+  ModelInputLayout model_input_layout() const {
+    return {config_.public_card_features, config_.physical_seat_feature,
+            config_.pending_decision_features};
   }
 
   void reshuffle_decks(Game &world) {

@@ -190,6 +190,13 @@ Both calls release the GIL.
 
 ## State feature arrays
 
+- `StateEncoder.encode_snapshots(data, offsets, players, public_card_features=True, physical_seat_feature=True,
+  pending_decision_features=True) -> numpy.ndarray`: Encodes row i, the snapshot `data[offsets[i]:offsets[i+1]]`
+  (`uint8`, `offsets` `int64` of length N+1, `players` `int8` of length N), from the side `players[i]`
+  (player and observer alike), in the layout of the `V3SearchSession` leaves. Returns `float32` `(N, dim)`
+  and releases the GIL. Raises `ValueError` for an unsupported flag combination, bad offsets or players, or
+  a snapshot that `Game.deserialize_snapshot` would reject.
+
 - `StateEncoder.encode(game, observer=-1) -> list[float]`: The existing list API is unchanged.
 - `StateEncoder.encode_numpy(game, observer=-1) -> numpy.ndarray`: Returns an independent,
   owning, writable, C-contiguous `float32` array of shape `(196,)`.

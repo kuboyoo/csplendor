@@ -10,6 +10,10 @@
 #include <stdexcept>
 #include <vector>
 
+// Edges are 90% of a tree's bytes: the decision-only clean prior and the
+// chance-only enumerated value share one slot.
+static_assert(sizeof(csplendor::v3search::Edge) == 16, "V3 search edges are 16 bytes");
+
 namespace {
 
 using csplendor::v3search::Batch;
