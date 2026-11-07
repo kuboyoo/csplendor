@@ -429,8 +429,48 @@ inline bool last_move_cut_applies(const Game &game, int attacker, int depth) {
          !game.board.final_round;
 }
 
-// Keeps the attacker's actions whose turn ends at WIN_POINTS or more (attacker
-// nodes never carry the defender's oracle actions).
+// Whether moves other than a purchase may end the turn at WIN_POINTS: a
+// pending noble choice or return, or a noble the mover already qualifies for.
+inline bool last_move_needs_all_actions(const Board &board) {
+  const PlayerState &player = board.players[board.current_player];
+  return board.waiting_noble || board.waiting_return ||
+         static_cast<int>(player.points) +
+                 max_noble_points(board, player.bonuses) >=
+             WIN_POINTS;
+}
+
+// The winning last moves (doc/mate_usage.md「最終手の直接生成」): the legal
+// codes whose turn ends at WIN_POINTS or more, passed to `sink(code)`. They
+// are generated directly as the purchases of the cards that reach WIN_POINTS,
+// with the move generator's payment patterns, unless other moves may win too.
+template <typename Sink>
+void for_each_winning_last_move(const Game &game, Sink sink) {
+  const Board &board = game.board;
+  const PlayerState &player = board.players[board.current_player];
+  if (last_move_needs_all_actions(board)) {
+    for (uint64_t code : game.legal_action_codes())
+      if (points_at_turn_end(board, player, Action::unpack(code)) >= WIN_POINTS)
+        sink(code);
+    return;
+  }
+  auto emit = [&](const Action &action) {
+    sink(action.pack());
+    return true;
+  };
+  const auto purchases = [&](int card_id, bool from_reserved) {
+    if (score_after_purchase(board, player, card_id) >= WIN_POINTS)
+      MoveGenerator::emit_card_purchases(board, card_id, from_reserved,
+                                         game.simple_payment_mode, emit);
+  };
+  for (int level = 0; level < 3; ++level)
+    for (int slot = 0; slot < Board::CARDS_PER_LEVEL; ++slot)
+      purchases(board.visible[level][slot], false);
+  for (int slot = 0; slot < Board::MAX_RESERVED; ++slot)
+    purchases(player.reserved[slot], true);
+}
+
+// Keeps the attacker's actions whose turn ends at WIN_POINTS or more (the
+// visible-only search, whose actions are grouped representatives).
 template <typename OrderedAction>
 void keep_winning_last_moves(const Board &board,
                              std::vector<OrderedAction> &actions) {

@@ -38,7 +38,6 @@ using csplendor::solver_internal::SearchLimitExceeded;
 using csplendor::solver_internal::StateKeyCore;
 using csplendor::solver_internal::TerminalResult;
 using csplendor::solver_internal::can_win_this_turn;
-using csplendor::solver_internal::keep_winning_last_moves;
 using csplendor::solver_internal::last_move_cut_applies;
 using csplendor::solver_internal::max_noble_points;
 using csplendor::solver_internal::score_after_purchase;
@@ -752,14 +751,14 @@ private:
 #ifdef CSPLENDOR_REUSE_SEARCH_SCRATCH
     SearchScratch::Lease scratch_lease(scratch_);
     auto &actions = scratch_lease.get().actions;
-    fill_ordered_actions(game, actions, exact_refinement);
 #else
-    std::vector<OrderedAction> actions =
-        exact_refinement ? proof_ordered_actions(game) : ordered_actions(game);
+    std::vector<OrderedAction> actions;
 #endif
-    CSPLENDOR_PERF_INC(SolverTemporaryVectorAllocations);
     if (last_move)
-      keep_winning_last_moves(game.board, actions);
+      fill_winning_last_moves(game, actions);
+    else
+      fill_ordered_actions(game, actions, exact_refinement);
+    CSPLENDOR_PERF_INC(SolverTemporaryVectorAllocations);
     filter_probe_actions(game.current_player() == attacker_, actions);
     apply_order_hints(state.board_hash(), game.current_player() == attacker_,
                       actions);
@@ -1668,6 +1667,19 @@ private:
     return ordinary_ordered_actions(game);
   }
 
+  // The attacker's last move outside the final round: only the moves that
+  // end the turn at 15 points, generated directly (doc/mate_usage.md
+  // 「最終手の直接生成」); the same set and order as filtering every move.
+  static void fill_winning_last_moves(const Game &game,
+                                      std::vector<OrderedAction> &actions) {
+    actions.clear();
+    csplendor::solver_internal::for_each_winning_last_move(
+        game, [&](uint64_t code) {
+          actions.push_back(ordered_action(Action::unpack(code), code));
+        });
+    std::sort(actions.begin(), actions.end());
+  }
+
   static std::vector<OrderedAction> ordinary_ordered_actions(const Game &game) {
     std::vector<OrderedAction> actions;
     ordinary_ordered_actions(game, actions);
@@ -2202,9 +2214,11 @@ private:
       return 0.0;
     }
     const bool attacker_node = game.current_player() == attacker_;
-    std::vector<OrderedAction> actions = proof_ordered_actions(game);
+    std::vector<OrderedAction> actions;
     if (last_move)
-      keep_winning_last_moves(game.board, actions);
+      fill_winning_last_moves(game, actions);
+    else
+      ordinary_ordered_actions(game, actions);
     filter_probe_actions(attacker_node, actions);
     apply_order_hints(key.state.board_hash(), attacker_node, actions);
     prefer_line_move(attacker_node, actions);

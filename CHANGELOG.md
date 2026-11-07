@@ -1,5 +1,23 @@
 # 変更履歴 / Changelog
 
+## 未出荷：詰み探索の最終手の直接生成（2026-11-07）
+
+- 最終手カットの節点（最終ラウンドでない局面で攻め側の手番、残り1手）で、全合法手を作ってから 15 点に届く手に絞るのを
+  やめ、15 点に届く購入（予約札・公開札）の全支払いパターンを合法手生成と同じ列挙（`MoveGenerator::emit_card_purchases`）
+  で直接作る（`for_each_winning_last_move`、`doc/mate_usage.md` の「最終手の直接生成」）。貴族選択待ち・返却待ちと、
+  購入以外の手でも 15 点に届く節点は従来どおり全手を作って絞る。作られる手の集合と順序は従来と同一で、判定・証明 DAG・
+  主手順・ノード数・`legal_moves`・golden digest は変わらない。適用先はめくれ検証の解決器（厳密・blank）と準詰み。
+- C++ 単体テスト（`tests/solver_components_unit.cpp`）で、ランダム局面 1,000 以上について直接生成と「全手を作って絞る」
+  結果が一致することを確かめる。
+- 計測（1 スレッド、置換表 200万件、47791b9 との比較）: BENCH の厳密探索は深さ4 が 2.07 → 1.73 秒（ノード数は同じ
+  150.9万）、深さ5 の 60 秒で訪問できたノードは 4,453万 → 5,597万（+26%）。ランダム終盤 360 + 1,164 ケースで判定・
+  ノード数・主手順が全て一致。
+
+English: generates the attacker's winning last moves directly (the purchases
+that reach 15 points, with the move generator's payment patterns) instead of
+generating every legal move and filtering. Same move set and order, so every
+result is unchanged; BENCH depth 4 runs in 1.73 s instead of 2.07 s.
+
 ## 未出荷：詰み探索の守り側の最終応手カット（2026-11-07）
 
 - 守り側の手番で攻め側の残りが1手の節点（最終ラウンドでなく、守り側に貴族選択・返却が残っていない）で、守り側がどう応じて

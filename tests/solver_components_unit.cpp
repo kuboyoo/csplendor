@@ -7,12 +7,14 @@
 #include "solver_search_scratch.h"
 #include "solver_tt_types.h"
 #include "solver_types.h"
+#include "solver_win_threshold.h"
 #include "visible_only_solver.h"
 
 #include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <limits>
+#include <random>
 #include <set>
 #include <stdexcept>
 #include <type_traits>
@@ -1001,6 +1003,57 @@ void test_proof_dag_builder_owns_limits() {
           "proof DAG release retained or lost owned state");
 }
 
+// doc/mate_usage.md「最終手の直接生成」: the winning last moves generated
+// directly are exactly the legal codes whose turn ends at WIN_POINTS or more.
+void test_winning_last_move_codes_match_filtered_legal_codes() {
+  using csplendor::solver_internal::for_each_winning_last_move;
+  using csplendor::solver_internal::points_at_turn_end;
+  using csplendor::solver_internal::WIN_POINTS;
+  std::mt19937_64 rng(2026);
+  size_t compared = 0, winning = 0, direct = 0;
+  const auto compare = [&](const Game &game) {
+    const Board &board = game.board;
+    const PlayerState &player = board.players[board.current_player];
+    std::vector<uint64_t> expected;
+    for (uint64_t code : game.legal_action_codes())
+      if (points_at_turn_end(board, player, Action::unpack(code)) >= WIN_POINTS)
+        expected.push_back(code);
+    std::vector<uint64_t> actual;
+    for_each_winning_last_move(game, [&](uint64_t code) { actual.push_back(code); });
+    std::sort(expected.begin(), expected.end());
+    std::sort(actual.begin(), actual.end());
+    require(actual == expected, "winning last moves differ from the filtered legal codes");
+    ++compared;
+    winning += !expected.empty();
+    direct += !csplendor::solver_internal::last_move_needs_all_actions(board);
+  };
+  for (uint64_t seed = 0; seed < 40; ++seed) {
+    Game game(seed);
+    for (int ply = 0; ply < 70 && !game.is_game_over(); ++ply) {
+      const std::vector<uint64_t> codes = game.legal_action_codes();
+      if (codes.empty())
+        break;
+      compare(game);
+      for (int points : {12, 13, 14}) {
+        Game probe = game.clone_light();
+        probe.board.players[probe.current_player()].points = static_cast<uint8_t>(points);
+        probe.board.invalidate_hash();
+        compare(probe);
+        probe.simple_payment_mode = true;
+        compare(probe);
+        // Every action wins once a noble is already within reach.
+        PlayerState &rich = probe.board.players[probe.current_player()];
+        rich.bonuses.fill(10);
+        rich.sync_packed_bonuses_and_noble_eligibility();
+        compare(probe);
+      }
+      game.apply_action_code_trusted(codes[rng() % codes.size()], false);
+    }
+  }
+  require(compared > 1000 && winning > 200 && direct > 500,
+          "winning last move differential covered too few positions");
+}
+
 } // namespace
 
 int main() {
@@ -1021,6 +1074,7 @@ int main() {
     test_incremental_reveal_search_state_random_differential();
     test_reveal_solver_sidecar_restores_on_node_limit();
     test_proof_dag_builder_owns_limits();
+    test_winning_last_move_codes_match_filtered_legal_codes();
   } catch (const std::exception &exc) {
     std::cerr << exc.what() << '\n';
     return 1;

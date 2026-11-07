@@ -207,6 +207,18 @@ public:
     return csplendor::rules::eligible_nobles(board, player_idx);
   }
 
+  // Every purchase of one card by the side to move (the same payment
+  // patterns as the legal actions), for callers that already know which
+  // cards matter (doc/mate_usage.md「最終手の直接生成」).
+  template <typename Sink>
+  static bool emit_card_purchases(const Board &board, int card_id,
+                                  bool from_reserved, bool simple_payment_mode,
+                                  Sink &sink) {
+    return emit_purchase_options(board.players[board.current_player],
+                                 static_cast<int8_t>(card_id), from_reserved,
+                                 simple_payment_mode, sink);
+  }
+
 private:
   friend class Game;
   friend class ActionEncoderCpp;
