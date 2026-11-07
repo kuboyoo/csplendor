@@ -228,11 +228,11 @@ malloc、flush は全節点の free）で、深さ5 の時間の約 2 割を占�
 C = `ceil(N / 0.7)` を超えず、`C >> k`（k ≥ 3）の列で倍々に伸びて C/8 から C へ跳ぶ（1024 スロットから。再ハッシュは
 旧配列と新配列が同時に生きるので、大きな表を写す再ハッシュを C/8 からの 1 回に限る）ため、N 件を再ハッシュなしで保持でき、
 N = 200万で 2,857,143 スロット = 183 MB（1 件あたり 91 バイト）。表の型は上限なし（N = 0）なら 2 の冪で倍々に伸びるが、探索は常に正の N を渡す（「探索のメモリ予算」）。
-探索の最初にノード上限から表を予約する処理（`reserve_active_memo`）はやめた（開番地法の成長は安く、並列分割の枝ごとに
+探索の最初にノード上限から表を予約する処理（`reserve_active_memo`）はやめた（開番地法の成長は安く、小さな探索に
 183 MB を先に割り当てないため）。
 削除（session の `trim_exact_cache` と制限つき探索後の反証の除去）は後方シフト（backward-shift）で、墓標を使わない。
 flush は全スロットの初期化 1 回。表の中身・探索の結果（判定・証明 DAG・主手順・ノード数・`memoized_states`）は変わらず、
-`memo_hits` の意味も同じ。並列分割の枝ごとの表も同じ型なので、合計は N × スレッド数 × 91 バイト以下。
+`memo_hits` の意味も同じ。並列の探索（「並列の詰み探索」）は同じスロット・同じはしごの共有表を 1 組だけ持つ。
 
 計測（2026-11-07、1 スレッド、置換表 200万件、69bd2fb との比較。共有マシンの負荷を避けるためノード数で予算を揃えた
 CPU 時間）: BENCH 厳密探索の深さ4（148.5万ノード）が 1.42 → 1.38 秒、深さ5 の 3,000万ノードが 28.98 → 25.44 秒（−12%）。
@@ -495,7 +495,7 @@ Python に依存しません。`root_mate_probe` の終盤の厳密探索もこ�
 使う値と同じです。表にある局面では手をその順で試し（表にない手は従来の順序で後ろに続く）、
 ない局面は従来どおりです。`solve_reveal_verified_mate_cpp`、`search_reveal_verified_mate_depths`、
 `search_reveal_verified_mate_anytime`、`NativeMateSearchSession.search` の `order_hints=` に渡し、
-並列分割の各枝にも同じ表が渡ります。統計には `hint_lookups` / `hint_hits` が加わります。
+並列の探索でも全スレッドが同じ表を読みます。統計には `hint_lookups` / `hint_hits` が加わります。
 
 ```python
 import numpy as np
@@ -543,7 +543,7 @@ result = cs.search_reveal_verified_mate_depths(game, attacker=1, min_depth=1, ma
   制限つきの探索の後に全手の探索をしても、詰みを見逃しません。
 - **置換表の上限（`max_memo_states=N`）**: 表が N 件に達すると空にして詰め直します（結果は厳密のまま、
   直近の局面を再探索する分だけ遅くなる）。表は開番地法（上の「置換表の開番地法化」）で 1 件あたり 91 バイト
-  （64 バイトのスロット、負荷率 0.7）、6 スレッドの並列分割では枝ごとに表を持ちます。既定の 0 は
+  （64 バイトのスロット、負荷率 0.7）、並列の探索でも全スレッドで 1 組です。既定の 0 は
   「自動」で、探索の開始時に端末の空きメモリから N を決めます（次の「探索のメモリ予算」）。正の N を
   渡すとそのまま使います（無制限はありません。大きな N を渡します）。
   `NativeMateSearchSession` が持ち越す表（`max_cache_states`）は、探索の前に N の半分以下に
@@ -558,26 +558,27 @@ result = cs.search_reveal_verified_mate_depths(game, attacker=1, min_depth=1, ma
    cgroup v2 の自分と祖先の `memory.max − memory.current`（上限のあるもの）の最小。macOS は `host_statistics64` の
    空き・非活性・パージ可能なページ。Windows は `GlobalMemoryStatusEx` の `ullAvailPhys`。WASM（`__EMSCRIPTEN__`）は
    常に 0（ブラウザ側でしか分からない）。
-2. **予算**（`solver_memory_budget_bytes(available_bytes, jobs)`）: 空きメモリの 1/4 を 64 MiB〜2 GiB に挟み、
-   並列のジョブ数で割る。共有マシンで学習が並走しても足りるよう保守的にしている。空きメモリが 0（取れない）なら
-   既定の 512,000,000 バイト（200万件。2026-11-07 までの固定の既定 `DEFAULT_MAX_MEMO_STATES` と同じ）をジョブ数で割る。
+2. **予算**（`solver_memory_budget_bytes(available_bytes)`）: 空きメモリの 1/4 を 64 MiB〜2 GiB に挟む。共有マシンで
+   学習が並走しても足りるよう保守的にしている。空きメモリが 0（取れない）なら既定の 512,000,000 バイト（200万件。
+   2026-11-07 までの固定の既定 `DEFAULT_MAX_MEMO_STATES` と同じ）。並列の探索は表を 1 組だけ共有するので、予算を
+   スレッド数で割らない（2026-11-08 まではジョブ数で割っていた。引数 `jobs` は削除）。
    WASM の既定は 256 MiB（100万件。線形メモリの上限 2 GiB（`MAXIMUM_MEMORY` の既定）に網・探索木と並んで収まる）。
-3. **件数**（`resolve_max_memo_states(max_memo_states, memory_budget_bytes, jobs)`）: 正の `max_memo_states` は
-   そのまま返す。0 なら予算（`memory_budget_bytes` が正ならそれをジョブ数で割った値、0 なら 2 の予算）を
+3. **件数**（`resolve_max_memo_states(max_memo_states, memory_budget_bytes)`）: 正の `max_memo_states` は
+   そのまま返す。0 なら予算（`memory_budget_bytes` が正ならその値、0 なら 2 の予算）を
    1 件あたり 256 バイトで割った件数。256 バイトは、厳密と blank の 2 表の定常（2 × 91）、最後の再ハッシュの一時領域
    （C/8）、2 つの移植の表（各 `bit_floor(N)` スロット × 16 バイトと倍化の一時領域）の合計の上界。準詰みの
    `prob_memo_` と visible-only の 3 表も同じ件数で flush する。
-4. **df-pn**（`algorithm="dfpn"`、`resolve_search_table_caps(max_memo_states, dfpn_table_bytes, algorithm, memory_budget_bytes, jobs)`）:
-   `dfpn_table_bytes=0` なら予算の 1/4 を df-pn 表のバイト数にし、`max_memo_states=0` の件数は残りの 3/4 から決める
-   （どちらも予算は 2 と同じくジョブ数で割った値なので、並列の枝の合計も予算に収まる）。正の値はそのまま使う。
+4. **df-pn**（`algorithm="dfpn"`、`resolve_search_table_caps(max_memo_states, dfpn_table_bytes, algorithm, memory_budget_bytes)`）:
+   `dfpn_table_bytes=0` なら予算の 1/4 を df-pn 表のバイト数にし、`max_memo_states=0` の件数は残りの 3/4 から決める。
+   正の値はそのまま使う。
    DFS では df-pn 表は 0 バイトで、件数は 3 と同じ。
 
-| 呼び出し | 決める場所 | jobs |
-|---|---|---|
-| `search_reveal_verified_mate_depths` / `search_reveal_verified_mate_anytime` | 関数の開始時（全深さ・全枝で同じ N と df-pn 表のバイト数） | 引数 `jobs` |
-| `MateSearchSession.search` / `search_anytime` | 呼び出しの開始時 | `MateSearchSession(jobs=...)` |
-| `near_mate_search` / `search_near_mate`、`exact_mate_search`、`root_mate_probe` | 関数の開始時（設定の `memory_budget_bytes`） | 1 |
-| `solve_reveal_verified_mate_cpp` などの1回の探索、`NativeMateSearchSession.search`、`solve_visible_only_winner_cpp` | 探索の開始時 | 1（`jobs>1` の C++ 並列探索も 1 つの共有表なので 1。次の「並列の詰み探索」） |
+| 呼び出し | 決める場所 |
+|---|---|
+| `search_reveal_verified_mate_depths` / `search_reveal_verified_mate_anytime` | 関数の開始時（全深さで同じ N と df-pn 表のバイト数） |
+| `MateSearchSession.search` / `search_anytime` | 呼び出しの開始時 |
+| `near_mate_search` / `search_near_mate`、`exact_mate_search`、`root_mate_probe` | 関数の開始時（設定の `memory_budget_bytes`） |
+| `solve_reveal_verified_mate_cpp` などの1回の探索、`NativeMateSearchSession.search`、`solve_visible_only_winner_cpp` | 探索の開始時 |
 
 WASM では、JS 側が `navigator.deviceMemory`（GB、丸めた値）などから予算を決め、`RootMateProbeConfig`・
 `NearMateSearchConfig`・`ExactMateSearchConfig` の `memory_budget_bytes` に渡します（0 は上の WASM の既定）。
@@ -604,7 +605,11 @@ WASM では、JS 側が `navigator.deviceMemory`（GB、丸めた値）などか
 スレッド数の決め方、ヘッダだけ）、`src/solver_flat_table.h`（共有表 `ConcurrentFlatMemoTable` と伸長
 `ConcurrentTableGrowth`）、`src/reveal_verified_solver.cpp`（`search_root_parallel` と `split_*`）。
 
-- **入口**: `solve_reveal_verified_mate_cpp(..., jobs=N)`（C++ は `RevealVerifiedSolver::set_jobs`）。`jobs=1`（既定）は
+- **入口**: `solve_reveal_verified_mate_cpp(..., jobs=N)`（C++ は `RevealVerifiedSolver::set_jobs`）、深さ掃引
+  `search_reveal_verified_mate_depths` / `search_reveal_verified_mate_anytime` と `MateSearchSession` の `jobs`（各深さの
+  探索に渡す。セッションの表を持ち越す warm start は 1 スレッド）、`ExactMateSearchConfig.jobs`・`RootMateProbeConfig.jobs`
+  （新しい探索に渡す）。どれも既定は `jobs=1` で、決定的な結果のためにそのままにする。対局で使う側（dlsplendor、
+  bgasplendor、splendorgui）が `jobs=0`（自動）などを明示して渡す。`jobs=1` は
   これまでの 1 スレッドの探索そのもので、判定・主手順・ノード数・統計・`memoized_states` がビット単位で同じ。
   `jobs=0` は `default_mate_jobs()`: 環境変数 `CSPLENDOR_MATE_JOBS` が正の数ならその値、なければ
   clamp(物理コア − 2, 1, 8)（`physical_core_count()`。SMT の論理コアは数えない。Linux は CPU affinity の中の
@@ -669,7 +674,8 @@ WASM では、JS 側が `navigator.deviceMemory`（GB、丸めた値）などか
   8 スレッド 7〜10 ms。深さ4（148.5 万ノード）は 1 スレッド 1.34 秒、2 スレッド 0.78 秒、4 スレッド 0.46〜0.48 秒、
   8 スレッド 0.32〜0.35 秒（4 倍前後、220 万ノード）。ランダム終盤 3,012 ケース（深さ 1〜3、時間・ノード上限なし）は
   `jobs=1` が既存とビット単位で一致、`jobs=2/4/8/12` が判定で全件一致。
-  Python の深さ掃引（`search_reveal_verified_mate_depths(jobs=...)`）はまだ旧来の Python の root 分割を使う。
+  2026-11-08 までの Python の root 分割（`ThreadPoolExecutor` で root の手 × めくれを別々の表で解き、正証明モードでは
+  blank 探索を 1 ワーカーで併走する。`parallel_min_branches`）は削除した。
 
 ### 準詰み（確率的な詰み判定、2026-10-02 追加）
 
@@ -734,13 +740,13 @@ python scripts/generate_mate_puzzles.py \
   --min-depth 5 \
   --max-depth 7 \
   --no-strategy-dag \
-  --mate-jobs 16 \
+  --mate-jobs 8 \
   --uniqueness-jobs 16 \
   --time-limit 30
 ```
 
 進捗は attempt 開始と詰み探索開始時に表示されます。`--min-losing-alternatives` を1以上にした場合は誤答側詰み探索も表示されます。棄却時は `stage=rejected`、棄却理由、完全な SPN `position` を表示します。対局中の定期表示間隔は `--progress-seconds` で変更できます。
 
-高コストなめくれ検証の前に、点差、合法手数、両者の楽観的な近未来得点、visible-only 探索で候補を絞ります。既定では両者が3手以内に15点へ到達しうる合法手12個以上の局面を対象とし、depth 3以上の詰みだけを採用します。詰み証明後は全合法初手を固定して再検証し、別解がない問題だけを保存します。条件は `--threat-turns`、`--min-legal-actions`、`--min-optimistic-score`、`--min-depth`、`--visible-prefilter-time-limit`、`--uniqueness-time-limit` で調整できます。`--uniqueness-max-depth 8` のように指定すると、各初手を問題の詰み深さから指定深さまで反復深化し、より長い別解も除外します。各初手では最初の `--uniqueness-positive-time-limit` 秒（既定2秒）で別解の正証明を高速に探し、残りの累積予算で全合法手・具体的めくれの不詰みを厳密検証します。各初手の累積予算は `--uniqueness-node-limit` と `--uniqueness-time-limit`、候補局面・誤答側の詰み探索は `--mate-jobs 16`、初手間のCPU並列数は `--uniqueness-jobs 16`（いずれも `0` は論理CPU数）で指定します。誤答時に相手の詰みまで成立することは既定の採用条件ではありません。必要なら `--min-losing-alternatives 1` 以上を指定します。
+高コストなめくれ検証の前に、点差、合法手数、両者の楽観的な近未来得点、visible-only 探索で候補を絞ります。既定では両者が3手以内に15点へ到達しうる合法手12個以上の局面を対象とし、depth 3以上の詰みだけを採用します。詰み証明後は全合法初手を固定して再検証し、別解がない問題だけを保存します。条件は `--threat-turns`、`--min-legal-actions`、`--min-optimistic-score`、`--min-depth`、`--visible-prefilter-time-limit`、`--uniqueness-time-limit` で調整できます。`--uniqueness-max-depth 8` のように指定すると、各初手を問題の詰み深さから指定深さまで反復深化し、より長い別解も除外します。各初手では最初の `--uniqueness-positive-time-limit` 秒（既定2秒）で別解の正証明を高速に探し、残りの累積予算で全合法手・具体的めくれの不詰みを厳密検証します。各初手の累積予算は `--uniqueness-node-limit` と `--uniqueness-time-limit`、候補局面・誤答側の詰み探索のスレッド数は `--mate-jobs 8`（`0` は `default_mate_jobs()`）、初手間のCPU並列数は `--uniqueness-jobs 16`（`0` は論理CPU数）で指定します。誤答時に相手の詰みまで成立することは既定の採用条件ではありません。必要なら `--min-losing-alternatives 1` 以上を指定します。
 
 生成物は `depth_XX/<問題ID>/` に分類されます。`XX` はソルバー上の攻撃側手数深さです。各問題には局面情報 `problem.json`、検証済み代表手順 `answer.kifu`、代表手順とDAG状態を収める `strategy.json` が含まれます。DAG作成を有効にした場合は、攻撃側の証明手、守備側の全合法応手、公開カード補充と山札予約を含む全めくれ結果を保持し、同一局面をノードIDで共有します。既定ではDAG作成を試みますが、ノード・辺上限を超えても詰み判定と代表手順が検証済みなら保存します。完全DAGを必須にする場合は `--require-complete-dag`、DAG作成を省いて生成を優先する場合は `--no-strategy-dag` を指定します。DAGの有無と省略理由は `problem.json` の `strategy_dag` および `quality` に保存されます。`strategy.json` は既定で compact DAG を保存し、めくれカード集合は reveal group の bitset として厳密に残します。従来形式が必要な場合は生成時に `--strategy-dag-format v1`、比較用に両方残す場合は `--strategy-dag-format both` を指定します。めくれ候補は現在の山札だけから取り、同じレベル・点数・ボーナス・コストのカードは同型として代表だけを検証します。公開カード補充は一度 blank として進めた局面から反例になりやすい reveal を推定し、危険度の高い候補から検証します。非公開カードを即購入・即予約する oracle 手は合法手順DAGには出力されません。再現性を保つため、生成物内の SPN は伏せ予約カードを `?C<id>` 形式で保存します。通常の公開用 SPN における `?L<level>` と異なり、伏せ予約であることと実カードIDの両方を保持します。購入済みカードは `bought:[<id>,...]`、取得済み貴族は player section の `nobles:[<id>,...]` に保存します。

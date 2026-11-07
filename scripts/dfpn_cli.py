@@ -117,8 +117,8 @@ def main(
         type=int,
         default=1,
         help=(
-            "parallel workers for exact reveal root branches; "
-            "0 uses CPU count"
+            "threads of every native depth-first search (depth >= 3); "
+            "0 uses default_mate_jobs()"
         ),
     )
     parser.add_argument("--allow-deck-reserve", action="store_true")

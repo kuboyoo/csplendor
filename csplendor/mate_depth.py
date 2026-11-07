@@ -2,20 +2,18 @@
 
 from __future__ import annotations
 
-import os
 import time
-from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 
 from ._csplendor import (
     Game,
     MateSearchCancellationToken,
+    default_mate_jobs,
     get_card,
     get_noble,
     resolve_max_memo_states,
     resolve_search_table_caps,
     solve_reveal_verified_mate_cpp,
-    solve_reveal_verified_root_split_cpp,
 )
 from .api.usi_kifu import action_to_usi
 
@@ -25,55 +23,9 @@ _WIN_SCORE = 15
 _NO_REQUIRED_ACTION = (1 << 64) - 1
 
 
-def _effective_jobs(jobs: int) -> int:
-    if jobs == 0:
-        return max(1, os.cpu_count() or 1)
-    return max(1, jobs)
-
-
-def _empty_native_stats() -> dict[str, int | float]:
-    return {
-        "nodes": 0,
-        "hint_lookups": 0,
-        "hint_hits": 0,
-        "hint_restricted_nodes": 0,
-        "line_order_hits": 0,
-        "probe_dropped_actions": 0,
-        "memo_flushes": 0,
-        "memo_hits": 0,
-        "persistent_memo_hits": 0,
-        "iterative_order_hits": 0,
-        "terminal_nodes": 0,
-        "legal_moves": 0,
-        "reveal_branches": 0,
-        "final_round_reveal_collapses": 0,
-        "final_round_score_prunes": 0,
-        "final_round_direct_resolutions": 0,
-        "oracle_purchase_actions": 0,
-        "oracle_reserve_actions": 0,
-        "deck_reserve_candidates": 0,
-        "deck_reserve_branches": 0,
-        "blank_cut_attempts": 0,
-        "blank_cut_proofs": 0,
-        "last_reply_cut_attempts": 0,
-        "last_reply_cut_proofs": 0,
-        "reach_cut_refutations": 0,
-        "elapsed_ms": 0.0,
-    }
-
-
-def _unknown_native(depth: int, reason: str) -> dict[str, Any]:
-    return {
-        "proven": False,
-        "attacker": -1,
-        "depth": depth,
-        "reason": reason,
-        "unknown_reason": reason,
-        "memoized_states": 0,
-        "stats": _empty_native_stats(),
-        "line": [],
-        "proof_dag": {},
-    }
+def _resolved_jobs(jobs: int) -> int:
+    """Threads of the native searches: 0 is ``default_mate_jobs()``."""
+    return default_mate_jobs() if jobs == 0 else jobs
 
 
 def _native_status(raw: dict[str, Any]) -> str:
@@ -82,103 +34,6 @@ def _native_status(raw: dict[str, Any]) -> str:
     if raw["unknown_reason"] is not None:
         return "unknown"
     return "no_mate"
-
-
-def _solve_parallel_branch(
-    edge: dict[str, Any],
-    *,
-    attacker: int,
-    max_nodes: int,
-    deadline: Optional[float],
-    preferred_attacker_actions: list[int],
-    cancellation_token: MateSearchCancellationToken,
-    exhaustive_attacker_actions: bool,
-    order_hints: Any = None,
-    line_transplant: bool = True,
-    no_take_probe: bool = False,
-    max_memo_states: int = 0,
-    algorithm: str = "dfs",
-    dfpn_table_bytes: int = 0,
-) -> dict[str, Any]:
-    if cancellation_token.is_cancelled:
-        return _unknown_native(int(edge["child_depth"]), "search cancelled")
-    remaining_time = 0.0
-    if deadline is not None:
-        remaining_time = deadline - time.monotonic()
-        if remaining_time <= 0.0:
-            return _unknown_native(
-                int(edge["child_depth"]), "time limit exceeded"
-            )
-    return dict(
-        solve_reveal_verified_mate_cpp(
-            edge["child_game"],
-            attacker=attacker,
-            depth=int(edge["child_depth"]),
-            max_nodes=max_nodes,
-            time_limit_seconds=remaining_time,
-            preferred_attacker_actions=preferred_attacker_actions,
-            include_proof_dag=False,
-            exhaustive_attacker_actions=exhaustive_attacker_actions,
-            exact_reveal_search=True,
-            cancellation_token=cancellation_token,
-            order_hints=order_hints,
-            line_transplant=line_transplant,
-            no_take_probe=no_take_probe,
-            max_memo_states=max_memo_states,
-            algorithm=algorithm,
-            dfpn_table_bytes=dfpn_table_bytes,
-        )
-    )
-
-
-def _solve_positive_portfolio(
-    game: Game,
-    *,
-    attacker: int,
-    depth: int,
-    max_nodes: int,
-    deadline: Optional[float],
-    required_root_action: Optional[int],
-    preferred_attacker_actions: list[int],
-    cancellation_token: MateSearchCancellationToken,
-    order_hints: Any = None,
-    line_transplant: bool = True,
-    no_take_probe: bool = False,
-    max_memo_states: int = 0,
-    algorithm: str = "dfs",
-    dfpn_table_bytes: int = 0,
-) -> dict[str, Any]:
-    if cancellation_token.is_cancelled:
-        return _unknown_native(depth, "search cancelled")
-    remaining_time = 0.0
-    if deadline is not None:
-        remaining_time = deadline - time.monotonic()
-        if remaining_time <= 0.0:
-            return _unknown_native(depth, "time limit exceeded")
-    return dict(
-        solve_reveal_verified_mate_cpp(
-            game,
-            attacker=attacker,
-            depth=depth,
-            max_nodes=max_nodes,
-            time_limit_seconds=remaining_time,
-            preferred_attacker_actions=preferred_attacker_actions,
-            required_root_action=(
-                _NO_REQUIRED_ACTION
-                if required_root_action is None
-                else required_root_action
-            ),
-            exhaustive_attacker_actions=False,
-            exact_reveal_search=False,
-            cancellation_token=cancellation_token,
-            order_hints=order_hints,
-            line_transplant=line_transplant,
-            no_take_probe=no_take_probe,
-            max_memo_states=max_memo_states,
-            algorithm=algorithm,
-            dfpn_table_bytes=dfpn_table_bytes,
-        )
-    )
 
 
 def _permanent_no_mate_certificate(
@@ -233,398 +88,6 @@ def _permanent_no_mate_certificate(
     }
 
 
-def _solve_depth_parallel(
-    game: Game,
-    *,
-    attacker: int,
-    depth: int,
-    max_nodes: int,
-    deadline: Optional[float],
-    required_root_action: Optional[int],
-    preferred_attacker_actions: list[int],
-    jobs: int,
-    parallel_min_branches: int,
-    cancellation_token: Optional[MateSearchCancellationToken],
-    exhaustive_attacker_actions: bool = True,
-    conclusive_refutations: bool = True,
-    order_hints: Any = None,
-    line_transplant: bool = True,
-    no_take_probe: bool = False,
-    max_memo_states: int = 0,
-    algorithm: str = "dfs",
-    dfpn_table_bytes: int = 0,
-) -> Optional[dict[str, Any]]:
-    """Solve one exact depth by splitting root actions/reveals across threads."""
-    split_started = time.monotonic()
-    split = dict(
-        solve_reveal_verified_root_split_cpp(
-            game,
-            attacker=attacker,
-            depth=depth,
-            required_root_action=(
-                _NO_REQUIRED_ACTION
-                if required_root_action is None
-                else required_root_action
-            ),
-            exhaustive_attacker_actions=exhaustive_attacker_actions,
-            cancellation_token=cancellation_token,
-            order_hints=order_hints,
-            line_transplant=line_transplant,
-            no_take_probe=no_take_probe,
-            max_memo_states=max_memo_states,
-        )
-    )
-    edges = [dict(edge) for edge in split["edges"]]
-    split_stats = [dict(split["stats"])]
-    prefix_edges: list[tuple[dict[str, Any], int]] = []
-    preferred_for_split = list(preferred_attacker_actions)
-    if (
-        bool(split["complete"])
-        and len(edges) == 1
-        and len(edges) < max(2, parallel_min_branches)
-    ):
-        prefix_action_count = len(
-            {int(edge["action_code"]) for edge in edges}
-        )
-        prefix_edge = edges[0]
-        if int(split["player"]) == attacker and preferred_for_split:
-            preferred_for_split = preferred_for_split[1:]
-        child_split = dict(
-            solve_reveal_verified_root_split_cpp(
-                prefix_edge["child_game"],
-                attacker=attacker,
-                depth=int(prefix_edge["child_depth"]),
-                exhaustive_attacker_actions=exhaustive_attacker_actions,
-                cancellation_token=cancellation_token,
-                order_hints=order_hints,
-            line_transplant=line_transplant,
-            no_take_probe=no_take_probe,
-            max_memo_states=max_memo_states,
-            )
-        )
-        child_edges = [dict(edge) for edge in child_split["edges"]]
-        if bool(child_split["complete"]) and len(child_edges) >= max(
-            2, parallel_min_branches
-        ):
-            prefix_edges.append((prefix_edge, prefix_action_count))
-            split = child_split
-            split_stats.append(dict(child_split["stats"]))
-            edges = child_edges
-
-    if (
-        not bool(split["complete"])
-        or len(edges) < max(2, parallel_min_branches)
-        or _effective_jobs(jobs) <= 1
-    ):
-        return None
-
-    preferred_root = (
-        preferred_attacker_actions[0] if preferred_attacker_actions else None
-    )
-    edges.sort(
-        key=lambda edge: (
-            int(edge["action_code"]) != preferred_root,
-            int(edge["action_code"]),
-            -1 if edge["reveal_card"] is None else int(edge["reveal_card"]),
-        )
-    )
-    action_edges: dict[int, list[dict[str, Any]]] = {}
-    for edge in edges:
-        action_edges.setdefault(int(edge["action_code"]), []).append(edge)
-
-    root_player = int(split["player"])
-    child_preferred = list(preferred_for_split)
-    if root_player == attacker and child_preferred:
-        child_preferred = child_preferred[1:]
-
-    use_positive_portfolio = not conclusive_refutations
-    budget_units = len(edges) + int(use_positive_portfolio)
-    portfolio_limit = 0
-    branch_limits = [0] * len(edges)
-    if max_nodes:
-        branch_budget = max_nodes
-        if use_positive_portfolio:
-            # The blank/oracle portfolio is usually the fastest positive
-            # prover.  Giving it one equal-sized edge share made a 16-way run
-            # weaker than the serial search under a finite node budget.
-            portfolio_limit = max(1, max_nodes // 2)
-            branch_budget = max_nodes - portfolio_limit
-        quotient, remainder = divmod(branch_budget, len(edges))
-        branch_limits = [
-            quotient + int(index < remainder) for index in range(len(edges))
-        ]
-
-    group_tokens = {
-        action_code: MateSearchCancellationToken(cancellation_token)
-        for action_code in action_edges
-    }
-    groups: dict[int, dict[str, Any]] = {
-        action_code: {
-            "remaining": len(group_edges),
-            "has_unknown": False,
-            "status": None,
-            "selected": None,
-            "first": None,
-        }
-        for action_code, group_edges in action_edges.items()
-    }
-    completed_raw: list[dict[str, Any]] = []
-    global_status: Optional[str] = None
-    selected: Optional[tuple[dict[str, Any], dict[str, Any]]] = None
-    direct_selected_raw: Optional[dict[str, Any]] = None
-
-    max_workers = min(_effective_jobs(jobs), budget_units)
-    executor = ThreadPoolExecutor(
-        max_workers=max_workers,
-        thread_name_prefix="csplendor-mate",
-    )
-    futures: dict[Any, tuple[str, Optional[dict[str, Any]], Optional[int]]] = {}
-    portfolio_token = MateSearchCancellationToken(cancellation_token)
-    try:
-        if use_positive_portfolio:
-            if max_nodes and portfolio_limit == 0:
-                portfolio_future = executor.submit(
-                    lambda: _unknown_native(depth, "parallel node share exhausted")
-                )
-            else:
-                portfolio_future = executor.submit(
-                    _solve_positive_portfolio,
-                    game,
-                    attacker=attacker,
-                    depth=depth,
-                    max_nodes=portfolio_limit,
-                    deadline=deadline,
-                    required_root_action=required_root_action,
-                    preferred_attacker_actions=preferred_attacker_actions,
-                    cancellation_token=portfolio_token,
-                    order_hints=order_hints,
-            line_transplant=line_transplant,
-            no_take_probe=no_take_probe,
-            max_memo_states=max_memo_states,
-            algorithm=algorithm,
-            dfpn_table_bytes=dfpn_table_bytes,
-                )
-            futures[portfolio_future] = ("portfolio", None, None)
-        for index, edge in enumerate(edges):
-            action_code = int(edge["action_code"])
-            if max_nodes and branch_limits[index] == 0:
-                raw = _unknown_native(depth, "parallel node share exhausted")
-                future = executor.submit(lambda value=raw: value)
-            else:
-                future = executor.submit(
-                    _solve_parallel_branch,
-                    edge,
-                    attacker=attacker,
-                    max_nodes=branch_limits[index],
-                    deadline=deadline,
-                    preferred_attacker_actions=child_preferred,
-                    cancellation_token=group_tokens[action_code],
-                    exhaustive_attacker_actions=exhaustive_attacker_actions,
-                    order_hints=order_hints,
-            line_transplant=line_transplant,
-            no_take_probe=no_take_probe,
-            max_memo_states=max_memo_states,
-            algorithm=algorithm,
-            dfpn_table_bytes=dfpn_table_bytes,
-                )
-            futures[future] = ("branch", edge, action_code)
-
-        for future in as_completed(futures):
-            kind, edge, action_code = futures[future]
-            try:
-                raw = dict(future.result())
-            except CancelledError:
-                continue
-            completed_raw.append(raw)
-            if kind == "portfolio":
-                if _native_status(raw) == "mate":
-                    global_status = "mate"
-                    direct_selected_raw = raw
-                    portfolio_token.request_cancel()
-                    for token in group_tokens.values():
-                        token.request_cancel()
-                    for other in futures:
-                        if other is not future:
-                            other.cancel()
-                continue
-            if edge is None or action_code is None:
-                raise RuntimeError("branch result is missing its search context")
-            group = groups[action_code]
-            if group["status"] is not None:
-                continue
-            group["remaining"] = int(group["remaining"]) - 1
-            status = _native_status(raw)
-            if group["first"] is None:
-                group["first"] = (edge, raw)
-            if status == "no_mate":
-                group["status"] = (
-                    "no_mate" if conclusive_refutations else "unknown"
-                )
-                group["selected"] = (edge, raw)
-                group_tokens[action_code].request_cancel()
-                for other, (other_kind, _, other_action) in futures.items():
-                    if (
-                        other_kind == "branch"
-                        and other_action == action_code
-                        and other is not future
-                    ):
-                        other.cancel()
-            elif status == "unknown":
-                group["has_unknown"] = True
-                if group["selected"] is None:
-                    group["selected"] = (edge, raw)
-
-            if group["status"] is None and group["remaining"] == 0:
-                group["status"] = (
-                    "unknown" if bool(group["has_unknown"]) else "mate"
-                )
-                if group["selected"] is None:
-                    group["selected"] = group["first"]
-
-            if global_status is None:
-                resolved_groups = [
-                    item for item in groups.values() if item["status"] is not None
-                ]
-                if root_player == attacker:
-                    winning = next(
-                        (
-                            item
-                            for item in resolved_groups
-                            if item["status"] == "mate"
-                        ),
-                        None,
-                    )
-                    if winning is not None:
-                        global_status = "mate"
-                        selected = winning["selected"]
-                    elif len(resolved_groups) == len(groups):
-                        unknown = next(
-                            (
-                                item
-                                for item in resolved_groups
-                                if item["status"] == "unknown"
-                            ),
-                            None,
-                        )
-                        global_status = "unknown" if unknown else "no_mate"
-                        chosen = unknown or resolved_groups[0]
-                        selected = chosen["selected"]
-                else:
-                    refuted = next(
-                        (
-                            item
-                            for item in resolved_groups
-                            if item["status"] == "no_mate"
-                        ),
-                        None,
-                    )
-                    if refuted is not None:
-                        global_status = "no_mate"
-                        selected = refuted["selected"]
-                    elif len(resolved_groups) == len(groups):
-                        unknown = next(
-                            (
-                                item
-                                for item in resolved_groups
-                                if item["status"] == "unknown"
-                            ),
-                            None,
-                        )
-                        global_status = "unknown" if unknown else "mate"
-                        chosen = unknown or resolved_groups[0]
-                        selected = chosen["selected"]
-
-                if global_status in {"mate", "no_mate"}:
-                    portfolio_token.request_cancel()
-                    for token in group_tokens.values():
-                        token.request_cancel()
-                    for other in futures:
-                        if other is not future:
-                            other.cancel()
-    finally:
-        for future in futures:
-            future.cancel()
-        executor.shutdown(wait=True)
-
-    if global_status is None:
-        global_status = "unknown"
-    aggregate = _empty_native_stats()
-    for source in split_stats + [
-        dict(raw["stats"]) for raw in completed_raw
-    ]:
-        for name, value in source.items():
-            if name == "elapsed_ms" or name not in aggregate:
-                continue
-            if isinstance(value, (int, float)):
-                aggregate[name] = aggregate[name] + value
-    aggregate["elapsed_ms"] = (time.monotonic() - split_started) * 1000.0
-    aggregate["parallel_jobs"] = max_workers
-    aggregate["parallel_branches"] = len(edges)
-    aggregate["parallel_action_groups"] = len(action_edges)
-
-    line: list[dict[str, Any]] = []
-    selected_raw: Optional[dict[str, Any]] = None
-    if direct_selected_raw is not None:
-        selected_raw = direct_selected_raw
-        line.extend(dict(entry) for entry in direct_selected_raw.get("line", []))
-    elif selected is not None:
-        selected_edge, selected_raw = selected
-        for prefix_edge, prefix_action_count in prefix_edges:
-            line.append(
-                {
-                    "action_code": int(prefix_edge["action_code"]),
-                    "reveal_card": prefix_edge["reveal_card"],
-                    "action_count": prefix_action_count,
-                }
-            )
-        line.append(
-            {
-                "action_code": int(selected_edge["action_code"]),
-                "reveal_card": selected_edge["reveal_card"],
-                "action_count": len(action_edges),
-            }
-        )
-        line.extend(dict(entry) for entry in selected_raw.get("line", []))
-
-    unknown_reason = None
-    if global_status == "unknown":
-        unknown_reason = (
-            selected_raw.get("unknown_reason")
-            if selected_raw is not None
-            else "parallel root search was indeterminate"
-        )
-        unknown_reason = str(unknown_reason or "parallel root search was indeterminate")
-    return {
-        "proven": global_status == "mate",
-        "attacker": attacker,
-        "depth": depth,
-        "reason": (
-            "all_reveals_verified"
-            if global_status == "mate"
-            else unknown_reason
-            if global_status == "unknown"
-            else "candidate_mate_not_verified"
-        ),
-        "unknown_reason": unknown_reason,
-        "memoized_states": sum(
-            int(raw.get("memoized_states", 0)) for raw in completed_raw
-        ),
-        "stats": aggregate,
-        "line": line,
-        "proof_dag": {},
-        "parallel": {
-            "jobs": max_workers,
-            "branches": len(edges),
-            "action_groups": len(action_edges),
-            "exact": True,
-            "exhaustive": exhaustive_attacker_actions,
-            "conclusive_refutations": conclusive_refutations,
-            "split_ply": 1 + len(prefix_edges),
-            "positive_portfolio": use_positive_portfolio,
-        },
-    }
-
-
 def _remaining_node_budget(limit: int, used: int) -> int:
     if limit == 0:
         return 0
@@ -648,7 +111,6 @@ def search_reveal_verified_mate_depths(
     required_root_action: Optional[int] = None,
     preferred_attacker_actions: Optional[list[int]] = None,
     jobs: int = 1,
-    parallel_min_branches: int = 2,
     cancellation_token: Optional[MateSearchCancellationToken] = None,
     include_proof_dag: bool = False,
     proof_dag_node_limit: int = 100_000,
@@ -682,8 +144,10 @@ def search_reveal_verified_mate_depths(
 
     ``algorithm`` selects the native search of every depth (``"dfs"`` or
     ``"dfpn"``, doc/mate_dfpn_cpp_design.md); verdicts are the same.
-    ``dfpn_table_bytes`` (0 = a quarter of the per-job memory budget) is the
-    df-pn table of every native search, parallel branches included.
+    ``dfpn_table_bytes`` (0 = a quarter of the memory budget) is the df-pn
+    table of every native search.  ``jobs`` is the threads of every native
+    depth-first search (doc/mate_usage.md「並列の詰み探索」): 1 is the serial
+    search, 0 is ``default_mate_jobs()``; the verdicts do not depend on it.
     """
     if algorithm not in {"dfs", "dfpn"}:
         raise ValueError("algorithm must be 'dfs' or 'dfpn'")
@@ -695,8 +159,6 @@ def search_reveal_verified_mate_depths(
         raise ValueError("search limits must be non-negative")
     if jobs < 0:
         raise ValueError("jobs must be non-negative")
-    if parallel_min_branches < 2:
-        raise ValueError("parallel_min_branches must be at least 2")
     if proof_dag_node_limit < 0 or proof_dag_edge_limit < 0:
         raise ValueError("proof DAG limits must be non-negative")
     if proof_dag_format not in {"v1", "compact"}:
@@ -727,15 +189,12 @@ def search_reveal_verified_mate_depths(
     ) or bool(no_take_probe)
     if restricted_probe and include_proof_dag:
         raise ValueError("a restricted probe cannot build a proof DAG")
-    # 0 = from the free memory, fixed once for every depth and branch; df-pn
+    # 0 = from the free memory, fixed once for every depth; df-pn
     # takes its table out of the same budget (doc/mate_usage.md「探索のメモリ予算」).
     max_memo_states, dfpn_table_bytes = resolve_search_table_caps(
-        max_memo_states, dfpn_table_bytes, algorithm=algorithm, jobs=_effective_jobs(jobs)
+        max_memo_states, dfpn_table_bytes, algorithm=algorithm
     )
     started = time.monotonic()
-    deadline = (
-        started + time_limit_seconds if time_limit_seconds > 0.0 else None
-    )
     permanent_certificate = _permanent_no_mate_certificate(game, attacker)
     if permanent_certificate is not None:
         return {
@@ -753,7 +212,7 @@ def search_reveal_verified_mate_depths(
             "minimal_within_range": False,
             "permanent_no_mate_proven": True,
             "permanent_no_mate_certificate": permanent_certificate,
-            "jobs": _effective_jobs(jobs),
+            "jobs": _resolved_jobs(jobs),
             "exact": True,
             "required_root_action": required_code,
             "required_root_action_usi": required_usi,
@@ -784,53 +243,31 @@ def search_reveal_verified_mate_depths(
             stop_reason = "cumulative time limit exceeded"
             break
 
-        native = None
-        if _effective_jobs(jobs) > 1 and not include_proof_dag:
-            native = _solve_depth_parallel(
-                game,
-                attacker=attacker,
-                depth=depth,
-                max_nodes=remaining_nodes,
-                deadline=deadline,
-                required_root_action=required_code,
-                preferred_attacker_actions=preferred_codes,
-                jobs=jobs,
-                parallel_min_branches=parallel_min_branches,
-                cancellation_token=cancellation_token,
-                exhaustive_attacker_actions=not restricted_probe,
-                conclusive_refutations=not restricted_probe,
-                order_hints=order_hints,
+        native = solve_reveal_verified_mate_cpp(
+            game,
+            attacker=attacker,
+            depth=depth,
+            max_nodes=remaining_nodes,
+            time_limit_seconds=remaining_time,
+            preferred_attacker_actions=preferred_codes,
+            include_proof_dag=include_proof_dag,
+            proof_dag_node_limit=proof_dag_node_limit,
+            proof_dag_edge_limit=proof_dag_edge_limit,
+            required_root_action=(
+                _NO_REQUIRED_ACTION if required_code is None else required_code
+            ),
+            proof_dag_format=proof_dag_format,
+            exhaustive_attacker_actions=not restricted_probe,
+            exact_reveal_search=True,
+            cancellation_token=cancellation_token,
+            order_hints=order_hints,
             line_transplant=line_transplant,
             no_take_probe=no_take_probe,
             max_memo_states=max_memo_states,
             algorithm=algorithm,
             dfpn_table_bytes=dfpn_table_bytes,
-            )
-        if native is None:
-            native = solve_reveal_verified_mate_cpp(
-                game,
-                attacker=attacker,
-                depth=depth,
-                max_nodes=remaining_nodes,
-                time_limit_seconds=remaining_time,
-                preferred_attacker_actions=preferred_codes,
-                include_proof_dag=include_proof_dag,
-                proof_dag_node_limit=proof_dag_node_limit,
-                proof_dag_edge_limit=proof_dag_edge_limit,
-                required_root_action=(
-                    _NO_REQUIRED_ACTION if required_code is None else required_code
-                ),
-                proof_dag_format=proof_dag_format,
-                exhaustive_attacker_actions=not restricted_probe,
-                exact_reveal_search=True,
-                cancellation_token=cancellation_token,
-                order_hints=order_hints,
-            line_transplant=line_transplant,
-            no_take_probe=no_take_probe,
-            max_memo_states=max_memo_states,
-            algorithm=algorithm,
-            dfpn_table_bytes=dfpn_table_bytes,
-            )
+            jobs=jobs,
+        )
         native_stats = dict(native["stats"])
         nodes = int(native_stats.get("nodes", 0))
         total_nodes += nodes
@@ -856,8 +293,7 @@ def search_reveal_verified_mate_depths(
         }
         if proven and include_proof_dag:
             attempt["proof_dag"] = dict(native["proof_dag"])
-        if "parallel" in native:
-            attempt["parallel"] = dict(native["parallel"])
+        attempt["jobs"] = int(native["jobs"])
         attempts.append(attempt)
 
         if proven:
@@ -914,7 +350,7 @@ def search_reveal_verified_mate_depths(
         "minimal_within_range": mate_depth is not None,
         "permanent_no_mate_proven": False,
         "permanent_no_mate_certificate": None,
-        "jobs": _effective_jobs(jobs),
+        "jobs": _resolved_jobs(jobs),
         "exact": not restricted_probe,
         "restricted_probe": restricted_probe,
         "required_root_action": required_code,
@@ -935,7 +371,6 @@ def search_reveal_verified_mate_anytime(
     required_root_action: Optional[int] = None,
     preferred_attacker_actions: Optional[list[int]] = None,
     jobs: int = 1,
-    parallel_min_branches: int = 2,
     cancellation_token: Optional[MateSearchCancellationToken] = None,
     order_hints: Any = None,
     line_transplant: bool = True,
@@ -955,8 +390,6 @@ def search_reveal_verified_mate_anytime(
         raise ValueError("depth range must satisfy 0 <= min_depth <= max_depth")
     if max_nodes < 0 or time_limit_seconds < 0 or jobs < 0:
         raise ValueError("search limits and jobs must be non-negative")
-    if parallel_min_branches < 2:
-        raise ValueError("parallel_min_branches must be at least 2")
     required_code = None if required_root_action is None else int(required_root_action)
     legal_by_code = {int(action.pack()): action for action in game.legal_actions}
     if required_code is not None:
@@ -964,7 +397,7 @@ def search_reveal_verified_mate_anytime(
             raise ValueError("required_root_action requires attacker to move")
         if required_code not in legal_by_code:
             raise ValueError("required_root_action must be legal in the root state")
-    max_memo_states = resolve_max_memo_states(max_memo_states, jobs=_effective_jobs(jobs))
+    max_memo_states = resolve_max_memo_states(max_memo_states)
 
     started = time.monotonic()
     global_deadline = (
@@ -1023,52 +456,27 @@ def search_reveal_verified_mate_anytime(
             if global_deadline is None
             else remaining_time / attempts_left
         )
-        attempt_deadline = (
-            None if global_deadline is None else time.monotonic() + attempt_time
-        )
-        raw = None
-        if _effective_jobs(jobs) > 1:
-            raw = _solve_depth_parallel(
+        raw = dict(
+            solve_reveal_verified_mate_cpp(
                 game,
                 attacker=attacker,
                 depth=depth,
                 max_nodes=attempt_nodes,
-                deadline=attempt_deadline,
-                required_root_action=required_code,
+                time_limit_seconds=attempt_time,
                 preferred_attacker_actions=preferred_codes,
-                jobs=jobs,
-                parallel_min_branches=parallel_min_branches,
-                cancellation_token=cancellation_token,
+                required_root_action=(
+                    _NO_REQUIRED_ACTION if required_code is None else required_code
+                ),
                 exhaustive_attacker_actions=False,
-                conclusive_refutations=False,
+                exact_reveal_search=False,
+                cancellation_token=cancellation_token,
                 order_hints=order_hints,
-            line_transplant=line_transplant,
-            no_take_probe=no_take_probe,
-            max_memo_states=max_memo_states,
+                line_transplant=line_transplant,
+                no_take_probe=no_take_probe,
+                max_memo_states=max_memo_states,
+                jobs=jobs,
             )
-        if raw is None:
-            raw = dict(
-                solve_reveal_verified_mate_cpp(
-                    game,
-                    attacker=attacker,
-                    depth=depth,
-                    max_nodes=attempt_nodes,
-                    time_limit_seconds=attempt_time,
-                    preferred_attacker_actions=preferred_codes,
-                    required_root_action=(
-                        _NO_REQUIRED_ACTION
-                        if required_code is None
-                        else required_code
-                    ),
-                    exhaustive_attacker_actions=False,
-                    exact_reveal_search=False,
-                    cancellation_token=cancellation_token,
-                    order_hints=order_hints,
-            line_transplant=line_transplant,
-            no_take_probe=no_take_probe,
-            max_memo_states=max_memo_states,
-                )
-            )
+        )
         native_status = _native_status(raw)
         nodes = int(raw["stats"].get("nodes", 0))
         total_nodes += nodes
@@ -1081,8 +489,7 @@ def search_reveal_verified_mate_anytime(
             "stats": dict(raw["stats"]),
             "line": [dict(entry) for entry in raw.get("line", [])],
         }
-        if "parallel" in raw:
-            attempt["parallel"] = dict(raw["parallel"])
+        attempt["jobs"] = int(raw["jobs"])
         attempts.append(attempt)
         if native_status == "mate":
             mate_depth = depth
@@ -1111,7 +518,7 @@ def search_reveal_verified_mate_anytime(
         "verified_no_mate_through_depth": None,
         "permanent_no_mate_proven": False,
         "permanent_no_mate_certificate": None,
-        "jobs": _effective_jobs(jobs),
+        "jobs": _resolved_jobs(jobs),
         "attempts": attempts,
         "stats": {
             "nodes": total_nodes,

@@ -154,3 +154,41 @@ def test_no_thread_outlives_the_search():
     before = threads()
     _solve(game, int(game.current_player), 3, jobs=8, max_memo_states=0)
     assert threads() == before
+
+
+def test_depth_sweeps_pass_jobs_to_the_native_search():
+    game = load_game_from_usi_text(BENCH_POSITION)
+    attacker = int(game.current_player)
+    serial = cs.search_reveal_verified_mate_depths(game, attacker=attacker, min_depth=1, max_depth=3)
+    parallel = cs.search_reveal_verified_mate_depths(
+        game, attacker=attacker, min_depth=1, max_depth=3, jobs=4)
+    assert parallel["status"] == serial["status"] == "no_mate_within_max_depth"
+    assert [a["jobs"] for a in parallel["attempts"]] == [1, 1, 4]
+    assert parallel["jobs"] == 4
+    anytime = cs.search_reveal_verified_mate_anytime(
+        game, attacker=attacker, min_depth=3, max_depth=3, jobs=4)
+    assert anytime["attempts"][0]["jobs"] == 4
+    assert cs.search_reveal_verified_mate_depths(
+        game, attacker=attacker, min_depth=1, max_depth=1, jobs=0)["jobs"] == cs.default_mate_jobs()
+
+
+def test_exact_search_and_root_probe_take_jobs():
+    assert cs.ExactMateSearchConfig().jobs == 1
+    assert cs.RootMateProbeConfig().jobs == 1
+    game = load_game_from_usi_text(BENCH_POSITION)
+    results = []
+    for jobs in (1, 4):
+        config = cs.ExactMateSearchConfig()
+        config.attacker = int(game.current_player)
+        config.min_depth, config.max_depth = 1, 3
+        config.jobs = jobs
+        results.append(cs.exact_mate_search(game, config))
+    assert results[0].status == results[1].status == "no_mate_within_max_depth"
+    probes = []
+    for jobs in (1, 4):
+        config = cs.RootMateProbeConfig()
+        config.jobs = jobs
+        config.endgame_exact_depth = 3
+        probes.append(cs.root_mate_probe(game, config, previous_value=0.72, time_limit_seconds=0.0))
+    assert probes[0].proven == probes[1].proven
+    assert probes[0].depth == probes[1].depth

@@ -14,6 +14,15 @@
 - 計測（BENCH 厳密探索の深さ4、1.34 秒）: 2 スレッド 0.78 秒、4 スレッド 0.47 秒、8 スレッド 0.32〜0.35 秒。ランダム終盤
   3,012 ケースで `jobs=2/4/8/12` の判定が 1 スレッドと全件一致。
 
+- 深さ掃引（`search_reveal_verified_mate_depths` / `_anytime`）と `MateSearchSession` の `jobs` は、各深さの C++ の探索に
+  そのまま渡すようにし、Python の root 分割（`_solve_depth_parallel`・`_solve_parallel_branch`・
+  `_solve_positive_portfolio`、`ThreadPoolExecutor`、引数 `parallel_min_branches`、結果の `attempts[i]["parallel"]`）を
+  削除した。各試行は `attempts[i]["jobs"]`（使ったスレッド数）を持つ。`jobs=0` は `default_mate_jobs()`（以前は論理 CPU 数）。
+- `ExactMateSearchConfig.jobs` と `RootMateProbeConfig.jobs`（既定 1）を足した。
+- メモリ予算の API から `jobs` を除いた（`solver_memory_budget_bytes(available_bytes)`、
+  `resolve_max_memo_states(max_memo_states, memory_budget_bytes)`、`resolve_search_table_caps(..., memory_budget_bytes)`）。
+  共有表は 1 組なので予算をスレッド数で割らない。
+
 English: `solve_reveal_verified_mate_cpp(jobs=N)` runs depth-first searches of
 depth 3 or more on N threads over one shared transposition table (same
 verdicts; `jobs=1` is the serial search bit for bit, `jobs=0` picks

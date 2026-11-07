@@ -2,8 +2,9 @@
 #define CSPLENDOR_SOLVER_MEMORY_BUDGET_H
 
 // Memory budget of the searches' tables (doc/mate_usage.md「探索のメモリ
-// 予算」): a quarter of the free memory, clamped and split across jobs, turned
-// into a transposition-table cap once at the start of a search. Header-only so
+// 予算」): a quarter of the free memory, clamped, turned into a
+// transposition-table cap once at the start of a search (a parallel search
+// shares one set of tables, so the budget is never split across threads). Header-only so
 // that every build (Python module, WASM, native tests) compiles it unchanged.
 
 #include <algorithm>
@@ -132,16 +133,12 @@ inline uint64_t available_memory_bytes() noexcept {
 #endif
 }
 
-// A quarter of `available_bytes` clamped to [MIN, MAX] (the fallback when 0),
-// split across `jobs`.
-inline uint64_t solver_memory_budget_bytes(uint64_t available_bytes,
-                                           unsigned jobs = 1) noexcept {
-  const uint64_t total =
-      available_bytes == 0
-          ? MEMORY_BUDGET_FALLBACK_BYTES
-          : std::clamp(available_bytes / MEMORY_BUDGET_FRACTION_DEN,
-                       MEMORY_BUDGET_MIN_BYTES, MEMORY_BUDGET_MAX_BYTES);
-  return total / std::max(1u, jobs);
+// A quarter of `available_bytes` clamped to [MIN, MAX] (the fallback when 0).
+inline uint64_t solver_memory_budget_bytes(uint64_t available_bytes) noexcept {
+  return available_bytes == 0
+             ? MEMORY_BUDGET_FALLBACK_BYTES
+             : std::clamp(available_bytes / MEMORY_BUDGET_FRACTION_DEN,
+                          MEMORY_BUDGET_MIN_BYTES, MEMORY_BUDGET_MAX_BYTES);
 }
 
 // df-pn (doc/mate_dfpn_cpp_design.md 第 5 節): the share of the budget given
@@ -155,21 +152,18 @@ struct SearchTableCaps {
 };
 
 // The table sizes a search uses: positive values as given, zeros from the
-// budget (`memory_budget_bytes`, or the detected one when 0, split across
-// `jobs`). With df-pn the automatic df-pn table takes a quarter of the budget
+// budget (`memory_budget_bytes`, or the detected one when 0). With df-pn the automatic df-pn table takes a quarter of the budget
 // and the automatic cap the remaining three quarters.
 inline SearchTableCaps resolve_search_table_caps(size_t max_memo_states,
                                                  size_t dfpn_table_bytes,
                                                  bool dfpn,
-                                                 uint64_t memory_budget_bytes = 0,
-                                                 unsigned jobs = 1) noexcept {
+                                                 uint64_t memory_budget_bytes = 0) noexcept {
   SearchTableCaps caps{max_memo_states, dfpn ? dfpn_table_bytes : 0};
   if (caps.max_memo_states > 0 && (!dfpn || caps.dfpn_table_bytes > 0))
     return caps;
-  const uint64_t budget =
-      memory_budget_bytes > 0
-          ? memory_budget_bytes / std::max(1u, jobs)
-          : solver_memory_budget_bytes(available_memory_bytes(), jobs);
+  const uint64_t budget = memory_budget_bytes > 0
+                              ? memory_budget_bytes
+                              : solver_memory_budget_bytes(available_memory_bytes());
   const uint64_t dfpn_share = dfpn ? budget / DFPN_TABLE_BUDGET_DEN : 0;
   if (caps.max_memo_states == 0)
     caps.max_memo_states = static_cast<size_t>(std::max<uint64_t>(
@@ -181,10 +175,9 @@ inline SearchTableCaps resolve_search_table_caps(size_t max_memo_states,
 
 // The cap a depth-first search uses.
 inline size_t resolve_max_memo_states(size_t max_memo_states,
-                                      uint64_t memory_budget_bytes = 0,
-                                      unsigned jobs = 1) noexcept {
+                                      uint64_t memory_budget_bytes = 0) noexcept {
   return resolve_search_table_caps(max_memo_states, 0, false,
-                                   memory_budget_bytes, jobs)
+                                   memory_budget_bytes)
       .max_memo_states;
 }
 

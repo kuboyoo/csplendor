@@ -284,28 +284,25 @@ void bind_solvers(py::module_ &m) {
   m.def("default_mate_jobs", &csplendor::default_mate_jobs);
   m.def(
       "solver_memory_budget_bytes",
-      [](std::optional<uint64_t> available_bytes, unsigned jobs) {
+      [](std::optional<uint64_t> available_bytes) {
         return csplendor::solver_memory_budget_bytes(
-            available_bytes ? *available_bytes : csplendor::available_memory_bytes(), jobs);
+            available_bytes ? *available_bytes : csplendor::available_memory_bytes());
       },
-      py::arg("available_bytes") = py::none(), py::arg("jobs") = 1);
+      py::arg("available_bytes") = py::none());
   m.def("resolve_max_memo_states", &csplendor::resolve_max_memo_states,
-        py::arg("max_memo_states") = 0, py::arg("memory_budget_bytes") = 0,
-        py::arg("jobs") = 1);
+        py::arg("max_memo_states") = 0, py::arg("memory_budget_bytes") = 0);
   m.def(
       "resolve_search_table_caps",
       [](size_t max_memo_states, size_t dfpn_table_bytes,
-         const std::string &algorithm, uint64_t memory_budget_bytes,
-         unsigned jobs) {
+         const std::string &algorithm, uint64_t memory_budget_bytes) {
         const csplendor::SearchTableCaps caps = csplendor::resolve_search_table_caps(
             max_memo_states, dfpn_table_bytes,
             parse_mate_search_algorithm(algorithm) == MateSearchAlgorithm::DFPN,
-            memory_budget_bytes, jobs);
+            memory_budget_bytes);
         return py::make_tuple(caps.max_memo_states, caps.dfpn_table_bytes);
       },
       py::arg("max_memo_states") = 0, py::arg("dfpn_table_bytes") = 0,
-      py::arg("algorithm") = "dfs", py::arg("memory_budget_bytes") = 0,
-      py::arg("jobs") = 1);
+      py::arg("algorithm") = "dfs", py::arg("memory_budget_bytes") = 0);
   using csplendor::RootMateProbeConfig;
   using csplendor::RootMateProbeResult;
   py::class_<RootMateProbeConfig>(m, "RootMateProbeConfig")
@@ -325,7 +322,8 @@ void bind_solvers(py::module_ &m) {
       .def_readwrite("max_cache_states", &RootMateProbeConfig::max_cache_states)
       .def_readwrite("warm_start_nodes", &RootMateProbeConfig::warm_start_nodes)
       .def_readwrite("warm_start_time_ms", &RootMateProbeConfig::warm_start_time_ms)
-      .def_readwrite("memory_budget_bytes", &RootMateProbeConfig::memory_budget_bytes);
+      .def_readwrite("memory_budget_bytes", &RootMateProbeConfig::memory_budget_bytes)
+      .def_readwrite("jobs", &RootMateProbeConfig::jobs);
 
   py::class_<RootMateProbeResult>(m, "RootMateProbeResult")
       .def_readonly("attempted", &RootMateProbeResult::attempted)
@@ -402,7 +400,8 @@ void bind_solvers(py::module_ &m) {
       .def_readwrite("max_nodes", &csplendor::ExactMateSearchConfig::max_nodes)
       .def_readwrite("time_limit_seconds", &csplendor::ExactMateSearchConfig::time_limit_seconds)
       .def_readwrite("max_memo_states", &csplendor::ExactMateSearchConfig::max_memo_states)
-      .def_readwrite("memory_budget_bytes", &csplendor::ExactMateSearchConfig::memory_budget_bytes);
+      .def_readwrite("memory_budget_bytes", &csplendor::ExactMateSearchConfig::memory_budget_bytes)
+      .def_readwrite("jobs", &csplendor::ExactMateSearchConfig::jobs);
   py::class_<csplendor::ExactMateSearchResult>(m, "ExactMateSearchResult")
       .def_readonly("status", &csplendor::ExactMateSearchResult::status)
       .def_readonly("stop_reason", &csplendor::ExactMateSearchResult::stop_reason)

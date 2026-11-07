@@ -55,6 +55,9 @@ struct ExactMateSearchConfig {
   // per call (doc/mate_usage.md「探索のメモリ予算」).
   size_t max_memo_states = 0;
   uint64_t memory_budget_bytes = 0;
+  // Threads of each depth's search (doc/mate_usage.md「並列の詰み探索」):
+  // 1 = the serial search, 0 = default_mate_jobs().
+  unsigned jobs = 1;
 };
 
 struct ExactMateSearchResult {
@@ -114,6 +117,7 @@ inline ExactMateSearchResult exact_mate_search(const Game &game,
     RevealVerifiedSolver solver(config.attacker, depth, remaining_nodes, remaining_time, {},
                                 false, 100000, 500000, UINT64_MAX, false, 0, true, true);
     solver.set_max_memo_states(max_memo_states);
+    solver.set_jobs(config.jobs);
     const RevealVerifiedSearchResult raw = solver.solve(game);
     result.nodes += raw.stats.nodes;
     if (raw.proven) {

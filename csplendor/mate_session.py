@@ -15,9 +15,9 @@ from ._csplendor import (
 from .api.usi_kifu import action_to_usi
 from .mate_depth import (
     MATE_DEPTH_SEARCH_FORMAT,
-    _effective_jobs,
     _native_status,
     _permanent_no_mate_certificate,
+    _resolved_jobs,
     search_reveal_verified_mate_anytime,
     search_reveal_verified_mate_depths,
 )
@@ -30,7 +30,8 @@ class MateSearchSession:
 
     The native exact transposition table survives calls, so a later position
     from the same game can reuse states visited on the preceding turn.  With
-    multiple jobs, a short warm-cache probe runs before root-parallel search.
+    multiple jobs, a short warm-cache probe (one thread) runs before the
+    parallel native search (doc/mate_usage.md「並列の詰み探索」).
     Search is serialized per session, while :meth:`cancel` is thread-safe and
     may be called by a clock or an AI controller.
     """
@@ -40,7 +41,6 @@ class MateSearchSession:
         attacker: int,
         *,
         jobs: int = 1,
-        parallel_min_branches: int = 2,
         warm_start_nodes: int = 50_000,
         warm_start_time_seconds: float = 0.05,
         max_cache_states: int = 2_000_000,
@@ -49,8 +49,6 @@ class MateSearchSession:
             raise ValueError("attacker must be 0 or 1")
         if jobs < 0:
             raise ValueError("jobs must be non-negative")
-        if parallel_min_branches < 2:
-            raise ValueError("parallel_min_branches must be at least 2")
         if (
             warm_start_nodes < 0
             or warm_start_time_seconds < 0
@@ -61,7 +59,6 @@ class MateSearchSession:
             raise ValueError("parallel warm start needs a node or time limit")
         self.attacker = attacker
         self.jobs = jobs
-        self.parallel_min_branches = parallel_min_branches
         self.warm_start_nodes = warm_start_nodes
         self.warm_start_time_seconds = warm_start_time_seconds
         self.max_cache_states = max_cache_states
@@ -167,7 +164,7 @@ class MateSearchSession:
         )
         cache_before = self.memoized_states
         # One table cap for the whole call (doc/mate_usage.md「探索のメモリ予算」).
-        max_memo_states = resolve_max_memo_states(jobs=_effective_jobs(self.jobs))
+        max_memo_states = resolve_max_memo_states()
         attempts: list[dict[str, Any]] = []
         total_nodes = 0
         reused_memo_hits = 0
@@ -289,7 +286,6 @@ class MateSearchSession:
                     time_limit_seconds=depth_time,
                     preferred_attacker_actions=self._preferred_root_actions,
                     jobs=self.jobs,
-                    parallel_min_branches=self.parallel_min_branches,
                     cancellation_token=self._cancellation_token,
                     max_memo_states=max_memo_states,
                 )
@@ -315,8 +311,6 @@ class MateSearchSession:
                 "stats": dict(raw["stats"]),
                 "line": [dict(entry) for entry in raw.get("line", [])],
             }
-            if "parallel" in raw:
-                attempt["parallel"] = dict(raw["parallel"])
             attempts.append(attempt)
             if native_status == "mate":
                 mate_depth = depth
@@ -349,7 +343,7 @@ class MateSearchSession:
             "winning_root_action_usi": winning_usi,
             "minimal_depth_proven": False,
             "verified_no_mate_through_depth": None,
-            "jobs": _effective_jobs(self.jobs),
+            "jobs": _resolved_jobs(self.jobs),
             "attempts": attempts,
             "stats": {
                 "nodes": total_nodes,
@@ -376,7 +370,7 @@ class MateSearchSession:
         )
         cache_before = self.memoized_states
         # One table cap for the whole call (doc/mate_usage.md「探索のメモリ予算」).
-        max_memo_states = resolve_max_memo_states(jobs=_effective_jobs(self.jobs))
+        max_memo_states = resolve_max_memo_states()
         certificate = _permanent_no_mate_certificate(game, self.attacker)
         if certificate is not None:
             return {
@@ -431,7 +425,7 @@ class MateSearchSession:
                 stop_reason = "search cancelled"
                 break
 
-            parallel = _effective_jobs(self.jobs) > 1
+            parallel = _resolved_jobs(self.jobs) > 1
             warm_nodes = remaining_nodes
             warm_time = remaining_time
             if parallel:
@@ -501,7 +495,6 @@ class MateSearchSession:
                             time_limit_seconds=remaining_time,
                             preferred_attacker_actions=self._preferred_root_actions,
                             jobs=self.jobs,
-                            parallel_min_branches=self.parallel_min_branches,
                             cancellation_token=self._cancellation_token,
                             max_memo_states=max_memo_states,
                         )
@@ -520,8 +513,6 @@ class MateSearchSession:
                 "stats": dict(raw["stats"]),
                 "line": [dict(entry) for entry in raw.get("line", [])],
             }
-            if "parallel" in raw:
-                attempt["parallel"] = dict(raw["parallel"])
             attempts.append(attempt)
 
             if raw_status == "mate":
@@ -559,7 +550,7 @@ class MateSearchSession:
             "verified_no_mate_through_depth": last_refuted_depth,
             "permanent_no_mate_proven": False,
             "permanent_no_mate_certificate": None,
-            "jobs": _effective_jobs(self.jobs),
+            "jobs": _resolved_jobs(self.jobs),
             "attempts": attempts,
             "stats": {
                 "nodes": total_nodes,

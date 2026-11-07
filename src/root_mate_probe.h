@@ -49,6 +49,10 @@ struct RootMateProbeConfig {
   // Search memory; 0 = the free memory (WASM: a conservative default), fixed
   // once per call (doc/mate_usage.md「探索のメモリ予算」).
   uint64_t memory_budget_bytes = 0;
+  // Threads of the fresh searches of both sweeps (doc/mate_usage.md「並列の
+  // 詰み探索」): 1 = the serial search, 0 = default_mate_jobs(). The
+  // session's warm start stays on one thread.
+  unsigned jobs = 1;
 };
 
 struct RootMateProbeResult {
@@ -189,6 +193,7 @@ inline SweepResult anytime_sweep(const Game &game, int attacker,
     const double attempt_seconds = budget.seconds_share(attempts_left);
     RevealVerifiedSolver solver(attacker, depth, attempt_nodes, attempt_seconds);
     solver.set_max_memo_states(max_memo_states);
+    solver.set_jobs(config.jobs);
     const RevealVerifiedSearchResult raw = solver.solve(game);
     budget.spend(raw.stats.nodes);
     if (outcome_of(raw) == Outcome::Mate) {
@@ -258,6 +263,7 @@ inline RootMateProbeResult root_mate_probe(const Game &game, const RootMateProbe
     exact_config.max_depth = config.endgame_exact_depth;
     exact_config.max_nodes = max_nodes;
     exact_config.time_limit_seconds = budget.seconds_share(1);
+    exact_config.jobs = config.jobs;
     // No more entries than nodes.
     exact_config.max_memo_states =
         max_nodes > 0 ? std::min<uint64_t>(max_memo_states, max_nodes) : max_memo_states;

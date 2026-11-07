@@ -183,10 +183,10 @@ dn = 0 ⇔ 反証」の帰納法で保たれる。カットの関数は DFS の�
   上書きする。exact の探索では予算の全部を exact 表に、blank の探索では全部を blank 表に割る（B は DFS なので
   exact の探索に blank の df-pn 表は要らない）。
 - 予算は引数で受け取る（`solve_reveal_verified_mate_cpp(dfpn_table_bytes=...)`）。既定の 0 は「自動」で、探索の開始時に
-  [探索のメモリ予算](mate_usage.md)（空きメモリの 1/4 を 64 MiB〜2 GiB に挟み、ジョブ数で割る）の 1/4 を df-pn 表に、
+  [探索のメモリ予算](mate_usage.md)（空きメモリの 1/4 を 64 MiB〜2 GiB に挟む）の 1/4 を df-pn 表に、
   残りの 3/4 を決着表の件数（`max_memo_states=0` のとき、1 件 256 バイト）に割る（`src/solver_memory_budget.h` の
-  `resolve_search_table_caps`）。深さ掃引は呼び出しの開始時に `jobs` で割った予算から両方を1回だけ決め、全深さ・
-  全枝に渡すので、`jobs` 本の枝の合計も予算に収まる。
+  `resolve_search_table_caps`）。深さ掃引は呼び出しの開始時に予算から両方を1回だけ決め、全深さに渡す
+  （df-pn は 1 スレッドで、`jobs` は DFS だけに効く）。
 - 置換・flush された節点は再訪時に再初期化（未訪問の初期値か、子からの再計算）される。正しさは保たれ、時間だけが
   増える。
 - 決着表の flush（上限で空にする）は DFS と同じ。df-pn の未決着の値は df-pn 表に残るので、flush で失うのは決着値だけ
@@ -241,7 +241,7 @@ DFS の手の順序（購入 → 予約 → 取得、証明の移植、反復深
   統計として `dfpn_expansions`（手を生成した回数）、`dfpn_table_stores`、`dfpn_table_replacements`（置換で上書き
   した回数）、`dfpn_table_bytes`（割り当てた表のバイト数）を足す（DFS では 0）。df-pn は再訪のたびに手を作り直すので、
   `legal_moves`・`blank_cut_attempts`・`deck_reserve_*` は再展開の分を含む。
-- `search_reveal_verified_mate_depths`: 同じ `algorithm` / `dfpn_table_bytes` を各深さの解決（並列分割の枝を含む）に
+- `search_reveal_verified_mate_depths`: 同じ `algorithm` / `dfpn_table_bytes` を各深さの解決に
   渡すだけ。`verified_no_mate_through_depth` の意味は同じ（dn = 0 を反証とする）。
 - `exact_mate_search`（WASM）、`root_mate_probe`、`MateSearchSession` / `NativeMateSearchSession`
   （`solve_reusing_exact_cache`）、`search_reveal_verified_mate_anytime`: DFS だけで動く（`algorithm` を持たない）。
@@ -312,8 +312,8 @@ df-pn が削るのは「固定順序が外した手の部分木」である。�
 3. **守り側 d ≥ 2 の順序付け**: 攻め側の 2 手到達上界 U を応手ごとに計算し、U を最も下げる応手（攻め側の候補札を
    奪う購入・予約、必要色の取得）を先に試す。reach cut の関数 `two_move_reach_at_least` を順序付けに流用できる。
    外れ率の計測（第 9.2 節）を先に行い、外れが多い場合だけ入れる。
-4. **深さ5 の時間配分**: root の並列分割（`jobs`）で深さ5 を分ける。BENCH の根は攻め側で手が 30〜150 あり、
-   6 スレッドで 4〜5 倍の実時間短縮が見込める（置換表は枝ごとに N 件なのでメモリは 6 倍）。
+4. **深さ5 の時間配分**: 並列化は DFS 側で行った（[mate_usage.md「並列の詰み探索」](mate_usage.md)。2 段のタスク列と
+   共有置換表。表は 1 組なのでメモリは増えない）。df-pn の並列化は見送り。
 
 ## 11. 段階的な実装計画とテスト計画
 

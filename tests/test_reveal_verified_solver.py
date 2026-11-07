@@ -277,7 +277,8 @@ def test_parallel_exact_iterative_search_proves_five_and_seven_move_mates(
     assert result["status"] == "mate"
     assert result["mate_depth"] == depth
     assert result["verified_no_mate_through_depth"] == depth - 1
-    assert all(attempt["parallel"]["exact"] for attempt in result["attempts"])
+    # Depths of 3 or more run on the requested threads.
+    assert all(attempt["jobs"] == 4 for attempt in result["attempts"])
 
 
 def test_reveal_verified_depth_search_advances_after_refutation_and_stops_on_mate():
@@ -430,16 +431,9 @@ def test_exact_depth_search_parallelizes_concrete_root_reveals():
 
     assert sequential["status"] == parallel["status"] == "mate"
     assert parallel["winning_root_action"] == int(root_action.pack())
-    assert parallel["attempts"][0]["parallel"] == {
-        "jobs": 2,
-        "branches": 2,
-        "action_groups": 1,
-        "exact": True,
-        "exhaustive": True,
-        "conclusive_refutations": True,
-        "split_ply": 1,
-        "positive_portfolio": False,
-    }
+    # Depth 2 stays on one thread (doc/mate_usage.md「並列の詰み探索」).
+    assert parallel["jobs"] == 2
+    assert parallel["attempts"][0]["jobs"] == 1
 
 
 def test_exact_depth_search_honors_external_cancellation():

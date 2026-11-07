@@ -1036,7 +1036,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--mate-jobs",
         type=int,
         default=1,
-        help="CPU workers for candidate and countermate proof search; 0 uses CPU count",
+        help="threads of the candidate and countermate mate searches; 0 uses default_mate_jobs()",
     )
     parser.add_argument("--proof-dag-node-limit", type=int, default=100000)
     parser.add_argument("--proof-dag-edge-limit", type=int, default=500000)
