@@ -58,6 +58,12 @@ void test_capacity_follows_the_byte_budget() {
   require(table.bucket_count() == table.max_bucket_count(),
           "the table grows to its fixed capacity");
   require(table.memory_bytes() <= budget, "never beyond the budget");
+  // The last growth holds the old table (at most max/8 buckets) beside the
+  // new one: the peak stays within the budget too.
+  require((table.max_bucket_count() + table.max_bucket_count() / 8) *
+                  Table::WAYS * sizeof(Table::Slot) <=
+              budget,
+          "the last growth stays within the budget");
   require(table.size() <= table.max_bucket_count() * Table::WAYS,
           "entries fit the fixed capacity");
   require(table.replacements() > 0, "a full table replaces entries");

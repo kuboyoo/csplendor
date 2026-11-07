@@ -130,11 +130,13 @@ def test_dfpn_stops_undecided_at_the_node_limit():
 
 def test_dfpn_table_stays_within_its_byte_budget():
     game = load_game_from_usi_text(BENCH_POSITION)
-    budget = 1024  # four buckets of four 48-byte slots
+    # 8/9 of 1024 bytes holds four buckets of four 48-byte exact slots (768
+    # bytes), so the last growth (old + new table) stays within the budget.
+    budget = 1024
     small = _solve(game, 0, 3, "dfpn", exact=True, dfpn_table_bytes=budget)
     large = _solve(game, 0, 3, "dfpn", exact=True)
     assert _verdict(small) == _verdict(large) == "refuted"
-    assert 0 < small["stats"]["dfpn_table_bytes"] <= budget
+    assert small["stats"]["dfpn_table_bytes"] == 768
     assert small["stats"]["dfpn_table_stores"] > 0
 
 

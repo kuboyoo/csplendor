@@ -61,9 +61,10 @@ inline DfpnNumber dfpn_second_bound(DfpnNumber second) noexcept {
 // Undecided df-pn values, fixed capacity (doc/mate_dfpn_cpp_design.md 第 5 節).
 // Buckets of WAYS slots; a bucket without a free slot overwrites its entry
 // with the least work (nodes visited below it). The bucket count grows from
-// MIN_BUCKETS by doubling and jumps from max/8 to the maximum derived from the
-// byte budget, so a small search never initialises a large table and the
-// table never exceeds the budget (the last growth briefly holds 1/8 more).
+// MIN_BUCKETS by doubling and jumps from max/8 to the maximum, so a small
+// search never initialises a large table. The last growth holds the old table
+// (at most max/8) beside the new one, so the maximum takes 8/9 of the byte
+// budget and even that peak stays within it.
 template <typename Key, typename Hash> class DfpnTable {
 public:
   struct Slot {
@@ -77,7 +78,7 @@ public:
   static constexpr size_t MIN_BUCKETS = 256;
 
   static constexpr size_t buckets_for_bytes(size_t bytes) noexcept {
-    const size_t buckets = bytes / (WAYS * sizeof(Slot));
+    const size_t buckets = bytes / 9 * 8 / (WAYS * sizeof(Slot));
     return buckets < 1 ? 1 : buckets;
   }
 
