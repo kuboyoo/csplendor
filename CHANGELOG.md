@@ -14,6 +14,8 @@
 - 深さ掃引（`search_reveal_verified_mate_depths` / `_anytime`）と `MateSearchSession` は呼び出しの開始時に `jobs` で割った
   件数を決め、全深さ・全枝に同じ値を渡す。`root_mate_probe` の終盤の厳密探索の件数は、ノード上限があるときはそれ以下
   （従来は `max(1, max_nodes)` で、ノード上限 0 のとき 1 件だった）。
+- 計測（69bd2fb との比較）: ランダム終盤 3,024 ケースの判定・主手順・ノード数は同一。BENCH 深さ5 の 3,000万ノードは
+  28.6 秒 → 23.5 秒（200万件）/ 24.8 秒（自動 839万件）、2,500万ノードの RSS のピークの増分は 527 MB → 395 MB / 1,724 MB。
 
 English: the default table cap (`max_memo_states=0`) is now derived once per
 search from the free memory (a quarter, clamped to 64 MiB..2 GiB, split
