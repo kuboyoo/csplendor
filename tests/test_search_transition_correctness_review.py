@@ -11,6 +11,8 @@ def test_reveal_deck_reserve_keeps_preexisting_noble_choice(current_player):
     game.board.current_player = current_player
     player = game.board.get_player(current_player)
     player.bonuses = [10] * 5
+    # 12 + a 3-point noble reaches 15, so the last-move cut keeps the reserve.
+    player.points = 12
     game.board.set_player(current_player, player)
     action = next(
         candidate
@@ -24,12 +26,14 @@ def test_reveal_deck_reserve_keeps_preexisting_noble_choice(current_player):
     assert direct.current_player == current_player
 
     # The reveal solver injects each possible deck card itself. That custom
-    # transition must still run Game's ordinary noble/final-round processing.
+    # transition must still run Game's ordinary noble/final-round processing:
+    # every reveal then leads to the noble choice that wins.
     result = cs.solve_reveal_verified_mate_cpp(
         game,
         attacker=current_player,
         depth=1,
         required_root_action=int(action.pack()),
     )
-    assert result["stats"]["deck_reserve_branches"] == 1
-    assert result["stats"]["nodes"] == 8
+    assert result["proven"]
+    assert result["stats"]["deck_reserve_branches"] == 36
+    assert result["stats"]["nodes"] == 73

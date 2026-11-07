@@ -1,5 +1,17 @@
 # 変更履歴 / Changelog
 
+## 未出荷：詰み探索の最終手カット（2026-11-07）
+
+- 最終ラウンドでない局面で攻め側の残りが1手のとき、手番の終わりに15点に届く手（購入＋貴族、`VISIT_NOBLE`、
+  すでに貴族の条件を満たしている場合のその他の手）だけを展開し、無ければ手を作らずに反証する。めくれ検証・
+  visible-only・準詰みの各探索に入れた。結果は厳密なまま。BENCH 局面では exact 深さ3 が 133万 → 3.3万ノード、
+  visible-only の5手詰めが 149万 → 36万ノード、準詰み深さ2 が 300万ノードで未決 → 1,140 ノードで決着。
+  ランダム終盤 360 ケースで判定は変わらない。点数の計算は `src/solver_win_threshold.h` にまとめた。
+
+English: adds the exact last-move cut (the attacker's last move outside the
+final round must end the turn at 15+ points) to the reveal-verified,
+visible-only and near-mate searches.
+
 ## 未出荷：詰み探索の不具合3件の修正と置換表の既定上限（2026-11-07）
 
 - visible-only ソルバー（`solve_visible_only_winner_cpp`、`--reveal-verified` の候補探索）が、反復窓が

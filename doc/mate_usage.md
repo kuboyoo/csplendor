@@ -15,6 +15,15 @@ C++ の解決器（`solve_reveal_verified_mate_cpp`、`exact_mate_search`、`Mat
 探索本体、root の並列分割（`child_depth`）、`expand_mate_frontier` の `child_depth`、証明 DAG の
 深さラベルと検証は、すべてこの規則に従います。
 
+**最終手カット**: 最終ラウンドでない局面で攻め側の残りが1手のとき、攻め側が勝てるのはこの手番で15点に
+届く場合だけです（15点未満で手番を渡すと、守り側の手で終局しても守り側の15点到達か引き分けで、攻め側の
+勝ちにはならず、終局しなければ攻め側の手が残っていません）。そこで、この節点では手番の終わりに15点以上に
+なる手（購入＋その後に取れる貴族、`VISIT_NOBLE`、すでに貴族の条件を満たしている場合のその他の手）だけを
+展開し、そのような手が無ければ手を作らずに反証します。結果は厳密なままで、葉の層の展開がなくなるため、
+同じ時間でおよそ1手深く読めます。めくれ検証の解決器（`solve_reveal_verified_mate_cpp` と、それを使う
+深さ掃引・`MateSearchSession`・`exact_mate_search`・`root_mate_probe`）、visible-only の候補探索、準詰み
+（残り1手で15点に届かなければ勝率0）に入っています。
+
 
 `scripts/dfpn_mate_solver.py` は、任意局面から player0 または player1 の強制勝利を探索します。
 

@@ -144,6 +144,7 @@
       "solver_reveal_order.h",
       "solver_search_scratch.h",
       "solver_tt_types.h",
+      "solver_win_threshold.h",
       "state_field_roles.h",
       "state_invariants.h",
       "undo_record.h",

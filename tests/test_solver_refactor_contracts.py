@@ -120,8 +120,11 @@ def test_solver_node_and_time_limit_boundaries_remain_distinct():
 
     assert node_limited["unknown_reason"] == "node limit exceeded"
     assert time_limited["unknown_reason"] == "time limit exceeded"
+    # 2026-11-07: the last-move cut refutes the depth-1 root without move
+    # generation (terminal_nodes 0 -> 1, legal_moves 9 -> 0); before,
+    # 5a07ad46...2ebdb.
     assert _digest_without_elapsed(node_limited) == (
-        "5a07ad46e3fda32a97a7471378fd82c5758471e3769de259815b9d5a4102ebdb"
+        "e1638a9d437e9b74fe0290da10f5f996e92ca760491e9eb40ad51b74102c8807"
     )
 
 

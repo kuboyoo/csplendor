@@ -6,6 +6,7 @@
 #include "solver_normal_rollback.h"
 #include "solver_tt_types.h"
 #include "solver_take_groups.h"
+#include "solver_win_threshold.h"
 #include "state_invariants.h"
 #include <algorithm>
 #include <chrono>
@@ -182,8 +183,18 @@ private:
       return ForceStatus::UNKNOWN;
     }
 
+    const bool last_move =
+        csplendor::solver_internal::last_move_cut_applies(game, attacker, depth);
+    if (last_move && !csplendor::solver_internal::can_win_this_turn(game.board)) {
+      ++stats_.terminal_nodes;
+      store_force_entry(key, ForceEntry{ForceStatus::REFUTED, 0, false, 0});
+      return ForceStatus::REFUTED;
+    }
+
     CSPLENDOR_PERF_INC(SolverTemporaryVectorAllocations);
     std::vector<OrderedAction> actions = representative_actions(game);
+    if (last_move)
+      csplendor::solver_internal::keep_winning_last_moves(game.board, actions);
     if (game.current_player() == attacker)
       actions = forced_attacker_actions(game, actions);
     stats_.legal_moves += actions.size();

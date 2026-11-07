@@ -195,16 +195,22 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
 # added on 2026-10-02 (hint_*, line_order_hits, probe_dropped_actions,
 # memo_flushes) are all 0 here; without them each payload, node counts
 # included, still hashes to its pre-change golden value.
+# 2026-11-07: the last-move cut refutes attacker nodes with one move left
+# that cannot reach 15 points without generating moves. The verdicts are
+# unchanged; node counts shrink and an unproven line stops at the first cut
+# node (lines are only consumed for proven mates). Previous digests:
+# seed0_d1 060611af...cbb44c, seed7_d2 fe20c195...ec752, oracle_blank
+# c880392b...61c63e.
 @pytest.mark.parametrize(
     ("fixture", "expected_digest"),
     [
         (
             "seed0_d1",
-            "060611affa5c8b51c72b7b7f2ab0ed1e04c953f7499717a4269d6e58dcfbb44c",
+            "1e00dfdc929dbcdc997e933a808902b94496aa28351e3b475ea1fb6c91c902bf",
         ),
         (
             "seed7_d2",
-            "fe20c1952534ddebe55fbf349a31083c26bbda25b76aa554c9e1dd0f3af4c752",
+            "b5171a73ca81b9b0eac5c1756b53449dc955781e98342bc4a8e54e45674ea29a",
         ),
         (
             "purchase_dag",
@@ -217,7 +223,7 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
         ),
         (
             "oracle_blank",
-            "c880392b51d87c945d2f51c3d067addbae85dcbab7fa0acd8727a1cf3c61c63e",
+            "9c9931a133db3bd7a4a1312a1d47127e14fdadda346037fffd2dcfd34dbbb57a",
         ),
     ],
 )

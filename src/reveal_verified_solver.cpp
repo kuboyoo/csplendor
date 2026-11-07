@@ -9,6 +9,7 @@
 #include "solver_reveal_order.h"
 #include "solver_search_scratch.h"
 #include "solver_tt_types.h"
+#include "solver_win_threshold.h"
 #include <algorithm>
 #include <chrono>
 #include <iterator>
@@ -34,6 +35,11 @@ using csplendor::solver_internal::SearchLimit;
 using csplendor::solver_internal::SearchLimitExceeded;
 using csplendor::solver_internal::StateKeyCore;
 using csplendor::solver_internal::TerminalResult;
+using csplendor::solver_internal::can_win_this_turn;
+using csplendor::solver_internal::keep_winning_last_moves;
+using csplendor::solver_internal::last_move_cut_applies;
+using csplendor::solver_internal::max_noble_points;
+using csplendor::solver_internal::score_after_purchase;
 
 class RevealVerifiedSolver::Impl {
 public:
@@ -725,6 +731,12 @@ private:
       store_entry(memo, key, resolved);
       return resolved.status();
     }
+    const bool last_move = last_move_cut_applies(game, attacker_, depth);
+    if (last_move && !can_win_this_turn(game.board)) {
+      ++stats_.terminal_nodes;
+      store_entry(memo, key, MemoEntry{ForceStatus::REFUTED, 0, -1, false, 0});
+      return ForceStatus::REFUTED;
+    }
 
 #ifdef CSPLENDOR_REUSE_SEARCH_SCRATCH
     SearchScratch::Lease scratch_lease(scratch_);
@@ -735,6 +747,8 @@ private:
         exact_refinement ? proof_ordered_actions(game) : ordered_actions(game);
 #endif
     CSPLENDOR_PERF_INC(SolverTemporaryVectorAllocations);
+    if (last_move)
+      keep_winning_last_moves(game.board, actions);
     filter_probe_actions(game.current_player() == attacker_, actions);
     apply_order_hints(state.board_hash(), game.current_player() == attacker_,
                       actions);
@@ -1515,33 +1529,6 @@ private:
     return -2;
   }
 
-  static int score_after_purchase(const Board &board, const PlayerState &player,
-                                  int card_id) {
-    if (!is_valid_card_id(card_id))
-      return player.points;
-    const Card &card = get_card(card_id);
-    if (!player.can_afford(card))
-      return player.points;
-    std::array<uint8_t, 5> bonuses = player.bonuses;
-    ++bonuses[card.bonus];
-    return static_cast<int>(player.points) + card.points +
-           max_noble_points(board, bonuses);
-  }
-
-  static int max_noble_points(const Board &board,
-                              const std::array<uint8_t, 5> &bonuses) {
-    int points = 0;
-    for (uint8_t noble_id : board.nobles) {
-      const Noble &noble = get_noble(noble_id);
-      bool eligible = true;
-      for (int color = 0; color < 5; ++color)
-        eligible = eligible && bonuses[color] >= noble.requirement[color];
-      if (eligible)
-        points = std::max(points, static_cast<int>(noble.points));
-    }
-    return points;
-  }
-
   std::vector<OrderedAction> ordered_actions(const Game &game) {
     std::vector<OrderedAction> actions;
     fill_ordered_actions(game, actions, false);
@@ -2076,8 +2063,15 @@ private:
       ++stats_.terminal_nodes;
       return 0.0; // repetition inside the horizon: no forced win counted
     }
+    const bool last_move = last_move_cut_applies(game, attacker_, depth);
+    if (last_move && !can_win_this_turn(game.board)) {
+      ++stats_.terminal_nodes;
+      return 0.0;
+    }
     const bool attacker_node = game.current_player() == attacker_;
     std::vector<OrderedAction> actions = proof_ordered_actions(game);
+    if (last_move)
+      keep_winning_last_moves(game.board, actions);
     filter_probe_actions(attacker_node, actions);
     apply_order_hints(key.state.board_hash(), attacker_node, actions);
     prefer_line_move(attacker_node, actions);
