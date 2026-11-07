@@ -7,6 +7,7 @@
 #include "solver_flat_table.h"
 
 #include <atomic>
+#include <cstdlib>
 #include <cstdint>
 #include <iostream>
 #include <map>
@@ -72,7 +73,10 @@ void test_table_growth_under_threads() {
   ConcurrentTableGrowth growth;
   const size_t limit = 400000;
   Table table(limit, &growth);
-  require(table.capacity() == Table::INITIAL_CAPACITY, "starts small");
+  const size_t final_capacity = Table::serial_table::capacity_for(limit);
+  require(table.capacity() <= final_capacity / 8 &&
+              table.capacity() >= Table::MIN_CAPACITY,
+          "starts on the ladder below C / 8");
   const int threads = 8;
   const uint64_t keys = 300000;
   std::atomic<bool> wrong{false};
@@ -98,7 +102,8 @@ void test_table_growth_under_threads() {
   for (std::thread &thread : pool)
     thread.join();
   require(!wrong.load(), "a key read back with a wrong value or missing");
-  require(table.capacity() > Table::INITIAL_CAPACITY, "the arrays grew");
+  require(table.capacity() == final_capacity,
+          "the arrays grew to C (from C / 8)");
   require(table.size() <= limit, "never beyond the entry limit");
   size_t found = 0;
   for (uint64_t k = 1; k <= keys; ++k) {
@@ -109,6 +114,39 @@ void test_table_growth_under_threads() {
     }
   }
   require(found + table.dropped() >= table.size(), "entries are kept");
+}
+
+std::atomic<int> allocations_left{0};
+
+void *failing_calloc(size_t count, size_t size) {
+  if (allocations_left.fetch_sub(1) <= 0)
+    return nullptr;
+  return std::calloc(count, size);
+}
+
+// A growth whose allocation fails keeps the array and drops new entries; no
+// thread waits forever.
+void test_table_growth_allocation_failure() {
+  ConcurrentTableGrowth growth;
+  allocations_left.store(2); // the first array only
+  Table table(400000, &growth, &failing_calloc);
+  const size_t start = table.capacity();
+  std::vector<std::thread> pool;
+  for (int t = 0; t < 4; ++t)
+    pool.emplace_back([&, t] {
+      growth.attach();
+      for (uint64_t k = 1; k <= 60000; ++k) {
+        table.insert(Key{k + static_cast<uint64_t>(t) * 60000}, Value{k});
+        growth.safepoint();
+      }
+      growth.detach();
+    });
+  for (std::thread &thread : pool)
+    thread.join();
+  require(table.capacity() == start, "the failed growth kept the array");
+  require(table.size() <= start, "entries stop at the array's size");
+  require(table.dropped() > 0, "later entries are dropped");
+  require(table.find(Key{1}) != nullptr, "earlier entries stay readable");
 }
 
 // ---- The scheduler over synthetic trees --------------------------------
@@ -165,7 +203,13 @@ struct FakeTree {
       for (int child : branch.children)
         outcomes.push_back(id == 0 ? value(child)
                                    : leaves[static_cast<size_t>(child)]);
-      actions.push_back(combine_and(outcomes));
+      // The serial blank cut: tried once outcome 0 is not refuted; proven,
+      // the action takes outcome 0's value.
+      if (branch.blank && outcomes[0] != ForceStatus::REFUTED &&
+          branch.blank_value == ForceStatus::PROVEN)
+        actions.push_back(outcomes[0]);
+      else
+        actions.push_back(combine_and(outcomes));
     }
     return node.or_node ? combine_or(actions) : combine_and(actions);
   }
@@ -211,9 +255,10 @@ FakeTree random_tree(std::mt19937_64 &rng) {
     branch.blank = outcomes > 1 && pick(3) == 0;
     tree.nodes[0].branches.push_back(branch);
   }
-  // A blank child may prove its action only when every outcome is proven
-  // (blank dominance); otherwise it fails.
-  for (size_t id = 0; id < tree.nodes.size(); ++id)
+  // A blank child may prove its action only when no outcome is refuted
+  // (blank dominance; unknown outcomes are repetitions); otherwise it fails.
+  // Frontiers first: the root's outcomes take their values.
+  for (size_t id = tree.nodes.size(); id-- > 0;)
     for (auto &branch : tree.nodes[id].branches) {
       if (!branch.blank)
         continue;
@@ -221,7 +266,7 @@ FakeTree random_tree(std::mt19937_64 &rng) {
       for (int child : branch.children)
         outcomes.push_back(id == 0 ? tree.value(child)
                                    : tree.leaves[static_cast<size_t>(child)]);
-      branch.blank_value = combine_and(outcomes) == ForceStatus::PROVEN &&
+      branch.blank_value = combine_and(outcomes) != ForceStatus::REFUTED &&
                                    pick(2) == 0
                                ? ForceStatus::PROVEN
                                : ForceStatus::REFUTED;
@@ -438,6 +483,7 @@ int main() {
   try {
     test_table_single_thread();
     test_table_growth_under_threads();
+    test_table_growth_allocation_failure();
     test_scheduler_matches_the_tree_value();
     test_scheduler_limits_and_failures();
     test_solver_verdicts_match_the_serial_search();

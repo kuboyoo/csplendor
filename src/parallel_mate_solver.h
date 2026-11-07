@@ -120,9 +120,11 @@ inline unsigned default_mate_jobs() noexcept {
     if (value > 0)
       return static_cast<unsigned>(value);
   }
-  unsigned cores = physical_core_count();
-  if (cores == 0)
-    cores = std::thread::hardware_concurrency();
+  // Read once: the topology does not change while the process runs.
+  static const unsigned cores = [] {
+    const unsigned physical = physical_core_count();
+    return physical != 0 ? physical : std::thread::hardware_concurrency();
+  }();
 #if defined(__APPLE__)
   const unsigned spare = 0;
 #else
@@ -150,8 +152,9 @@ namespace csplendor::solver_internal {
 // to pay for the split).
 inline constexpr int PARALLEL_MATE_MIN_DEPTH = 3;
 // The outcome index of an action's blank child (doc/mate_usage.md「blank
-// 支配カット」): handed out once the first concrete outcome is proven, as the
-// serial search tries it only then; proven, it proves the action.
+// 支配カット」): handed out once the first concrete outcome came back
+// unrefuted, as the serial search tries it only then; proven, it settles the
+// action with that outcome's value.
 inline constexpr int SPLIT_BLANK = -1;
 
 // A node a worker expanded: decided before its moves (`decided`), or its
@@ -194,8 +197,8 @@ template <typename Move, typename Key> struct SplitExpansion {
 // action's later children wait until its first child is resolved (the
 // "young brothers wait" rule): the first child usually decides an OR node
 // (proof) or an AND node (refutation), so searching its brothers at the same
-// time is mostly wasted. A blank child waits until the first outcome is
-// proven, as in the serial search.
+// time is mostly wasted. A blank child waits until the first outcome came
+// back unrefuted, as in the serial search.
 template <typename Worker> class ParallelMateSearch {
 public:
   using Node = typename Worker::Node;
@@ -309,13 +312,14 @@ private:
 
     std::atomic<bool> decided{false};
     std::atomic<bool> first_resolved{false}; // child 0 came back
-    std::atomic<bool> first_proven{false};   // actions: outcome 0 proven
+    std::atomic<bool> first_survived{false}; // actions: outcome 0 not refuted
     std::atomic<size_t> next_outcome{0};     // actions: claim cursor
     std::atomic<bool> blank_claimed{false};  // actions
 
     size_t remaining = 0;
     bool unknown = false;
-    bool blank_proven = false;
+    bool first_unknown = false; // actions: outcome 0 unknown
+    bool blank_reported = false;
     ForceStatus status = ForceStatus::UNKNOWN;
     int decided_outcome = 0; // actions: the refuting outcome, else 0
   };
@@ -396,7 +400,8 @@ private:
           continue;
       }
       std::unique_lock<std::mutex> lock(mutex_);
-      if (running_ == 0 && generation_.load(std::memory_order_relaxed) == seen)
+      if (running_.load(std::memory_order_relaxed) == 0 &&
+          generation_.load(std::memory_order_relaxed) == seen)
         return; // nothing runs and nothing is available: no work will appear
       // Bounded: the caller's token cancels without notifying.
       changed_.wait_for(lock, std::chrono::milliseconds(1), [&] {
@@ -458,40 +463,43 @@ private:
   }
 
   // The next outcome of `action`: outcome 0 at once, the others once it is
-  // resolved. Counts the claim as running.
+  // resolved. A claim counts as running from before it is taken, so that no
+  // thread sees nothing running while another is taking work.
   bool claim_outcome(Item &action, size_t &outcome) {
     size_t next = action.next_outcome.load(std::memory_order_relaxed);
+    if (next >= action.outcome_count)
+      return false;
+    running_.fetch_add(1, std::memory_order_relaxed);
     while (next < action.outcome_count) {
       if (next > 0 && !action.first_resolved.load(std::memory_order_acquire))
-        return false;
+        break;
       if (action.next_outcome.compare_exchange_weak(next, next + 1,
                                                     std::memory_order_relaxed)) {
         outcome = next;
-        begin_work();
         return true;
       }
     }
+    running_.fetch_sub(1, std::memory_order_relaxed);
     return false;
   }
 
+  // The blank child once outcome 0 came back unrefuted (the serial search
+  // tries the blank cut then, outcome 0 proven or unknown).
   bool claim_blank(Item &action) {
     if (!action.has_blank ||
-        !action.first_proven.load(std::memory_order_acquire) ||
-        action.blank_claimed.load(std::memory_order_relaxed) ||
-        action.blank_claimed.exchange(true, std::memory_order_relaxed))
+        !action.first_survived.load(std::memory_order_acquire) ||
+        action.blank_claimed.load(std::memory_order_relaxed))
       return false;
-    begin_work();
-    return true;
-  }
-
-  void begin_work() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    ++running_;
+    running_.fetch_add(1, std::memory_order_relaxed);
+    if (!action.blank_claimed.exchange(true, std::memory_order_relaxed))
+      return true;
+    running_.fetch_sub(1, std::memory_order_relaxed);
+    return false;
   }
 
   // Under mutex_: one claimed work finished (its results are reported).
   void end_work() {
-    --running_;
+    running_.fetch_sub(1, std::memory_order_relaxed);
     generation_.fetch_add(1, std::memory_order_release);
     changed_.notify_all();
   }
@@ -507,7 +515,7 @@ private:
           worker.child(*root.at, *root.expansion, action.branch, index);
       worker.expand(frontier.node, frontier.expansion);
     } catch (const SearchLimitExceeded &exc) {
-      note_limit(exc);
+      note_limit(exc, frontier.token.get(), &action);
       expanded = false;
     }
     if (expanded && !frontier.expansion.decided)
@@ -532,7 +540,7 @@ private:
         status = worker.search(*node.at, *node.expansion, action.branch,
                                outcome);
       } catch (const SearchLimitExceeded &exc) {
-        note_limit(exc);
+        note_limit(exc, nullptr, &action);
         searched = false;
       }
     }
@@ -542,14 +550,20 @@ private:
     end_work();
   }
 
-  // A limit inside some work: a sibling's decision cancelled it (nothing to
-  // do), or the search is out of nodes/time or cancelled by the caller (stop
-  // every thread; the root stays undecided).
-  void note_limit(const SearchLimitExceeded &exc) {
-    const bool by_caller = user_token_ && user_token_->is_cancelled();
-    const std::string reason = by_caller ? "search cancelled" : exc.what();
-    if (!by_caller && reason == "search cancelled")
-      return;
+  // A limit inside some work (its own token `own`, if any, under `item`): a
+  // cancellation of a token of this search (a decided ancestor, or stop())
+  // needs nothing more; the caller's cancellation, or running out of nodes or
+  // time, stops every thread with that reason (the root stays undecided).
+  void note_limit(const SearchLimitExceeded &exc, const Token *own,
+                  const Item *item) {
+    const std::string reason = exc.what();
+    if (reason == "search cancelled") {
+      bool inside = own != nullptr && own->cancelled_here();
+      for (; item != nullptr && !inside; item = item->parent)
+        inside = item->token->cancelled_here();
+      if (inside)
+        return;
+    }
     {
       std::lock_guard<std::mutex> lock(mutex_);
       if (limit_reason_.empty())
@@ -565,21 +579,37 @@ private:
     if (index == 0)
       item.first_resolved.store(true, std::memory_order_release);
     if (!item.node) {
+      // The blank child as the serial search's blank cut: proven, it settles
+      // the action with outcome 0's value (the rest are skipped); otherwise
+      // the outcomes decide.
       if (index == SPLIT_BLANK) {
-        item.blank_proven = status == ForceStatus::PROVEN;
-        if (item.blank_proven)
-          decide(worker, item, ForceStatus::PROVEN, 0); // outcome 0 is proven
+        item.blank_reported = true;
+        if (status == ForceStatus::PROVEN)
+          return decide(worker, item,
+                        item.first_unknown ? ForceStatus::UNKNOWN
+                                           : ForceStatus::PROVEN,
+                        0);
+        if (item.remaining == 0)
+          decide(worker, item,
+                 item.unknown ? ForceStatus::UNKNOWN : ForceStatus::PROVEN, 0);
         return;
       }
       if (status == ForceStatus::REFUTED)
         return decide(worker, item, ForceStatus::REFUTED, index);
-      if (status == ForceStatus::UNKNOWN)
+      if (status == ForceStatus::UNKNOWN) {
         item.unknown = true;
-      if (index == 0 && status == ForceStatus::PROVEN)
-        item.first_proven.store(true, std::memory_order_release);
-      if (--item.remaining == 0)
-        decide(worker, item,
-               item.unknown ? ForceStatus::UNKNOWN : ForceStatus::PROVEN, 0);
+        item.first_unknown = item.first_unknown || index == 0;
+      }
+      if (index == 0)
+        item.first_survived.store(true, std::memory_order_release);
+      if (--item.remaining > 0)
+        return;
+      // An unknown among the outcomes waits for the blank child, which may
+      // still prove the action.
+      if (item.unknown && item.has_blank && !item.blank_reported)
+        return;
+      decide(worker, item,
+             item.unknown ? ForceStatus::UNKNOWN : ForceStatus::PROVEN, 0);
       return;
     }
     const ForceStatus wins =
@@ -628,7 +658,7 @@ private:
   std::mutex mutex_;
   std::condition_variable changed_;
   std::atomic<uint64_t> generation_{0};
-  size_t running_ = 0; // claimed work not finished (under mutex_)
+  std::atomic<size_t> running_{0}; // claimed work not finished
   std::string limit_reason_;
   std::exception_ptr failure_;
 };

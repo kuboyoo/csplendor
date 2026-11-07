@@ -197,10 +197,11 @@ class ConcurrentTableGrowth {
 public:
   class Table {
   public:
-    // Under the growth: allocate the larger array (false: no growth wanted),
-    // move part `part` of `parts` of the entries (threads run the parts at
-    // once), and switch to the larger array.
-    virtual bool prepare_growth() = 0;
+    // Under the growth: allocate the larger array (false: no growth wanted,
+    // or the allocation failed, after which the table keeps its array and
+    // drops new entries), move part `part` of `parts` of the entries (threads
+    // run the parts at once), and switch to the larger array.
+    virtual bool prepare_growth() noexcept = 0;
     virtual void migrate(size_t part, size_t parts) noexcept = 0;
     virtual void finish_growth() noexcept = 0;
 
@@ -303,9 +304,12 @@ private:
 // at once may both succeed into different slots; find() returns the first,
 // and both hold the same decided value (only decided entries are stored).
 //
-// The arrays start at INITIAL_CAPACITY slots, allocated zeroed so that pages
-// are committed only when written, and double (through `growth`) once 60%
-// full, up to capacity_for(max_entries). The table never flushes or
+// The arrays are allocated zeroed, so that pages are committed only when
+// written, and grow (through `growth`) once 60% full along FlatMemoTable's
+// ladder: with C = capacity_for(max_entries), from the smallest C >> k
+// (k >= 3) not below MIN_CAPACITY, doubling up to C / 8, then C. The one
+// growth that copies a large table (both arrays alive) starts from C / 8, so
+// the peak stays at 1.125 C slots per table. The table never flushes or
 // erases: an insert beyond max_entries entries is dropped, which only costs
 // re-searching that node. A pointer from find() stays valid until the
 // caller's next safepoint.
@@ -317,16 +321,21 @@ public:
   using serial_table = FlatMemoTable<Key, Entry, Hash>;
   using Slot = typename serial_table::Slot;
   static constexpr bool concurrent = true;
-  static constexpr size_t INITIAL_CAPACITY = size_t{1} << 15;
+  static constexpr size_t MIN_CAPACITY = size_t{1} << 15;
+  // calloc(count, size); a test injects allocation failures through it.
+  using Allocate = void *(*)(size_t, size_t);
 
   // Without `growth` the arrays have their final size from the start.
   ConcurrentFlatMemoTable(size_t max_entries,
-                          ConcurrentTableGrowth *growth = nullptr)
+                          ConcurrentTableGrowth *growth = nullptr,
+                          Allocate allocate = &std::calloc)
       : limit_(std::max<size_t>(1, max_entries)),
-        final_capacity_(serial_table::capacity_for(limit_)), growth_(growth) {
-    current_.store(new Array(growth_ ? std::min(final_capacity_, INITIAL_CAPACITY)
-                                     : final_capacity_),
-                   std::memory_order_relaxed);
+        final_capacity_(serial_table::capacity_for(limit_.load())),
+        growth_(growth), allocate_(allocate) {
+    Array *array = Array::create(start_capacity(), allocate_);
+    if (array == nullptr)
+      throw std::bad_alloc();
+    current_.store(array, std::memory_order_relaxed);
     if (growth_)
       growth_->add(*this);
   }
@@ -343,7 +352,9 @@ public:
   size_t capacity() const noexcept {
     return current_.load(std::memory_order_acquire)->capacity;
   }
-  size_t entry_limit() const noexcept { return limit_; }
+  size_t entry_limit() const noexcept {
+    return limit_.load(std::memory_order_relaxed);
+  }
   size_t memory_bytes() const noexcept { return capacity() * (sizeof(Slot) + 1); }
   // Inserts refused because the table held entry_limit() entries.
   uint64_t dropped() const noexcept {
@@ -365,7 +376,8 @@ public:
 
   // False when `key` is already READY or the table is full (dropped).
   bool insert(const Key &key, const Entry &entry) noexcept {
-    if (size_.load(std::memory_order_relaxed) >= limit_) {
+    if (size_.load(std::memory_order_relaxed) >=
+        limit_.load(std::memory_order_relaxed)) {
       dropped_.fetch_add(1, std::memory_order_relaxed);
       return false;
     }
@@ -389,12 +401,22 @@ public:
         fn(array.slots[i].key, array.slots[i].entry);
   }
 
-  bool prepare_growth() override {
+  bool prepare_growth() noexcept override {
     const Array &array = *current_.load(std::memory_order_relaxed);
     if (array.capacity >= final_capacity_ ||
         size_.load(std::memory_order_relaxed) <= grow_at(array.capacity))
       return false;
-    next_ = new Array(std::min(final_capacity_, array.capacity * 2));
+    const size_t capacity = array.capacity >= (final_capacity_ >> 3)
+                                ? final_capacity_
+                                : array.capacity * 2;
+    next_ = Array::create(capacity, allocate_);
+    if (next_ == nullptr) {
+      // Out of memory: keep this array and its entries, store no more.
+      limit_.store(size_.load(std::memory_order_relaxed),
+                   std::memory_order_relaxed);
+      final_capacity_ = array.capacity;
+      return false;
+    }
     return true;
   }
 
@@ -426,22 +448,36 @@ private:
     return capacity / 10 * 6;
   }
 
+  // The first capacity of the ladder (the final one without growth).
+  size_t start_capacity() const noexcept {
+    if (growth_ == nullptr || (final_capacity_ >> 3) < MIN_CAPACITY)
+      return final_capacity_;
+    size_t capacity = final_capacity_ >> 3;
+    while ((capacity >> 1) >= MIN_CAPACITY)
+      capacity >>= 1;
+    return capacity;
+  }
+
   struct Array {
-    explicit Array(size_t slot_count) : capacity(slot_count) {
-      // One extra slot to align the slots to a cache line; calloc leaves the
-      // pages uncommitted until first written.
-      raw_slots = std::calloc(capacity + 1, sizeof(Slot));
-      states = static_cast<std::atomic<uint8_t> *>(
-          std::calloc(capacity, sizeof(std::atomic<uint8_t>)));
-      if (raw_slots == nullptr || states == nullptr) {
-        std::free(raw_slots);
-        std::free(states);
-        throw std::bad_alloc();
+    // Null when the allocation fails. One extra slot aligns the slots to a
+    // cache line; calloc leaves the pages uncommitted until first written.
+    static Array *create(size_t slot_count, Allocate allocate) noexcept {
+      Array *array = new (std::nothrow) Array(slot_count);
+      if (array == nullptr)
+        return nullptr;
+      array->raw_slots = allocate(slot_count + 1, sizeof(Slot));
+      array->states = static_cast<std::atomic<uint8_t> *>(
+          allocate(slot_count, sizeof(std::atomic<uint8_t>)));
+      if (array->raw_slots == nullptr || array->states == nullptr) {
+        delete array;
+        return nullptr;
       }
-      const uintptr_t address = reinterpret_cast<uintptr_t>(raw_slots);
-      slots = reinterpret_cast<Slot *>((address + alignof(Slot) - 1) &
-                                       ~uintptr_t{alignof(Slot) - 1});
+      const uintptr_t address = reinterpret_cast<uintptr_t>(array->raw_slots);
+      array->slots = reinterpret_cast<Slot *>((address + alignof(Slot) - 1) &
+                                              ~uintptr_t{alignof(Slot) - 1});
+      return array;
     }
+    explicit Array(size_t slot_count) noexcept : capacity(slot_count) {}
     ~Array() {
       std::free(raw_slots);
       std::free(states);
@@ -483,9 +519,10 @@ private:
     return false;
   }
 
-  size_t limit_;
-  size_t final_capacity_;
+  std::atomic<size_t> limit_;
+  size_t final_capacity_; // changes only under a growth
   ConcurrentTableGrowth *growth_;
+  Allocate allocate_;
   std::atomic<Array *> current_{nullptr};
   Array *next_ = nullptr; // during a growth
   std::atomic<size_t> size_{0};

@@ -88,32 +88,24 @@ public:
       result.reason = result.proven ? "all_reveals_verified"
                                     : "candidate_mate_not_verified";
       result.line = principal_line(exact_reveal_search_);
-      if (result.proven && include_proof_dag_) {
-        // After a parallel search the DAG is built by the serial search over
-        // this solver's own (empty) tables, which re-proves it.
-        SharedTables *shared = shared_;
-        shared_ = nullptr;
+      // After a parallel search the DAG is built by the serial search over
+      // this solver's own (empty) tables, which re-proves it; the shared
+      // tables are freed first.
+      release_shared_tables();
+      if (result.proven && include_proof_dag_)
         result.proof_dag = build_proof_dag();
-        shared_ = shared;
-      }
     } catch (const SearchLimitExceeded &exc) {
       result.reason = exc.what();
       result.unknown_reason = exc.what();
     }
+    release_shared_tables();
     verify_reveal_state(game);
 
     stats_.elapsed_ms = limits_.elapsed_ms();
-    if (shared_tables_)
-      result.memoized_states = exact_reveal_search_
-                                   ? shared_tables_->exact.size()
-                                   : shared_tables_->blank.size();
-    else
-      result.memoized_states =
-          exact_reveal_search_ ? exact_memo_.size() : memo_.size();
-    if (shared_tables_)
-      shared_tables_->growth.detach();
-    shared_ = nullptr;
-    shared_tables_.reset();
+    result.memoized_states =
+        parallel_jobs_ > 1 ? parallel_memoized_states_
+                           : (exact_reveal_search_ ? exact_memo_.size()
+                                                   : memo_.size());
     result.jobs = parallel_jobs_;
     result.stats = stats_;
     return result;
@@ -657,6 +649,20 @@ private:
     Impl *impl_;
   };
 
+  // Records the shared table's size, then detaches this thread and frees the
+  // tables of a parallel search.
+  void release_shared_tables() {
+    if (!shared_tables_)
+      return;
+    parallel_memoized_states_ = exact_reveal_search_
+                                    ? shared_tables_->exact.size()
+                                    : shared_tables_->blank.size();
+    if (shared_ != nullptr)
+      shared_->growth.detach();
+    shared_ = nullptr;
+    shared_tables_.reset();
+  }
+
   // The workers are copies of this search after begin_search() (same root,
   // hidden catalog, limits and clock) without its tables, each with its own
   // line tables and statistics, over one pair of shared tables.
@@ -703,7 +709,13 @@ private:
     root.depth = depth_;
     root.exact = exact;
     csplendor::solver_internal::ParallelMateSearch<SplitWorker> search;
-    const auto result = search.run(handles, root, limits_.cancellation_token());
+    typename decltype(search)::Result result;
+    try {
+      result = search.run(handles, root, limits_.cancellation_token());
+    } catch (...) {
+      shared_tables_.reset(); // a failure other than a search limit
+      throw;
+    }
     stats_ = RevealVerifiedSearchStats();
     for (const auto &worker : workers)
       add_search_stats(stats_, worker->stats_);
@@ -870,6 +882,7 @@ private:
   uint64_t max_nodes_ = 0;
   unsigned jobs_ = 1; // 0 = csplendor::default_mate_jobs()
   unsigned parallel_jobs_ = 1; // the threads of the last solve()
+  size_t parallel_memoized_states_ = 0;
   // The parallel search's tables (owned here, shared with the workers) and
   // the tables forced_win() and principal_line() use while set.
   std::shared_ptr<SharedTables> shared_tables_;
@@ -1364,7 +1377,9 @@ private:
               ? for_each_proof_outcome(game, ordered, visit_outcome, blank_cut)
               : for_each_search_outcome(game, ordered, visit_outcome);
       line_hash_ = line_before;
-      if (!completed && !action_refuted)
+      // A move none of whose outcomes could be materialized is unknown (not
+      // vacuously proven), as in the parallel search.
+      if ((!completed || !has_representative_reveal) && !action_refuted)
         action_unknown = true;
 
       if (!representative.has_action()) {

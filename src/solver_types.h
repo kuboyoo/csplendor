@@ -221,6 +221,11 @@ public:
 
   void reset() noexcept { cancelled_.store(false, std::memory_order_release); }
 
+  // This token's own flag, without its parents.
+  bool cancelled_here() const noexcept {
+    return cancelled_.load(std::memory_order_acquire);
+  }
+
   bool is_cancelled() const noexcept {
     return cancelled_.load(std::memory_order_acquire) ||
            (parent_ && parent_->is_cancelled());
