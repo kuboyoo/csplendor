@@ -10,13 +10,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
-import csplendor as cs
-from csplendor import mate_depth, near_mate
 from csplendor._csplendor import (
     NativeMateSearchSession,
     solve_reveal_verified_root_split_cpp,
 )
+
+import csplendor as cs
+from csplendor import mate_depth, near_mate
 from csplendor.mate_frontier import expand_mate_frontier
 
 EMERALD_L1 = [

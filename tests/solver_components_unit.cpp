@@ -878,11 +878,13 @@ void test_incremental_reveal_search_state_and_fallback() {
 }
 
 void test_reveal_solver_sidecar_restores_on_node_limit() {
-  // A canonical root enables the sidecar.  Depth one creates blank visible
-  // slots, so the defender's non-exact search also traverses oracle actions.
-  // The deliberately small limit exits from a nested branch; verify builds
-  // compare the restored root sidecar after the exception is caught.
-  RevealVerifiedSolver solver(0, 1, 20, 0.0);
+  // A canonical root enables the sidecar.  The attacker's first move creates
+  // blank visible slots, so the defender's non-exact search also traverses
+  // oracle actions. Depth two keeps the root out of the last-move cut (a
+  // 0-point attacker cannot reach 15 in one move). The deliberately small
+  // limit exits from a nested branch; verify builds compare the restored root
+  // sidecar after the exception is caught.
+  RevealVerifiedSolver solver(0, 2, 20, 0.0);
   const auto result = solver.solve(Game(0));
   if (result.unknown_reason != "node limit exceeded") {
     throw std::runtime_error(
