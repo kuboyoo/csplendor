@@ -2,7 +2,6 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _distribution_version
 
 from ._csplendor import (
-    DEFAULT_MAX_MEMO_STATES,
     MCTS,
     Action,
     ActionEncoderCpp,
@@ -40,6 +39,7 @@ from ._csplendor import (
     StateEncoder,
     V3SearchConfig,
     V3SearchSession,
+    available_memory_bytes,
     exact_mate_search,
     get_all_cards,
     get_all_nobles,
@@ -49,10 +49,12 @@ from ._csplendor import (
     mcts_search_root_parallel_native,
     near_mate_probability_cpp,
     near_mate_search,
+    resolve_max_memo_states,
     root_mate_probe,
     solve_reveal_verified_frontier_cpp,
     solve_reveal_verified_mate_cpp,
     solve_visible_only_winner_cpp,
+    solver_memory_budget_bytes,
     v3_semantic_group_id,
     v5_semantic_group_id,
 )
@@ -103,7 +105,9 @@ __all__ = [
     "near_mate_probability_cpp",
     "near_mate_search",
     "exact_mate_search",
-    "DEFAULT_MAX_MEMO_STATES",
+    "available_memory_bytes",
+    "solver_memory_budget_bytes",
+    "resolve_max_memo_states",
     "ExactMateSearchConfig",
     "ExactMateSearchResult",
     "NearMateSearchConfig",

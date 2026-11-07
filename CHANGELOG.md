@@ -1,5 +1,25 @@
 # 変更履歴 / Changelog
 
+## 未出荷：探索の表の上限を端末の空きメモリから決める（2026-11-07）
+
+- 詰み探索・準詰み・visible-only の表の上限 `max_memo_states` の既定を 0（自動）にした。探索の開始時に1回だけ、空きメモリ
+  （Linux は `MemAvailable` と cgroup v2 の `memory.max − memory.current` の小さい方、macOS は `host_statistics64`、Windows は
+  `GlobalMemoryStatusEx`）の 1/4 を 64 MiB〜2 GiB に挟んでジョブ数で割った予算を、1 件 256 バイトで件数にする。空きメモリが
+  取れなければ 512,000,000 バイト（200万件、従来の固定の既定と同じ）。WASM は 256 MiB。正の `max_memo_states` はそのまま使う
+  （無制限の 0 は廃止）。`src/solver_memory_budget.h`、`doc/mate_usage.md` の「探索のメモリ予算」。
+- `DEFAULT_MAX_MEMO_STATES` を削除し、`available_memory_bytes()`、`solver_memory_budget_bytes(available_bytes=None, jobs=1)`、
+  `resolve_max_memo_states(max_memo_states=0, memory_budget_bytes=0, jobs=1)` を足した。`RootMateProbeConfig`・
+  `NearMateSearchConfig`・`ExactMateSearchConfig` に `memory_budget_bytes`（0 = 自動。WASM の呼び出し側が渡す）を足し、
+  `solve_visible_only_winner_cpp` に `max_memo_states` を足した（visible-only の 3 表は従来は上限なし）。
+- 深さ掃引（`search_reveal_verified_mate_depths` / `_anytime`）と `MateSearchSession` は呼び出しの開始時に `jobs` で割った
+  件数を決め、全深さ・全枝に同じ値を渡す。`root_mate_probe` の終盤の厳密探索の件数は、ノード上限があるときはそれ以下
+  （従来は `max(1, max_nodes)` で、ノード上限 0 のとき 1 件だった）。
+
+English: the default table cap (`max_memo_states=0`) is now derived once per
+search from the free memory (a quarter, clamped to 64 MiB..2 GiB, split
+across jobs; 512 MB when unknown, 256 MiB on WASM). `DEFAULT_MAX_MEMO_STATES`
+is gone; `memory_budget_bytes` lets the WASM caller pass a budget.
+
 ## 未出荷：証明の移植の表に上限を付ける（2026-11-07）
 
 - 証明の移植の表（`line_proofs_` / `line_refutations_`）を `src/solver_line_table.h` の `LineTable` にし、上限を付けた。

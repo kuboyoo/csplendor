@@ -11,6 +11,7 @@
 #include "game.h"
 #include "noble_data.h"
 #include "reveal_verified_solver.h"
+#include "solver_memory_budget.h"
 
 #include <chrono>
 #include <cstdint>
@@ -50,7 +51,10 @@ struct ExactMateSearchConfig {
   int max_depth = 3;
   uint64_t max_nodes = 0;          // cumulative over all depths, 0 = unlimited
   double time_limit_seconds = 0.0; // cumulative over all depths, 0 = unlimited
-  size_t max_memo_states = DEFAULT_MAX_MEMO_STATES; // 0 = unbounded
+  // Table cap; 0 = from memory_budget_bytes (0 = the free memory), fixed once
+  // per call (doc/mate_usage.md「探索のメモリ予算」).
+  size_t max_memo_states = 0;
+  uint64_t memory_budget_bytes = 0;
 };
 
 struct ExactMateSearchResult {
@@ -91,6 +95,8 @@ inline ExactMateSearchResult exact_mate_search(const Game &game,
 
   result.status = "no_mate_within_max_depth";
   result.stop_reason = "max_depth_reached";
+  const size_t max_memo_states =
+      resolve_max_memo_states(config.max_memo_states, config.memory_budget_bytes);
   for (int depth = config.min_depth; depth <= config.max_depth; ++depth) {
     if (config.max_nodes != 0 && result.nodes >= config.max_nodes) {
       result.status = "unknown";
@@ -107,7 +113,7 @@ inline ExactMateSearchResult exact_mate_search(const Game &game,
     const uint64_t remaining_nodes = config.max_nodes == 0 ? 0 : config.max_nodes - result.nodes;
     RevealVerifiedSolver solver(config.attacker, depth, remaining_nodes, remaining_time, {},
                                 false, 100000, 500000, UINT64_MAX, false, 0, true, true);
-    solver.set_max_memo_states(config.max_memo_states);
+    solver.set_max_memo_states(max_memo_states);
     const RevealVerifiedSearchResult raw = solver.solve(game);
     result.nodes += raw.stats.nodes;
     if (raw.proven) {

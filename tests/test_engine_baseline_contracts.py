@@ -36,7 +36,7 @@ EXPECTED_PUBLIC_EXPORTS = {
     "near_mate_probability_cpp",
     "near_mate_search", "NearMateSearchConfig", "NearMateSearchResult",
     "exact_mate_search", "ExactMateSearchConfig", "ExactMateSearchResult",
-    "DEFAULT_MAX_MEMO_STATES",
+    "available_memory_bytes", "solver_memory_budget_bytes", "resolve_max_memo_states",
     "NEAR_MATE_FORMAT",
     "search_near_mate",
     "root_mate_probe", "RootMateProbeConfig", "RootMateProbeResult",

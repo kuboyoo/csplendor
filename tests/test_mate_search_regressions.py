@@ -241,11 +241,12 @@ def test_visible_only_survives_pass_below_long_repetition_window():
     assert completed.returncode == 0, completed.stderr
 
 
-def test_memo_cap_is_bounded_by_default():
-    cap = cs.DEFAULT_MAX_MEMO_STATES
-    assert cap == 2_000_000
-    assert cs.ExactMateSearchConfig().max_memo_states == cap
-    assert cs.NearMateSearchConfig().max_memo_states == cap
+def test_memo_cap_is_automatic_by_default():
+    # 0 = derive the cap from the free memory at the start of the search.
+    assert not hasattr(cs, "DEFAULT_MAX_MEMO_STATES")
+    for config in (cs.ExactMateSearchConfig(), cs.NearMateSearchConfig()):
+        assert config.max_memo_states == 0 and config.memory_budget_bytes == 0
+    assert cs.RootMateProbeConfig().memory_budget_bytes == 0
     functions = [
         mate_depth.search_reveal_verified_mate_depths,
         mate_depth.search_reveal_verified_mate_anytime,
@@ -253,4 +254,4 @@ def test_memo_cap_is_bounded_by_default():
     ]
     for function in functions:
         default = inspect.signature(function).parameters["max_memo_states"].default
-        assert default == cap, function.__name__
+        assert default == 0, function.__name__

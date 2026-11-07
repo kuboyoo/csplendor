@@ -10,6 +10,7 @@
 #include "action_encoder_v5.h"
 #include "game.h"
 #include "reveal_verified_solver.h"
+#include "solver_memory_budget.h"
 
 #include <algorithm>
 #include <chrono>
@@ -32,7 +33,10 @@ struct NearMateSearchConfig {
   double time_limit_seconds = 0.0; // cumulative over all queries, 0 = unlimited
   bool no_take_probe = false;
   bool line_transplant = true;
-  size_t max_memo_states = DEFAULT_MAX_MEMO_STATES;
+  // Table cap; 0 = from memory_budget_bytes (0 = the free memory), fixed once
+  // per call (doc/mate_usage.md「探索のメモリ予算」).
+  size_t max_memo_states = 0;
+  uint64_t memory_budget_bytes = 0;
 };
 
 struct NearMateDepthBound {
@@ -95,6 +99,8 @@ inline NearMateSearchResult near_mate_search(
   NearMateSearchResult result;
   result.thresholds = ladder;
   result.stop_reason = "max_depth_reached";
+  const size_t max_memo_states =
+      resolve_max_memo_states(config.max_memo_states, config.memory_budget_bytes);
 
   // A restricted (no_take_probe) query that misses a threshold has not seen
   // every attacker move, so it refutes nothing: the threshold stays open.
@@ -126,7 +132,7 @@ inline NearMateSearchResult near_mate_search(
                                   false, 0, true, true, cancellation_token);
       solver.set_line_transplant(config.line_transplant);
       solver.set_no_take_probe(config.no_take_probe);
-      solver.set_max_memo_states(config.max_memo_states);
+      solver.set_max_memo_states(max_memo_states);
       if (order_hints)
         solver.set_order_hints(order_hints, 0);
       const NearMateResult raw =

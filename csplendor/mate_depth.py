@@ -8,11 +8,11 @@ from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 
 from ._csplendor import (
-    DEFAULT_MAX_MEMO_STATES,
     Game,
     MateSearchCancellationToken,
     get_card,
     get_noble,
+    resolve_max_memo_states,
     solve_reveal_verified_mate_cpp,
     solve_reveal_verified_root_split_cpp,
 )
@@ -95,7 +95,7 @@ def _solve_parallel_branch(
     order_hints: Any = None,
     line_transplant: bool = True,
     no_take_probe: bool = False,
-    max_memo_states: int = DEFAULT_MAX_MEMO_STATES,
+    max_memo_states: int = 0,
 ) -> dict[str, Any]:
     if cancellation_token.is_cancelled:
         return _unknown_native(int(edge["child_depth"]), "search cancelled")
@@ -139,7 +139,7 @@ def _solve_positive_portfolio(
     order_hints: Any = None,
     line_transplant: bool = True,
     no_take_probe: bool = False,
-    max_memo_states: int = DEFAULT_MAX_MEMO_STATES,
+    max_memo_states: int = 0,
 ) -> dict[str, Any]:
     if cancellation_token.is_cancelled:
         return _unknown_native(depth, "search cancelled")
@@ -241,7 +241,7 @@ def _solve_depth_parallel(
     order_hints: Any = None,
     line_transplant: bool = True,
     no_take_probe: bool = False,
-    max_memo_states: int = DEFAULT_MAX_MEMO_STATES,
+    max_memo_states: int = 0,
 ) -> Optional[dict[str, Any]]:
     """Solve one exact depth by splitting root actions/reveals across threads."""
     split_started = time.monotonic()
@@ -642,7 +642,7 @@ def search_reveal_verified_mate_depths(
     order_hints: Any = None,
     line_transplant: bool = True,
     no_take_probe: bool = False,
-    max_memo_states: int = DEFAULT_MAX_MEMO_STATES,
+    max_memo_states: int = 0,
 ) -> dict[str, Any]:
     """Search consecutive mate depths until a sound stopping condition.
 
@@ -703,6 +703,9 @@ def search_reveal_verified_mate_depths(
     ) or bool(no_take_probe)
     if restricted_probe and include_proof_dag:
         raise ValueError("a restricted probe cannot build a proof DAG")
+    # 0 = from the free memory, fixed once for every depth and branch
+    # (doc/mate_usage.md「探索のメモリ予算」).
+    max_memo_states = resolve_max_memo_states(max_memo_states, jobs=_effective_jobs(jobs))
     started = time.monotonic()
     deadline = (
         started + time_limit_seconds if time_limit_seconds > 0.0 else None
@@ -907,7 +910,7 @@ def search_reveal_verified_mate_anytime(
     order_hints: Any = None,
     line_transplant: bool = True,
     no_take_probe: bool = False,
-    max_memo_states: int = DEFAULT_MAX_MEMO_STATES,
+    max_memo_states: int = 0,
 ) -> dict[str, Any]:
     """Search progressively deeper for a sound mate without proving minimality.
 
@@ -931,6 +934,7 @@ def search_reveal_verified_mate_anytime(
             raise ValueError("required_root_action requires attacker to move")
         if required_code not in legal_by_code:
             raise ValueError("required_root_action must be legal in the root state")
+    max_memo_states = resolve_max_memo_states(max_memo_states, jobs=_effective_jobs(jobs))
 
     started = time.monotonic()
     global_deadline = (

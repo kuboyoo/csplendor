@@ -65,6 +65,11 @@ file(GENERATE OUTPUT "${normal_rollback_header_source}"
      CONTENT "#include \"solver_normal_rollback.h\"\nint main() { return 0; }\n")
 csplendor_add_native_test(header_solver_normal_rollback "${normal_rollback_header_source}"
                           "header;standalone;internal" 10)
+set(memory_budget_header_source "${CMAKE_CURRENT_BINARY_DIR}/header_solver_memory_budget.cpp")
+file(GENERATE OUTPUT "${memory_budget_header_source}"
+     CONTENT "#include \"solver_memory_budget.h\"\nint main() { return csplendor::resolve_max_memo_states(0) > 0 ? 0 : 1; }\n")
+csplendor_add_native_test(header_solver_memory_budget "${memory_budget_header_source}"
+                          "header;standalone;internal" 10)
 csplendor_add_native_test(solver_normal_rollback_unit solver_normal_rollback_unit.cpp
                           "unit;solver;rollback;oracle" 30)
 set(rollback_fault_header_source "${CMAKE_CURRENT_BINARY_DIR}/header_solver_rollback_faults.cpp")

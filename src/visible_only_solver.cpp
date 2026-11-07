@@ -2,6 +2,7 @@
 #include "action.h"
 #include "perf_counters.h"
 #include "solver_action_filter.h"
+#include "solver_memory_budget.h"
 #include "solver_path.h"
 #include "solver_normal_rollback.h"
 #include "solver_tt_types.h"
@@ -26,10 +27,11 @@ using csplendor::solver_internal::ZeroSumScore;
 
 class VisibleOnlySolver::Impl {
 public:
-  Impl(uint64_t max_nodes, double time_limit_seconds)
-      : limits_(max_nodes, time_limit_seconds) {}
+  Impl(uint64_t max_nodes, double time_limit_seconds, size_t max_memo_states)
+      : limits_(max_nodes, time_limit_seconds), max_memo_states_(max_memo_states) {}
 
   VisibleOnlySearchResult solve(const Game &input) {
+    memo_cap_ = csplendor::resolve_max_memo_states(max_memo_states_);
     memo_.clear();
     forced_memo_.clear();
     forced_bounds_.clear();
@@ -121,11 +123,22 @@ private:
   std::unordered_map<StateKey, Entry, StateKeyHash> memo_;
   std::unordered_map<DepthStateKey, ForceEntry, DepthStateKeyHash> forced_memo_;
   std::unordered_map<StateKey, ForceBounds, StateKeyHash> forced_bounds_;
+  size_t max_memo_states_ = 0; // 0 = from the memory budget
+  size_t memo_cap_ = 0;        // resolved at solve()
   Game root_{0};
   bool compact_rollback_ = false;
   static constexpr int FORCED_WIN_MAX_DEPTH = 8;
   static constexpr size_t ATTACKER_TAKE_LIMIT = 6;
   static constexpr size_t ATTACKER_RESERVE_LIMIT = 3;
+
+  // The entry for `key`, flushing the table first at the cap (the search
+  // stays exact; doc/mate_usage.md「探索のメモリ予算」).
+  template <typename Map, typename Key>
+  typename Map::mapped_type &memo_slot(Map &map, const Key &key) {
+    if (map.size() >= memo_cap_ && map.find(key) == map.end())
+      map.clear();
+    return map[key];
+  }
 
   static size_t path_reserve_capacity(int remaining_depth) noexcept {
     const size_t depth = static_cast<size_t>(std::max(remaining_depth, 1));
@@ -167,14 +180,14 @@ private:
         CSPLENDOR_PERF_INC(SolverTtHits);
         ++stats_.memo_hits;
         CSPLENDOR_PERF_INC(SolverTtStores);
-        forced_memo_[key] = bounds.proven;
+        memo_slot(forced_memo_, key) = bounds.proven;
         return ForceStatus::PROVEN;
       }
       if (bounds.max_refuted_depth >= depth) {
         CSPLENDOR_PERF_INC(SolverTtHits);
         ++stats_.memo_hits;
         CSPLENDOR_PERF_INC(SolverTtStores);
-        forced_memo_[key] = bounds.refuted;
+        memo_slot(forced_memo_, key) = bounds.refuted;
         return ForceStatus::REFUTED;
       }
     }
@@ -250,9 +263,9 @@ private:
 
   void store_force_entry(const DepthStateKey &key, const ForceEntry &entry) {
     CSPLENDOR_PERF_INC(SolverTtStores);
-    forced_memo_[key] = entry;
+    memo_slot(forced_memo_, key) = entry;
     CSPLENDOR_PERF_INC(SolverTtStores);
-    ForceBounds &bounds = forced_bounds_[key.state];
+    ForceBounds &bounds = memo_slot(forced_bounds_, key.state);
     if (entry.status() == ForceStatus::PROVEN &&
         key.depth < bounds.min_proven_depth) {
       bounds.min_proven_depth = key.depth;
@@ -305,7 +318,7 @@ private:
     if (actions.empty()) {
       ++stats_.terminal_nodes;
       const int score = score_from_winner(adjudicate_by_score(game));
-      memo_[key] = Entry{score,
+      memo_slot(memo_, key) = Entry{score,
                          Entry::Bound::EXACT,
                          store_reason(EntryReason::NoVisibleAction),
                          0,
@@ -351,7 +364,7 @@ private:
       bound = Entry::Bound::UPPER;
     else if (best_score >= original_beta)
       bound = Entry::Bound::LOWER;
-    memo_[key] = Entry{
+    memo_slot(memo_, key) = Entry{
         best_score,  bound,           score_reason(best_score, current_player),
         best_action, has_best_action, actions.size()};
     CSPLENDOR_PERF_INC(SolverTtStores);
@@ -686,8 +699,9 @@ private:
 };
 
 VisibleOnlySolver::VisibleOnlySolver(uint64_t max_nodes,
-                                     double time_limit_seconds)
-    : impl_(std::make_unique<Impl>(max_nodes, time_limit_seconds)) {}
+                                     double time_limit_seconds,
+                                     size_t max_memo_states)
+    : impl_(std::make_unique<Impl>(max_nodes, time_limit_seconds, max_memo_states)) {}
 
 VisibleOnlySolver::~VisibleOnlySolver() = default;
 

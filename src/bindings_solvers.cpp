@@ -5,6 +5,7 @@
 #include "exact_mate_search.h"
 #include "near_mate_probe.h"
 #include "root_mate_probe.h"
+#include "solver_memory_budget.h"
 #include "visible_only_solver.h"
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
@@ -267,7 +268,18 @@ py::dict proof_dag_to_py_compact(const RevealVerifiedProofDag &dag) {
 namespace csplendor::python {
 
 void bind_solvers(py::module_ &m) {
-  m.attr("DEFAULT_MAX_MEMO_STATES") = DEFAULT_MAX_MEMO_STATES;
+  // doc/mate_usage.md「探索のメモリ予算」.
+  m.def("available_memory_bytes", &csplendor::available_memory_bytes);
+  m.def(
+      "solver_memory_budget_bytes",
+      [](std::optional<uint64_t> available_bytes, unsigned jobs) {
+        return csplendor::solver_memory_budget_bytes(
+            available_bytes ? *available_bytes : csplendor::available_memory_bytes(), jobs);
+      },
+      py::arg("available_bytes") = py::none(), py::arg("jobs") = 1);
+  m.def("resolve_max_memo_states", &csplendor::resolve_max_memo_states,
+        py::arg("max_memo_states") = 0, py::arg("memory_budget_bytes") = 0,
+        py::arg("jobs") = 1);
   using csplendor::RootMateProbeConfig;
   using csplendor::RootMateProbeResult;
   py::class_<RootMateProbeConfig>(m, "RootMateProbeConfig")
@@ -286,7 +298,8 @@ void bind_solvers(py::module_ &m) {
       .def_readwrite("endgame_exact_depth", &RootMateProbeConfig::endgame_exact_depth)
       .def_readwrite("max_cache_states", &RootMateProbeConfig::max_cache_states)
       .def_readwrite("warm_start_nodes", &RootMateProbeConfig::warm_start_nodes)
-      .def_readwrite("warm_start_time_ms", &RootMateProbeConfig::warm_start_time_ms);
+      .def_readwrite("warm_start_time_ms", &RootMateProbeConfig::warm_start_time_ms)
+      .def_readwrite("memory_budget_bytes", &RootMateProbeConfig::memory_budget_bytes);
 
   py::class_<RootMateProbeResult>(m, "RootMateProbeResult")
       .def_readonly("attempted", &RootMateProbeResult::attempted)
@@ -331,7 +344,8 @@ void bind_solvers(py::module_ &m) {
       .def_readwrite("time_limit_seconds", &csplendor::NearMateSearchConfig::time_limit_seconds)
       .def_readwrite("no_take_probe", &csplendor::NearMateSearchConfig::no_take_probe)
       .def_readwrite("line_transplant", &csplendor::NearMateSearchConfig::line_transplant)
-      .def_readwrite("max_memo_states", &csplendor::NearMateSearchConfig::max_memo_states);
+      .def_readwrite("max_memo_states", &csplendor::NearMateSearchConfig::max_memo_states)
+      .def_readwrite("memory_budget_bytes", &csplendor::NearMateSearchConfig::memory_budget_bytes);
   py::class_<csplendor::NearMateSearchResult>(m, "NearMateSearchResult")
       .def_readonly("thresholds", &csplendor::NearMateSearchResult::thresholds)
       .def_readonly("lower", &csplendor::NearMateSearchResult::lower)
@@ -361,7 +375,8 @@ void bind_solvers(py::module_ &m) {
       .def_readwrite("max_depth", &csplendor::ExactMateSearchConfig::max_depth)
       .def_readwrite("max_nodes", &csplendor::ExactMateSearchConfig::max_nodes)
       .def_readwrite("time_limit_seconds", &csplendor::ExactMateSearchConfig::time_limit_seconds)
-      .def_readwrite("max_memo_states", &csplendor::ExactMateSearchConfig::max_memo_states);
+      .def_readwrite("max_memo_states", &csplendor::ExactMateSearchConfig::max_memo_states)
+      .def_readwrite("memory_budget_bytes", &csplendor::ExactMateSearchConfig::memory_budget_bytes);
   py::class_<csplendor::ExactMateSearchResult>(m, "ExactMateSearchResult")
       .def_readonly("status", &csplendor::ExactMateSearchResult::status)
       .def_readonly("stop_reason", &csplendor::ExactMateSearchResult::stop_reason)
@@ -578,7 +593,7 @@ void bind_solvers(py::module_ &m) {
           py::arg("order_hints") = py::none(),
           py::arg("line_transplant") = true,
           py::arg("no_take_probe") = false,
-      py::arg("max_memo_states") = DEFAULT_MAX_MEMO_STATES)
+      py::arg("max_memo_states") = 0)
       .def("clear", &RevealVerifiedSolver::clear_exact_cache)
       .def("trim", &RevealVerifiedSolver::trim_exact_cache,
            py::arg("max_cache_states"))
@@ -587,7 +602,8 @@ void bind_solvers(py::module_ &m) {
 
   m.def(
       "solve_visible_only_winner_cpp",
-      [](const Game &game, uint64_t max_nodes, double time_limit_seconds) {
+      [](const Game &game, uint64_t max_nodes, double time_limit_seconds,
+         size_t max_memo_states) {
         // Snapshot while the GIL still excludes Python-side Board mutation.
         // The solver releases the GIL and must not keep reading the caller's
         // live vectors concurrently with Python editor setters.
@@ -595,7 +611,7 @@ void bind_solvers(py::module_ &m) {
         VisibleOnlySearchResult result;
         {
           py::gil_scoped_release release;
-          result = VisibleOnlySolver(max_nodes, time_limit_seconds)
+          result = VisibleOnlySolver(max_nodes, time_limit_seconds, max_memo_states)
                        .solve(input_snapshot);
         }
 
@@ -632,7 +648,7 @@ void bind_solvers(py::module_ &m) {
         return payload;
       },
       py::arg("game"), py::arg("max_nodes") = 0,
-      py::arg("time_limit_seconds") = 0.0);
+      py::arg("time_limit_seconds") = 0.0, py::arg("max_memo_states") = 0);
 
   m.def(
       "solve_reveal_verified_frontier_cpp",
@@ -801,7 +817,7 @@ void bind_solvers(py::module_ &m) {
       py::arg("game"), py::arg("attacker"), py::arg("depth"),
       py::arg("max_nodes") = 0, py::arg("time_limit_seconds") = 0.0,
       py::arg("root_exact") = true, py::arg("no_take_probe") = false,
-      py::arg("line_transplant") = true, py::arg("max_memo_states") = DEFAULT_MAX_MEMO_STATES,
+      py::arg("line_transplant") = true, py::arg("max_memo_states") = 0,
       py::arg("order_hints") = py::none(),
       py::arg("cancellation_token") = nullptr,
       py::arg("alpha") = 0.0, py::arg("beta") = 1.0,
@@ -907,7 +923,7 @@ void bind_solvers(py::module_ &m) {
       py::arg("order_hints") = py::none(),
       py::arg("line_transplant") = true,
       py::arg("no_take_probe") = false,
-      py::arg("max_memo_states") = DEFAULT_MAX_MEMO_STATES);
+      py::arg("max_memo_states") = 0);
 
   m.def(
       "solve_reveal_verified_mate_cpp",
@@ -1042,7 +1058,7 @@ void bind_solvers(py::module_ &m) {
       py::arg("order_hints") = py::none(),
       py::arg("line_transplant") = true,
       py::arg("no_take_probe") = false,
-      py::arg("max_memo_states") = DEFAULT_MAX_MEMO_STATES);
+      py::arg("max_memo_states") = 0);
 }
 
 } // namespace csplendor::python

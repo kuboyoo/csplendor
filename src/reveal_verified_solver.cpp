@@ -7,6 +7,7 @@
 #include "solver_action_filter.h"
 #include "solver_card_equivalence.h"
 #include "solver_line_table.h"
+#include "solver_memory_budget.h"
 #include "solver_path.h"
 #include "solver_reveal_order.h"
 #include "solver_search_scratch.h"
@@ -65,9 +66,7 @@ public:
         strict_preferred_attacker_actions_(strict_preferred_attacker_actions),
         strict_preferred_attacker_prefix_(strict_preferred_attacker_prefix),
         exhaustive_attacker_actions_(exhaustive_attacker_actions),
-        exact_reveal_search_(exact_reveal_search) {
-    set_max_memo_states(max_memo_states_);
-  }
+        exact_reveal_search_(exact_reveal_search) {}
 
   RevealVerifiedSearchResult solve(const Game &input) {
     max_cache_states_ = 0;
@@ -118,12 +117,10 @@ public:
     include_proof_dag_ = false;
     max_cache_states_ = max_cache_states;
 
+    Game game = begin_search(input, false);
     // Keep the carried-over table at most half of the flush cap, so that the
     // first new entries do not flush everything the session retained.
-    trim_exact_cache(max_memo_states_ ? std::min(max_cache_states,
-                                                 std::max<size_t>(1, max_memo_states_ / 2))
-                                      : max_cache_states);
-    Game game = begin_search(input, false);
+    trim_exact_cache(std::min(max_cache_states, std::max<size_t>(1, memo_cap_ / 2)));
     RevealVerifiedSearchResult result;
     result.attacker = attacker_;
     result.depth = depth_;
@@ -167,11 +164,6 @@ public:
   void set_line_transplant(bool enabled) { line_transplant_ = enabled; }
   void set_max_memo_states(size_t limit) {
     max_memo_states_ = limit;
-    memo_.set_entry_limit(limit);
-    exact_memo_.set_entry_limit(limit);
-    const size_t line_slots = limit ? limit : SIZE_MAX;
-    line_proofs_.set_max_slots(line_slots);
-    line_refutations_.set_max_slots(line_slots);
   }
   void set_no_take_probe(bool enabled) { no_take_probe_ = enabled; }
 
@@ -348,6 +340,12 @@ public:
 
 private:
   Game begin_search(const Game &input, bool clear_memo = true) {
+    // The cap is fixed once per search (doc/mate_usage.md「探索のメモリ予算」).
+    memo_cap_ = csplendor::resolve_max_memo_states(max_memo_states_);
+    memo_.set_entry_limit(memo_cap_);
+    exact_memo_.set_entry_limit(memo_cap_);
+    line_proofs_.set_max_slots(memo_cap_);
+    line_refutations_.set_max_slots(memo_cap_);
     // The blank table never outlives a search: its oracle moves depend on the
     // cards hidden at this root. Only the exact table is carried over.
     memo_.clear();
@@ -561,12 +559,13 @@ private:
   int depth_ = 0;
   uint64_t max_nodes_ = 0;
   size_t max_cache_states_ = 0;
-  size_t max_memo_states_ = DEFAULT_MAX_MEMO_STATES;
+  size_t max_memo_states_ = 0; // 0 = from the memory budget
+  size_t memo_cap_ = 0;        // resolved at begin_search()
   SearchLimit limits_;
   RevealVerifiedSearchStats stats_;
   // Open-addressing tables (src/solver_flat_table.h): the blank table is
   // discarded after every search, the exact table may outlive a session's
-  // searches. Both flush at max_memo_states_ (store_entry).
+  // searches. Both flush at memo_cap_ (store_entry).
   using Memo = csplendor::solver_internal::RevealMemoTable;
   using ExactMemo = csplendor::solver_internal::RevealExactMemoTable;
   Memo memo_;
@@ -596,7 +595,7 @@ private:
   // as available to the defender as gold would be). Proofs found this way are
   // sound; a failure proves nothing.
   bool no_take_probe_ = false;
-  // Bounded (src/solver_line_table.h); the cap follows max_memo_states_.
+  // Bounded (src/solver_line_table.h); the cap follows memo_cap_.
   using LineTable = csplendor::solver_internal::LineTable;
   LineTable line_proofs_;
   LineTable line_refutations_;
@@ -1178,7 +1177,7 @@ private:
       *existing = entry;
       return;
     }
-    if (max_memo_states_ > 0 && memo.size() >= max_memo_states_) {
+    if (memo.size() >= memo_cap_) {
       ++stats_.memo_flushes;
       memo.clear();
     }
@@ -2517,7 +2516,7 @@ private:
     } else {
       bounds.lo = bounds.hi = static_cast<float>(best);
     }
-    if (max_memo_states_ > 0 && prob_memo_.size() >= max_memo_states_ &&
+    if (prob_memo_.size() >= memo_cap_ &&
         prob_memo_.find(key) == prob_memo_.end()) {
       ++stats_.memo_flushes;
       prob_memo_.clear();

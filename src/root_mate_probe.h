@@ -16,6 +16,7 @@
 #include "exact_mate_search.h"
 #include "game.h"
 #include "reveal_verified_solver.h"
+#include "solver_memory_budget.h"
 
 #include <algorithm>
 #include <chrono>
@@ -45,6 +46,9 @@ struct RootMateProbeConfig {
   size_t max_cache_states = 50000;
   uint64_t warm_start_nodes = 50000;
   double warm_start_time_ms = 50.0;
+  // Search memory; 0 = the free memory (WASM: a conservative default), fixed
+  // once per call (doc/mate_usage.md「探索のメモリ予算」).
+  uint64_t memory_budget_bytes = 0;
 };
 
 struct RootMateProbeResult {
@@ -129,11 +133,13 @@ inline void take_mate(SweepResult &sweep, int depth, const RevealVerifiedSearchR
 // exact table first, and a still-open depth falls back to the heuristic
 // positive-proof search.
 inline SweepResult anytime_sweep(const Game &game, int attacker,
-                                 const RootMateProbeConfig &config, Budget &budget) {
+                                 const RootMateProbeConfig &config, Budget &budget,
+                                 size_t max_memo_states) {
   SweepResult sweep;
   sweep.stop_reason = "max_depth_reached_without_proof";
   RevealVerifiedSolver session(attacker, 0, 0, 0.0, {}, false, 0, 0, UINT64_MAX,
                                false, 0, true, true);
+  session.set_max_memo_states(max_memo_states);
   const double warm_start_seconds = config.warm_start_time_ms / 1000.0;
   for (int depth = config.min_depth; depth <= config.max_depth; ++depth) {
     const int attempts_left = config.max_depth - depth + 1;
@@ -182,6 +188,7 @@ inline SweepResult anytime_sweep(const Game &game, int attacker,
         budget.node_limited() ? std::max<uint64_t>(1, budget.nodes_left() / attempts_left) : 0;
     const double attempt_seconds = budget.seconds_share(attempts_left);
     RevealVerifiedSolver solver(attacker, depth, attempt_nodes, attempt_seconds);
+    solver.set_max_memo_states(max_memo_states);
     const RevealVerifiedSearchResult raw = solver.solve(game);
     budget.spend(raw.stats.nodes);
     if (outcome_of(raw) == Outcome::Mate) {
@@ -237,7 +244,8 @@ inline RootMateProbeResult root_mate_probe(const Game &game, const RootMateProbe
   Budget budget(max_nodes, seconds);
 
   result.attempted = true;
-  SweepResult sweep = anytime_sweep(game, attacker, config, budget);
+  const size_t max_memo_states = resolve_max_memo_states(0, config.memory_budget_bytes);
+  SweepResult sweep = anytime_sweep(game, attacker, config, budget, max_memo_states);
   const uint64_t anytime_nodes = budget.used();
   result.stop_reason = sweep.stop_reason;
   result.nodes = anytime_nodes;
@@ -250,7 +258,9 @@ inline RootMateProbeResult root_mate_probe(const Game &game, const RootMateProbe
     exact_config.max_depth = config.endgame_exact_depth;
     exact_config.max_nodes = max_nodes;
     exact_config.time_limit_seconds = budget.seconds_share(1);
-    exact_config.max_memo_states = std::max<uint64_t>(1, max_nodes);
+    // No more entries than nodes.
+    exact_config.max_memo_states =
+        max_nodes > 0 ? std::min<uint64_t>(max_memo_states, max_nodes) : max_memo_states;
     const ExactMateSearchResult exact = exact_mate_search(game, exact_config);
     result.nodes += exact.nodes;
     if (exact.status == "mate") {

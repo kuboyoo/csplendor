@@ -3,12 +3,16 @@
 
 #include "game.h"
 #include "solver_types.h"
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 
 class VisibleOnlySolver {
 public:
-  VisibleOnlySolver(uint64_t max_nodes, double time_limit_seconds);
+  // max_memo_states: cap of each table (flushed at the cap); 0 = from the
+  // memory budget at the start of each solve() (src/solver_memory_budget.h).
+  VisibleOnlySolver(uint64_t max_nodes, double time_limit_seconds,
+                    size_t max_memo_states = 0);
   ~VisibleOnlySolver();
 
   VisibleOnlySolver(const VisibleOnlySolver &other);

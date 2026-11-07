@@ -9,11 +9,6 @@
 #include <string>
 #include <vector>
 
-// Default cap of every mate/near-mate transposition table (entries; 91 bytes
-// each in the reveal solver's flat tables). The table is flushed and refilled
-// at the cap; 0 means unbounded.
-inline constexpr size_t DEFAULT_MAX_MEMO_STATES = 2'000'000;
-
 struct RevealVerifiedFrontierEdge {
   uint64_t action_code = 0;
   int reveal_card = -1;
@@ -70,8 +65,9 @@ public:
   // Proof transplantation across sibling reveals/defender replies (ordering
   // only, on by default); off reproduces the plain depth-first order.
   void set_line_transplant(bool enabled);
-  // Stop memoising new states beyond this many entries (0 = unbounded); the
-  // search remains exact. Bounds memory at roughly 35 bytes per entry.
+  // Cap of the transposition tables (flushed and refilled at the cap; the
+  // search remains exact). 0 = resolve_max_memo_states() at the start of each
+  // search (src/solver_memory_budget.h).
   void set_max_memo_states(size_t limit);
   // Probe: attacker never takes tokens, defender purchases collapse to the
   // fewest-gold payment (dominance). Proofs stay sound, refutations do not.

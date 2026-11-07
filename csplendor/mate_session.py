@@ -10,6 +10,7 @@ from ._csplendor import (
     Game,
     MateSearchCancellationToken,
     NativeMateSearchSession,
+    resolve_max_memo_states,
 )
 from .api.usi_kifu import action_to_usi
 from .mate_depth import (
@@ -165,6 +166,8 @@ class MateSearchSession:
             started + time_limit_seconds if time_limit_seconds > 0.0 else None
         )
         cache_before = self.memoized_states
+        # One table cap for the whole call (doc/mate_usage.md「探索のメモリ予算」).
+        max_memo_states = resolve_max_memo_states(jobs=_effective_jobs(self.jobs))
         attempts: list[dict[str, Any]] = []
         total_nodes = 0
         reused_memo_hits = 0
@@ -223,6 +226,7 @@ class MateSearchSession:
                     preferred_attacker_actions=self._preferred_root_actions,
                     cancellation_token=self._cancellation_token,
                     max_cache_states=self.max_cache_states,
+                    max_memo_states=max_memo_states,
                 )
             )
             probe_nodes = int(probe["stats"].get("nodes", 0))
@@ -287,6 +291,7 @@ class MateSearchSession:
                     jobs=self.jobs,
                     parallel_min_branches=self.parallel_min_branches,
                     cancellation_token=self._cancellation_token,
+                    max_memo_states=max_memo_states,
                 )
                 if not searched["attempts"]:
                     stop_reason = str(searched["stop_reason"])
@@ -370,6 +375,8 @@ class MateSearchSession:
             started + time_limit_seconds if time_limit_seconds > 0.0 else None
         )
         cache_before = self.memoized_states
+        # One table cap for the whole call (doc/mate_usage.md「探索のメモリ予算」).
+        max_memo_states = resolve_max_memo_states(jobs=_effective_jobs(self.jobs))
         certificate = _permanent_no_mate_certificate(game, self.attacker)
         if certificate is not None:
             return {
@@ -453,6 +460,7 @@ class MateSearchSession:
                     preferred_attacker_actions=self._preferred_root_actions,
                     cancellation_token=self._cancellation_token,
                     max_cache_states=self.max_cache_states,
+                    max_memo_states=max_memo_states,
                 )
             )
             warm_stats = dict(warm_raw["stats"])
@@ -495,6 +503,7 @@ class MateSearchSession:
                             jobs=self.jobs,
                             parallel_min_branches=self.parallel_min_branches,
                             cancellation_token=self._cancellation_token,
+                            max_memo_states=max_memo_states,
                         )
                         if cold["attempts"]:
                             raw = dict(cold["attempts"][-1])

@@ -225,7 +225,7 @@ malloc、flush は全節点の free）で、深さ5 の時間の約 2 割を占�
 限らず（添字は `mix(hash) * 容量` の上位語）、負荷率の上限は 0.7。上限 `max_memo_states` が N のとき容量は
 C = `ceil(N / 0.7)` を超えず、`C >> k`（k ≥ 3）の列で倍々に伸びて C/8 から C へ跳ぶ（1024 スロットから。再ハッシュは
 旧配列と新配列が同時に生きるので、大きな表を写す再ハッシュを C/8 からの 1 回に限る）ため、N 件を再ハッシュなしで保持でき、
-N = 200万で 2,857,143 スロット = 183 MB（1 件あたり 91 バイト）。上限なし（N = 0）のときは 2 の冪で倍々に伸びる。
+N = 200万で 2,857,143 スロット = 183 MB（1 件あたり 91 バイト）。表の型は上限なし（N = 0）なら 2 の冪で倍々に伸びるが、探索は常に正の N を渡す（「探索のメモリ予算」）。
 探索の最初にノード上限から表を予約する処理（`reserve_active_memo`）はやめた（開番地法の成長は安く、並列分割の枝ごとに
 183 MB を先に割り当てないため）。
 削除（session の `trim_exact_cache` と制限つき探索後の反証の除去）は後方シフト（backward-shift）で、墓標を使わない。
@@ -423,6 +423,7 @@ if result.proven:
 | `endgame_exact_depth` | 2 | `value_triggered` | 評価値で発火したか |
 | `max_cache_states` | 50,000 | | |
 | `warm_start_nodes` / `warm_start_time_ms` | 50,000 / 50 | | |
+| `memory_budget_bytes` | 0（自動。「探索のメモリ予算」） | | |
 
 ノード上限だけで打ち切る条件（時間上限 0）では、新しい `MateSearchSession(jobs=1)` を使った
 dlsplendor の `RootMateSearch.probe` と、状態・深さ・手・停止理由・ノード数が一致します。
@@ -446,7 +447,7 @@ Python に依存しません。`root_mate_probe` の終盤の厳密探索もこ�
   `mate_depth`・`verified_no_mate_through_depth`（無ければ -1）、`winning_root_action`（pack 値）と
   `winning_root_action_id`（V5。無ければ -1）、`nodes`、`elapsed_ms` も返す。
 - 設定 `ExactMateSearchConfig` は `attacker`、`min_depth`、`max_depth`、`max_nodes`、`time_limit_seconds`、
-  `max_memo_states` を持つ。証明DAG・`required_root_action`・順序表・並列化は扱わない（Python 版を使う）。
+  `max_memo_states`、`memory_budget_bytes`（「探索のメモリ予算」）を持つ。証明DAG・`required_root_action`・順序表・並列化は扱わない（Python 版を使う）。
 
 ### 外部評価による手の順序表と探り（2026-10-02 追加）
 
@@ -503,11 +504,43 @@ result = cs.search_reveal_verified_mate_depths(game, attacker=1, min_depth=1, ma
   制限つきの探索の後に全手の探索をしても、詰みを見逃しません。
 - **置換表の上限（`max_memo_states=N`）**: 表が N 件に達すると空にして詰め直します（結果は厳密のまま、
   直近の局面を再探索する分だけ遅くなる）。表は開番地法（上の「置換表の開番地法化」）で 1 件あたり 91 バイト
-  （64 バイトのスロット、負荷率 0.7）、6 スレッドの並列分割では枝ごとに
-  表を持つので合計は N×スレッド数になります。既定は `DEFAULT_MAX_MEMO_STATES`（200万件、約 183 MB）で、
-  0 を渡すと無制限です。無制限の長い探索は数分で 10 GB を超えるので、メモリに余裕があるときだけ使います。
-  `NativeMateSearchSession` が持ち越す表（`max_cache_states`）は、探索の前に `max_memo_states` の半分以下に
+  （64 バイトのスロット、負荷率 0.7）、6 スレッドの並列分割では枝ごとに表を持ちます。既定の 0 は
+  「自動」で、探索の開始時に端末の空きメモリから N を決めます（次の「探索のメモリ予算」）。正の N を
+  渡すとそのまま使います（無制限はありません。大きな N を渡します）。
+  `NativeMateSearchSession` が持ち越す表（`max_cache_states`）は、探索の前に N の半分以下に
   切り詰めます。持ち越した表が上限ちょうどだと、次の探索の最初の保存で全部消えてしまうためです。
+
+### 探索のメモリ予算（2026-11-07 追加）
+
+詰み探索・準詰み・visible-only の表の上限は、探索の開始時に1回だけ、端末の空きメモリから決めます
+（`src/solver_memory_budget.h`。探索の途中では変えないので、1回の探索の中で上限が揺れることはありません）。
+
+1. **空きメモリ**（`available_memory_bytes()`、取れなければ 0）: Linux は `/proc/meminfo` の `MemAvailable` と、
+   cgroup v2 の自分と祖先の `memory.max − memory.current`（上限のあるもの）の最小。macOS は `host_statistics64` の
+   空き・非活性・パージ可能なページ。Windows は `GlobalMemoryStatusEx` の `ullAvailPhys`。WASM（`__EMSCRIPTEN__`）は
+   常に 0（ブラウザ側でしか分からない）。
+2. **予算**（`solver_memory_budget_bytes(available_bytes, jobs)`）: 空きメモリの 1/4 を 64 MiB〜2 GiB に挟み、
+   並列のジョブ数で割る。共有マシンで学習が並走しても足りるよう保守的にしている。空きメモリが 0（取れない）なら
+   既定の 512,000,000 バイト（200万件。2026-11-07 までの固定の既定 `DEFAULT_MAX_MEMO_STATES` と同じ）をジョブ数で割る。
+   WASM の既定は 256 MiB（100万件。線形メモリの上限 2 GiB（`MAXIMUM_MEMORY` の既定）に網・探索木と並んで収まる）。
+3. **件数**（`resolve_max_memo_states(max_memo_states, memory_budget_bytes, jobs)`）: 正の `max_memo_states` は
+   そのまま返す。0 なら予算（`memory_budget_bytes` が正ならそれをジョブ数で割った値、0 なら 2 の予算）を
+   1 件あたり 256 バイトで割った件数。256 バイトは、厳密と blank の 2 表の定常（2 × 91）、最後の再ハッシュの一時領域
+   （C/8）、2 つの移植の表（各 `bit_floor(N)` スロット × 16 バイトと倍化の一時領域）の合計の上界。準詰みの
+   `prob_memo_` と visible-only の 3 表も同じ件数で flush する。
+
+| 呼び出し | 決める場所 | jobs |
+|---|---|---|
+| `search_reveal_verified_mate_depths` / `search_reveal_verified_mate_anytime` | 関数の開始時（全深さ・全枝で同じ N） | 引数 `jobs` |
+| `MateSearchSession.search` / `search_anytime` | 呼び出しの開始時 | `MateSearchSession(jobs=...)` |
+| `near_mate_search` / `search_near_mate`、`exact_mate_search`、`root_mate_probe` | 関数の開始時（設定の `memory_budget_bytes`） | 1 |
+| `solve_reveal_verified_mate_cpp` などの1回の探索、`NativeMateSearchSession.search`、`solve_visible_only_winner_cpp` | 探索の開始時 | 1 |
+
+WASM では、JS 側が `navigator.deviceMemory`（GB、丸めた値）などから予算を決め、`RootMateProbeConfig`・
+`NearMateSearchConfig`・`ExactMateSearchConfig` の `memory_budget_bytes` に渡します（0 は上の WASM の既定）。
+表は使った分だけ伸びるので、上限は確保量ではありません。ノード上限の小さい探索（`root_mate_probe` の 2万ノード
+など）は、上限によらずノード数以下の件数しか使いません。`root_mate_probe` の終盤の厳密探索は、ノード上限があるときは
+件数をノード上限以下にします。
 
 計測（dlsplendor `doc/native_v3_search_20260929.md` 参照）: 3 手詰めの局面で証明の移植はノード数を
 1,989 万 → 424 万（4.7 分の 1）、時間を 4.8 秒 → 2.8 秒にした。実対局の終盤 81 局面（深さ 1〜4 の掃引、
@@ -544,8 +577,8 @@ near = cs.search_near_mate(game, attacker=1, min_depth=1, max_depth=3,
 `search_near_mate` はその薄いラッパーです（返す辞書の形式 `NEAR_MATE_FORMAT` は同じ）。シングルスレッドで
 Python に依存しないので、WASM（embind）からも同じ結果で呼べます。C++ の設定 `NearMateSearchConfig` は
 `attacker`、`min_depth`、`max_depth`、`thresholds`（既定 1.0/0.9/0.75/0.5。高い順に並べ替え、重複は除く）、
-`max_nodes`、`time_limit_seconds`（全問い合わせの累計）、`no_take_probe`、`line_transplant`、`max_memo_states`
-を持ちます。`no_take_probe=True` で閾値を満たせなかった問い合わせは、省いた手があるので反証にならず、
+`max_nodes`、`time_limit_seconds`（全問い合わせの累計）、`no_take_probe`、`line_transplant`、`max_memo_states`、
+`memory_budget_bytes`（「探索のメモリ予算」）を持ちます。`no_take_probe=True` で閾値を満たせなかった問い合わせは、省いた手があるので反証にならず、
 `verdict` は `inconclusive` で上限を下げません（下の閾値と次の深さは続けて試し、詰みが出なければ
 `stop_reason` は `restricted_probe_exhausted`）。root も他の節点と同じ終局・深さの判定に従い、終局済みなら攻め方の勝ちで 1、それ以外で 0、
 攻め方の手番で深さ 0 なら 0 です。結果 `NearMateSearchResult` は `lower`/`upper`、`lower_depth`/`upper_depth`（無ければ -1）、
