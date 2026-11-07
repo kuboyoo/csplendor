@@ -1,6 +1,7 @@
 #ifndef CSPLENDOR_REVEAL_VERIFIED_SOLVER_H
 #define CSPLENDOR_REVEAL_VERIFIED_SOLVER_H
 
+#include "dfpn_mate_solver.h"
 #include "game.h"
 #include "solver_types.h"
 #include <cstddef>
@@ -76,6 +77,14 @@ public:
   void set_order_hints(
       std::shared_ptr<const PositionOrderHints> hints,
                        int attacker_restrict_top_k = 0);
+
+  // Search algorithm of solve() (doc/mate_dfpn_cpp_design.md): the
+  // depth-first search (default) or df-pn over the same AND/OR graph, with a
+  // df-pn table of at most `dfpn_table_bytes` for the undecided nodes.
+  void set_algorithm(MateSearchAlgorithm algorithm);
+  void set_dfpn_table_bytes(size_t bytes);
+  // The df-pn counters of the last solve() (zero after a depth-first one).
+  DfpnSearchStats dfpn_stats() const noexcept;
 
   RevealVerifiedSearchResult solve(const Game &input);
   // Probabilistic mate within `depth` attacker moves (see NearMateResult).

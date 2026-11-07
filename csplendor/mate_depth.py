@@ -96,6 +96,7 @@ def _solve_parallel_branch(
     line_transplant: bool = True,
     no_take_probe: bool = False,
     max_memo_states: int = 0,
+    algorithm: str = "dfs",
 ) -> dict[str, Any]:
     if cancellation_token.is_cancelled:
         return _unknown_native(int(edge["child_depth"]), "search cancelled")
@@ -122,6 +123,7 @@ def _solve_parallel_branch(
             line_transplant=line_transplant,
             no_take_probe=no_take_probe,
             max_memo_states=max_memo_states,
+            algorithm=algorithm,
         )
     )
 
@@ -140,6 +142,7 @@ def _solve_positive_portfolio(
     line_transplant: bool = True,
     no_take_probe: bool = False,
     max_memo_states: int = 0,
+    algorithm: str = "dfs",
 ) -> dict[str, Any]:
     if cancellation_token.is_cancelled:
         return _unknown_native(depth, "search cancelled")
@@ -168,6 +171,7 @@ def _solve_positive_portfolio(
             line_transplant=line_transplant,
             no_take_probe=no_take_probe,
             max_memo_states=max_memo_states,
+            algorithm=algorithm,
         )
     )
 
@@ -242,6 +246,7 @@ def _solve_depth_parallel(
     line_transplant: bool = True,
     no_take_probe: bool = False,
     max_memo_states: int = 0,
+    algorithm: str = "dfs",
 ) -> Optional[dict[str, Any]]:
     """Solve one exact depth by splitting root actions/reveals across threads."""
     split_started = time.monotonic()
@@ -390,6 +395,7 @@ def _solve_depth_parallel(
             line_transplant=line_transplant,
             no_take_probe=no_take_probe,
             max_memo_states=max_memo_states,
+            algorithm=algorithm,
                 )
             futures[portfolio_future] = ("portfolio", None, None)
         for index, edge in enumerate(edges):
@@ -411,6 +417,7 @@ def _solve_depth_parallel(
             line_transplant=line_transplant,
             no_take_probe=no_take_probe,
             max_memo_states=max_memo_states,
+            algorithm=algorithm,
                 )
             futures[future] = ("branch", edge, action_code)
 
@@ -643,6 +650,7 @@ def search_reveal_verified_mate_depths(
     line_transplant: bool = True,
     no_take_probe: bool = False,
     max_memo_states: int = 0,
+    algorithm: str = "dfs",
 ) -> dict[str, Any]:
     """Search consecutive mate depths until a sound stopping condition.
 
@@ -662,7 +670,12 @@ def search_reveal_verified_mate_depths(
     never extrapolates permanent no-mate from repeated bounded refutations.
     It may stop before searching only when it can emit a separate, unbounded
     certificate (a terminal non-attacker result or a score ceiling below 15).
+
+    ``algorithm`` selects the native search of every depth (``"dfs"`` or
+    ``"dfpn"``, doc/mate_dfpn_cpp_design.md); verdicts are the same.
     """
+    if algorithm not in {"dfs", "dfpn"}:
+        raise ValueError("algorithm must be 'dfs' or 'dfpn'")
     if attacker not in (0, 1):
         raise ValueError("attacker must be 0 or 1")
     if min_depth < 0 or max_depth < min_depth:
@@ -777,6 +790,7 @@ def search_reveal_verified_mate_depths(
             line_transplant=line_transplant,
             no_take_probe=no_take_probe,
             max_memo_states=max_memo_states,
+            algorithm=algorithm,
             )
         if native is None:
             native = solve_reveal_verified_mate_cpp(
@@ -800,6 +814,7 @@ def search_reveal_verified_mate_depths(
             line_transplant=line_transplant,
             no_take_probe=no_take_probe,
             max_memo_states=max_memo_states,
+            algorithm=algorithm,
             )
         native_stats = dict(native["stats"])
         nodes = int(native_stats.get("nodes", 0))

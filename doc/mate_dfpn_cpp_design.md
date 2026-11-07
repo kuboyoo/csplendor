@@ -1,13 +1,16 @@
-# C++ 版 df-pn 詰み探索の設計検討（2026-11-07）
+# C++ 版 df-pn 詰み探索の設計と実装計画（2026-11-07）
 
-[詰み探索の使い方](mate_usage.md) の C++ 解決器（深さ制限つき AND/OR 深さ優先探索）を、証明数・反証数で
-展開先を選ぶ df-pn（df-pn+、しきい値つき反復）に置き換える、または併設する場合の設計と、その見込みをまとめる。
-材料は現在の `src/reveal_verified_solver.cpp`（各カットを含む）、Python 版 `scripts/dfpn_mate_solver.py`、
-[Python 版の設計仕様](splendor_dfpn_mate_solver_design_spec.md) である。**実装はしていない**。結論を先に書く。
+[詰み探索の使い方](mate_usage.md) の C++ 解決器（深さ制限つき AND/OR 深さ優先探索、以下 DFS）に、証明数・反証数で
+展開先を選ぶ df-pn（df-pn+、しきい値つき反復）を**併設する**設計と実装計画をまとめる。材料は現在の
+`src/reveal_verified_solver.cpp`（各カットを含む）、Python 版 `scripts/dfpn_mate_solver.py`、
+[Python 版の設計仕様](splendor_dfpn_mate_solver_design_spec.md) である。実装は第 12 節の構成で行う。
 
-## 0. 結論
+## 0. 方針
 
-- BENCH 局面（`tests/test_reveal_verified_solver.py` の `BENCH_POSITION`、攻め側 P0 が 5 点）の深さ5 が 240 秒で
+- **実装する**（2026-11-07 のユーザー判断）。深さ5 の BENCH を決着させる効果は低いと見積もった（下の見込みと第 9 節）が、
+  いま発見できている**深さ4 までの詰みをより速く見つける**だけでも df-pn に移る価値があるので、DFS と並行して実装し、
+  判定の一致と速さを検証する。既定（`algorithm="dfs"`）は変えず、計測の結果から既定を推奨する。
+- 見込み: BENCH 局面（`tests/test_reveal_verified_solver.py` の `BENCH_POSITION`、攻め側 P0 が 5 点）の深さ5 が 240 秒で
   決着しない原因は、**不詰みの反証木の大きさ**である。反証には攻め側の全手を反証しなければならず、木の大きさは
   「攻め側の有効な手数の深さ乗」（1 段あたり 60〜130 倍、深さ3→4 で 11,535 → 148 万ノード）で決まる。df-pn は
   「どの手を先に調べるか」を変えるだけで、反証に必要な節点の集合（全攻め手 × 反証応手 1 つ × めくれ 1 つ）は
@@ -16,16 +19,12 @@
 - df-pn の利点が出るのは**詰みがある局面の証明**（実戦の anytime 探索、問題集生成）で、攻め側の手の選択を
   証明数で適応的に行えるため、固定順序 + 証明の移植よりも外れ手の読みが減る。文献（詰将棋）の df-pn の
   優位は、深さ 20〜100 手の細い木で桁違いに出るもので、Splendor の「深さ ≤ 7、1 段 100 倍の太い木」では
-  2〜5 倍程度と見積もる（第 9 節）。
-- 推奨: **df-pn の実装は今は進めない**。代わりに、同じ時間で深さを伸ばす手段として、(1) 攻め側の k 手到達
-  上界（k = 3、資源を数える上界）による反証カットの拡張、(2) 置換表の flush を置換（replacement）に変える、
-  (3) 守り側 d ≥ 2 の応手の順序付け（攻め側の到達上界で脅威を測る）、(4) 探索中の時間配分（root 並列分割は
-  既にある）を順に試す（第 10 節）。df-pn は、anytime の正の証明を速くしたい要求が明確になった時点で、本書の
-  設計で実装する。
-- Python 版 `dfpn_mate_solver.py` を消す条件（第 8 節）は、C++ 版 df-pn の有無にかかわらず満たせる。
-  splendorgui が読む `--kifu-output` の KIFU と `strategy.json` は、いまも C++ の `solve_reveal_verified_mate_cpp`
-  の主手順（`line`）と証明 DAG（`proof_dag`）から Python の純粋な符号化（`scripts/dfpn_output.py`）で作っており、
-  Python の df-pn 本体を使うのは `--kifu-dfpn`（めくれ検証なしの旧経路）と `solve_game_dfpn` のテストだけである。
+  2〜5 倍程度と見積もる（第 9 節）。深さ5 を伸ばす手段（第 10 節）は df-pn と独立に試せる。
+- Python 版 `dfpn_mate_solver.py` の df-pn 本体（`DFPNMateSolver`）は、C++ 版 df-pn が第 11 節の検証を通った後に
+  削除する（第 8 節）。splendorgui が読む `--kifu-output` の KIFU と `strategy.json` は、いまも C++ の
+  `solve_reveal_verified_mate_cpp` の主手順（`line`）と証明 DAG（`proof_dag`）から Python の純粋な符号化
+  （`scripts/dfpn_output.py`）で作っており、Python の df-pn 本体を使うのは `--kifu-dfpn`（めくれ検証なしの旧経路）と
+  `solve_game_dfpn` のテスト・ベンチだけである。
 
 ## 1. いまの探索と df-pn の違い
 
@@ -44,38 +43,36 @@ AND/OR 木の証明・反証に最低限必要な節点の集合は探索法に�
 
 ## 2. 節点と pn/dn の定義
 
-Python 版の設計仕様（第 5〜8 節）を踏襲し、C++ では節点を**局面節点だけ**にして手・めくれの中間節点は
-持たない（いまの探索と同じ。中間節点は Python 版では見通しのために置いたが、置換表の鍵は局面であり、
-手・めくれの節点は親の子配列の要素として表せる）。
+Python 版の設計仕様（第 5〜8 節）を踏襲し、置換表に載るのは**局面節点だけ**にする（いまの探索と同じ鍵）。
+手とめくれは局面節点の子配列（探索中だけ持つ枠）の要素として表す。
 
-- **OR 節点**（攻め側手番、貴族選択・返却待ちの攻め側）: pn = min 子 pn、dn = Σ 子 dn。
-- **AND 節点**（守り側手番、守り側の保留決定）: pn = Σ 子 pn、dn = min 子 dn。
-- **めくれ**: 補充が起こる手（公開札の購入・予約、山札予約）の子は「めくれごとの局面」で、手を 1 つの
-  AND として扱う（全めくれを証明、1 つ反証で手が反証）。OR 節点の子が「手」で、手の子が「めくれ」である。
-  実装では OR 節点の子配列の要素を (手, めくれ配列) にし、手の pn = Σ めくれ pn、dn = min めくれ dn とする。
-  守り側の手では AND の中の AND なので、親に対しては めくれの pn/dn をそのまま足し込む（AND の中の AND は
-  平坦化できる）。
-- **終端**: 終局で攻め側の勝ち pn = 0, dn = INF；それ以外の終局・攻め側手番で残り深さ 0 pn = INF, dn = 0。
-- **未展開の葉**: pn = dn = 1。df-pn+ の初期化（第 6 節）で手の種類により変える。
-- **INF** = 2^31 − 1（32 ビットの飽和加算）。置換表の項に pn/dn を 32 ビットで持つ。
+- **OR 節点**（攻め側手番、貴族選択・返却待ちの攻め側）: pn = min 手 pn、dn = Σ 手 dn。
+- **AND 節点**（守り側手番、守り側の保留決定）: pn = Σ 手 pn、dn = min 手 dn。
+- **手**: 子は「めくれごとの局面」（補充の起こらない手は 1 つ）で、手は常に AND（全めくれを証明、1 つ反証で手が
+  反証）: 手 pn = Σ めくれ pn、手 dn = min めくれ dn。守り側の手では AND の中の AND になり、しきい値の計算を
+  2 段に分けても平坦化した場合と同じ値になる（第 3 節）。
+- **終端**: 終局で攻め側の勝ち pn = 0, dn = INF；それ以外の終局・攻め側手番で残り深さ 0 は pn = INF, dn = 0。
+  各カットで決まった節点も同じ（第 4 節）。
+- **未訪問の手・めくれ**: 探索した兄弟のうち未決着のものの pn・dn それぞれの最大値（まだ無ければ pn = dn = 1。第 6 節）。
+- **INF** = 2^32 − 1。決着していない値の和は INF − 1 で飽和させ、「INF ⇔ 相手側の数が 0」を保つ。
 
 ### 2.1 めくれ節点の扱い（exact と blank）
 
-- **exact（全めくれ AND）**: 山札の同値類の代表（`card_equivalence_class`。標準の 90 枚では全枚別）を
-  `visible_refill_cards` の順（反例になりやすい順）で子にする。遅延生成: 最初の 1 枚だけ子にし、残りは
-  「未生成の残り」を 1 つの仮想子（pn = 残り枚数 × 1、dn = 1）として持つ。親が証明に向かう（残りの pn が
-  most proving になる）とき次のめくれを具体化し、反証に向かうときは具体化済みの子のうち dn 最小のものを選ぶ
-  （Python 版 `_lazy_reveal_node` と同じ）。
-- **blank 支配カット**（[mate_usage.md](mate_usage.md)「blank 支配カット」）: 最初の具体めくれが証明された
-  時点で、残りの仮想子を **blank の子局面**（補充を blank にした局面）に置き換える。blank の子は証明専用で、
-  pn は blank 局面の pn、dn は INF（blank の反証・未決は残りのめくれについて何も言わないので、反証したい
-  ときは blank を捨てて具体めくれを具体化する）。blank の子が PROVEN になれば残りの全めくれが PROVEN
-  （支配の帰納法はそのまま）。blank 局面の探索は exact とは別の置換表（blank の鍵）で、いまと同じく探索ごとに
-  捨てる。
+- **exact（全めくれ AND）**: 山札の同値類の代表（`visible_refill_cards` の順、反例になりやすい順）を手の子にする。
+  手を初めて選んだときに候補札を 1 回だけ並べ、子を **c0（最初の具体めくれ）、B（blank の子）、c1…（休眠）**
+  の順に作る（候補が 1 枚なら c0 だけ）。
+- **blank 支配カット**（[mate_usage.md](mate_usage.md)「blank 支配カット」）: B は補充を blank にした子局面で、
+  DFS と同じく **blank の DFS（`forced_win_with_memo`、blank の決着表）で決着まで探索する**（B は証明のときだけ意味が
+  あり、しきい値つきの df-pn にすると再展開のたびに B を探し直す。seed 3066 の不詰みで B の部分探索が DFS の 300 倍に
+  増えた）。B が PROVEN なら支配により残りの全めくれが PROVEN なので、休眠の c1… は作らずに済む。B が PROVEN でなければ
+  B を捨てて休眠の c1… を起こし、具体めくれとして探索する（B の反証は残りのめくれについて何も言わない）。手の pn/dn の
+  集計に入るのは c0・B（生きている間）・起きた c1… で、B は証明専用なので **c0 が証明されるまで選ばず**、手の dn の
+  min にも入れない（c0 が証明されると手の dn は B の dn になり、B は選ばれた時点で決着して消えるか証明されるので、
+  B の dn = 0 が手の dn = 0 になることはない）。blank の決着表は exact とは別で、探索ごとに捨てる（いまと同じ）。
 - **blank 探索（`exact_reveal_search=False`）**: めくれを列挙せず、補充は blank の枡になる。守り側の
-  oracle 手（blank の枡がある段の未知・未取得の札の購入、山札が空のときの予約）は AND 節点の子に加える。
-  山札予約は「その段の未知・未取得の札」の AND（遅延生成は上と同じ）。意味論と支配の証明は mate_usage.md の
-  とおりで、df-pn にしても変わらない（証明の集合が同じ）。
+  oracle 手（blank の枡がある段の未知・未取得の札の購入、山札が空のときの予約）は AND 節点の手に加える。
+  山札予約は「その段の未知・未取得の札」の AND。意味論と支配の証明は mate_usage.md のとおりで、df-pn にしても
+  変わらない（証明の集合が同じ）。
 
 ### 2.2 深さ制限との組み合わせ
 
@@ -83,11 +80,10 @@ Python 版の設計仕様（第 5〜8 節）を踏襲し、C++ では節点を**
   購入後の貴族選択・返却は同じ手番なので減らない。
 - 残り 0 の攻め側節点は pn = INF（深さ切れ）。最終手カット（A）: 残り 1 の攻め側節点は 15 点に届く購入だけを
   子にし（`for_each_winning_last_move`）、無ければ pn = INF。
-- 深さの単調性: (局面, d) が PROVEN なら (局面, d' > d) も PROVEN、(局面, d) が REFUTED なら d' < d も REFUTED。
-  置換表の参照で、同じ局面の浅い深さの PROVEN と深い深さの REFUTED を見て即決する（いまの探索はしていない。
-  df-pn では pn/dn の初期化にも使える: 浅い深さの pn を初期値にする）。
-- 深さ掃引（`mate_depth`）は呼び出し側で続ける。各深さは別の df-pn の解決で、置換表を共有する。
-  anytime 探索（浅い深さが未決でも次へ）は、df-pn の各深さにノード・時間予算を割る形で同じになる。
+- 深さの単調性（(局面, d) が PROVEN なら d' > d も PROVEN、REFUTED なら d' < d も REFUTED）を使った即決は、
+  いまの探索もしていないので初期実装では入れない（結果は変わらず、速さだけの改良）。
+- 深さ掃引（`mate_depth`）は呼び出し側で続ける。各深さは別の df-pn の解決である（決着した項は exact の表に残るので、
+  `MateSearchSession` の持ち越しと同じ形で次の深さの参照に使える）。
 
 ### 2.3 GHI と千日手
 
@@ -101,114 +97,152 @@ Python 版の設計仕様（第 5〜8 節）を踏襲し、C++ では節点を**
 ## 3. 探索手順（df-pn+、しきい値つき反復）
 
 ```text
-dfpn(node, th_pn, th_dn):
+search(node, th_pn, th_dn):              // node は局面節点。game はその局面にある
+  終局・深さ切れ・最終ラウンドの直接判定 → 決着値を返す
+  exact/blank の決着表（DFS と共用、第 5 節）にあれば決着値を返す
+  根でなく残り攻め手数 ≤ 1 → DFS（forced_win_with_memo）で決めて返す
+  df-pn 表にあり pn >= th_pn or dn >= th_dn なら、その値を返す（展開しない）
+  最終ラウンドの展開・最終手カット・reach cut・最終応手カット → 決着値を決着表に保存して返す
+  手を生成（DFS と同じ生成・絞り込み・並べ替え）。手が無ければ REFUTED
   loop:
-    entry = TT.lookup(node)            // pn, dn（無ければ初期化して展開）
-    if pn >= th_pn or dn >= th_dn: TT.store(node, pn, dn); return
-    if 子が未生成: 生成（守り側は群ごと、めくれは最初の 1 枚）
-    子 c1 = most proving（OR: pn 最小、AND: dn 最小）、c2 = 2 番目の値
-    OR:  th_pn' = min(th_pn, pn(c2) + 1), th_dn' = th_dn − dn(node) + dn(c1)
-    AND: th_pn' = th_pn − pn(node) + pn(c1), th_dn' = min(th_dn, dn(c2) + 1)
-    dfpn(c1, th_pn', th_dn')
-    node の pn/dn を子から再計算（遅延生成の仮想子を含む）
+    節点の pn/dn を手の値から計算（OR: min/Σ、AND: Σ/min）
+    pn = 0 or dn = 0 → 決着表に保存し、df-pn 表から消して返す
+    pn >= th_pn or dn >= th_dn → df-pn 表に (pn, dn, work) を保存して返す
+    手 m = OR: pn 最小、AND: dn 最小（同値は生成順の先）。2 番目の値を v2 とする
+    OR:  th_pn' = min(th_pn, v2 + 1 + v2/4), th_dn' = th_dn − dn + dn(m)
+    AND: th_pn' = th_pn − pn + pn(m),       th_dn' = min(th_dn, v2 + 1 + v2/4)
+    move(m, th_pn', th_dn')
+
+move(m, th_pn, th_dn):                   // 手は AND（第 2 節）
+  初めてなら めくれの子を作る（c0・B・休眠、山札予約の候補、それ以外は 1 つ）
+  loop:
+    手の pn = Σ 生きているめくれ pn、dn = min めくれ dn（B は c0 が証明されてから）
+    pn = 0 or dn = 0 or pn >= th_pn or dn >= th_dn → 返す
+    めくれ c = dn 最小（同値は先）。2 番目の dn を v2 とする
+    c を適用し search(c, th_pn − pn + pn(c), min(th_dn, v2 + 1 + v2/4))、巻き戻す
+    c が B で dn = 0 なら B を捨てて休眠のめくれを起こす
 ```
 
-- 根は th = (INF, INF) で呼ぶ。1 + ε の変種（しきい値を pn(c2) × 1.1 などに緩める）は再展開を減らすので
-  初期実装から入れる（`th_pn' = min(th_pn, max(pn(c2) + 1, pn(c2) * 1.1))`）。
-- 子の pn/dn は、子の置換表の項を参照して得る（子を配列に持たない「table-only」方式）。Splendor の局面は
-  復元に `Game` の適用が要るので、子の pn/dn を得るには子局面を作って鍵を計算する必要がある。1 節点の子
-  （守り側で平均 27〜30 手 × めくれ）を毎回作り直すと高いので、**節点ごとに子の (手, めくれ, 鍵, pn, dn) を
-  配列に持つ**（ノード木方式。Python 版と同じ）。配列は節点の寿命の間だけ保持し、節点を離れるとき（しきい値を
-  超えて戻るとき）に捨て、置換表の項だけを残す。再訪時に子配列を作り直す費用が df-pn の「再展開」の費用である。
-  再展開を減らすため、子の鍵と pn/dn だけ（手 8 B + 鍵 32 B + pn/dn 8 B）を置換表の項から復元できる
-  「子鍵の配列」を節点の外に持つ案もあるが、メモリが増えるので初期実装では作り直す。
-- 守り側の応手は**群ごと**（購入 → 公開札の予約 → 取得 → 山札予約。[mate_usage.md](mate_usage.md)「守り側の応手の
-  遅延生成」の `LazyReplies`）に生成し、未生成の群は仮想子（pn = 1、dn = 1）で表す。AND 節点の dn が最小の子が
-  仮想子なら次の群を生成する。証明（全子 PROVEN）には全群の生成が要る（いまと同じ）。
-- 攻め側の手は全手を生成する（OR 節点の pn = min なので最初から全子が要る。順序は手の鍵・証明の移植で初期化）。
+- 根は th = (INF, INF) で呼ぶ。子へ渡すしきい値は常に子の現在値より大きいので、子は必ず「決着」か「しきい値超え」で
+  戻り、反復は進む。1 + ε（ε = 1/4）の緩めは再展開を減らす。
+- 節点の子（手とめくれの配列、pn/dn）は**その節点の枠の寿命の間だけ**持つ（ノード木方式）。枠は再帰の深さごとに
+  使い回す（割り当てを繰り返さない）。節点を離れると表の (pn, dn) だけが残り、再訪時は手を生成し直して未訪問の
+  初期値から始める。子は選ばれたときに初めて適用され、子自身が表を引いて（しきい値を超えていれば展開せずに）
+  本当の値を返す。この「生成し直し + 子の再参照」が df-pn の再展開の費用である。
+- **地平線の近くは DFS**: 残り攻め手数が 1 以下の節点（攻め側の最終手、その前の守り側の手。時間の 9 割が
+  ここにある）は、DFS の `forced_win_with_memo` で決着まで探索し、決着表に入れる。この層の部分木は小さく、
+  df-pn の再展開の費用が DFS の順序付け・遅延生成の利得を上回るため（調整の計測では、残り 0 まで df-pn にしても
+  時間はほぼ同じかやや遅く、残り 2 以下を DFS にすると df-pn の層が 1 つしか残らず深さ4 の詰みで遅くなった）。根は DFS に渡さない
+  （DFS は経路が空の節点を根として `required_root_action` を当てるので、葉の探索には番兵を 1 つ積んだ経路を渡す）。
+- 守り側の応手の遅延生成（`LazyReplies`）は df-pn の層では使わず、守り側も全手を作る。未生成の群を 1 つの未訪問の
+  子として表す版も試したが、証明（全応手が要る）で AND の pn を過小に見積もり、深さ3 の詰みで 1.5〜2 倍遅くなった。
+- 攻め側の手は全手を生成する（OR 節点の pn = min なので最初から全子が要る）。順序と絞り込みは DFS と同じ関数
+  （`fill_ordered_actions` / `fill_winning_last_moves`、`filter_probe_actions`、`apply_order_hints`、反復深化の手、
+  証明の移植、`forced_attacker_actions`）で、同値の pn/dn の選択順にだけ効く。
+- 例外（ノード・時間の上限、取り消し）は DFS と同じ `SearchLimitExceeded` で根まで戻り、結果は未決になる。
 
 ## 4. 既存カットの再利用
 
 | カット | df-pn での位置 | 値 |
 |---|---|---|
-| 終局・最終ラウンドの直接判定 | 節点の初期化（鍵の計算前） | pn/dn = 0/INF か INF/0 |
-| 最終手カット（A） | 残り 1 の攻め側節点の子生成 | 15 点に届く購入だけ。無ければ INF/0 |
-| 最終手の直接生成 | 同上 | `for_each_winning_last_move` |
-| reach cut | 残り 2 の攻め側節点の初期化 | U < 15 なら INF/0 |
-| 守り側の最終応手カット（C） | 残り 1 の守り側節点の初期化 | 成立なら 0/INF（手を持たない項） |
-| blank 支配カット（B） | めくれ AND の 2 番目以降の子 | 第 2.1 節 |
-| 守り側の応手の遅延生成 | AND 節点の子生成 | 群ごと、仮想子で表す |
-| 証明の移植・反復深化の手 | 子の初期 pn/dn | 移植された手の pn を 1、他を 2 にするなど（df-pn+ の初期化） |
-| oracle 予約の重複除去、同型の札 | 子生成 | そのまま |
+| 終局・最終ラウンドの直接判定 | 節点の入口（鍵の計算前） | pn/dn = 0/INF か INF/0（保存しない） |
+| 最終ラウンドの展開（`resolve_final_round`） | 表の参照の後 | DFS と同じ関数で決め、決着表に保存 |
+| 最終手カット（A） | 残り 1 の攻め側節点 | 15 点に届く購入だけを手にする（`fill_winning_last_moves`）。無ければ REFUTED |
+| reach cut | 残り 2 の攻め側節点の入口 | U < 15 なら REFUTED |
+| 守り側の最終応手カット（C） | 残り 1 の守り側節点の入口 | 成立なら PROVEN（手を持たない項） |
+| blank 支配カット（B） | めくれ AND の 2 番目の子 | 第 2.1 節 |
+| 証明の移植・反復深化の手 | 手の並び（同値の選択順） | DFS と同じ |
+| oracle 予約の重複除去、同型の札 | 手・めくれの生成 | そのまま |
 
 いずれも結果（証明の集合）を変えないので、df-pn の健全性は「終端の pn/dn が正しい」ことと「pn = 0 ⇔ 証明、
-dn = 0 ⇔ 反証」の帰納法で保たれる。
+dn = 0 ⇔ 反証」の帰納法で保たれる。カットの関数は DFS のもの（`RevealVerifiedSolver::Impl` の私的関数と
+`src/solver_win_threshold.h`）をそのまま呼び、書き直さない。
 
 ## 5. 置換表の形とメモリの上限
 
-- 1 項 = 64 バイト（1 キャッシュライン）の開番地法（`src/solver_flat_table.h`、今回入れた `FlatMemoTable`）。
-  鍵は exact 32 B / blank 48 B（残り深さは metadata の上位 8 ビット）。項は pn 4 B、dn 4 B、最善手の code 8 B
-  （OR: pn 最小の子の手。主手順用）、代表めくれ 1 B、flags 1 B（PROVEN/REFUTED/UNKNOWN、手あり、再生可、
-  未集計）、`work`（その節点の下で展開した節点数の飽和 32 ビット、置換の優先度）、世代 8 B（session）。
-  exact は 32 + 32 = 64 B に収まる。blank は 48 + 16 B で pn/dn/code を入れると 48 + 24 = 72 B になるので、
-  blank の項は code を捨てる（blank 探索の主手順は証明側だけで要るので、PROVEN の項にだけ code を持ちたい
-  → `action_count` を捨て、pn/dn を 16 ビット（飽和 65535）にして 48 + 16 B に収める）。
-- **上限と置換**: df-pn は未決の節点も保存するので表はすぐ埋まる。いまの「上限で空にする」方式は df-pn では
-  致命的（しきい値から再開できず、根の近くから作り直す）なので、**容量固定・置換**にする: 鍵の home から
-  4 スロットの窓（1 キャッシュライン内）を見て、空きが無ければ **work が最小**（かつ現在の探索世代でない項を
-  優先）の項を上書きする。容量は `max_memo_states / 0.7` スロットで今と同じ 183 MB（200 万件）。これ以上は
-  いかなる局面でも割り当てない（`reserve` も容量を超えない）ので OOM の心配は今と同じ水準で、並列分割の枝
-  ごとの表は N × スレッド数 × 91 B。
-- 置換された節点は再訪時に再初期化（pn = dn = 1 か、子から再計算）される。正しさは保たれ、時間だけが増える。
-- 証明の移植の表（`line_proofs_` / `line_refutations_`）は現状では上限がなく（16 B × 2 の冪、負荷 0.5）、
-  BENCH 深さ5 の数十秒で数億バイトに達しうる。df-pn に移る・移らないにかかわらず、**上限（例: 2^22 スロット
-  = 64 MB）で古い項を上書きする**ように変えるべきである（第 10 節 (2)）。
+- **2 層**: 決着した節点（PROVEN/REFUTED）は DFS と同じ exact/blank の表（`exact_memo_` / `memo_`、
+  `FlatMemoTable`、`max_memo_states` で flush）に DFS と同じ項（状態、手、代表めくれ、合法手数、再生可）で保存する。
+  決着していない節点の (pn, dn, work) だけを **df-pn 表**（`src/dfpn_mate_solver.h` の `DfpnTable`）に置く。
+  決着表を共用するので、主手順（`principal_line_from_memo`）、証明 DAG、`MateSearchSession` の持ち越しと
+  制限つき探索後の反証の除去は DFS と同じコードがそのまま使える。
+- **df-pn 表は容量固定**: 1 スロット = 鍵（exact 32 B / blank 48 B）+ pn 4 B + dn 4 B + work 4 B（exact 48 B、
+  blank 64 B）、4 スロットの組（set-associative）。容量は**バイト数の予算**から決め（`dfpn_table_bytes`、既定
+  128 MiB）、それを超えて割り当てない。表は 256 組から倍々に伸び（小さな探索で大きな表を初期化しない。
+  上限の 1/8 からは上限へ跳ぶので、最後の伸長の間だけ予算の 1/8 を余分に持つ）、上限に達するまでは負荷 3/4 か
+  鍵の組が埋まったときに伸ばして置換しない。上限の組数に達したら伸びずに置換する。組に空きが無ければ **work（その節点の下で訪問した節点数）が最小**の項を
+  上書きする。exact の探索では予算の全部を exact 表に、blank の探索では全部を blank 表に割る（B は DFS なので
+  exact の探索に blank の df-pn 表は要らない）。
+- 予算は引数で受け取る（`solve_reveal_verified_mate_cpp(dfpn_table_bytes=...)`）。端末の空きメモリから決める
+  仕組みを入れるときは、この引数に渡す値をそこから決めるだけでよい。
+- 置換・flush された節点は再訪時に再初期化（未訪問の初期値か、子からの再計算）される。正しさは保たれ、時間だけが
+  増える。
+- 決着表の flush（上限で空にする）は DFS と同じ。df-pn の未決着の値は df-pn 表に残るので、flush で失うのは決着値だけ
+  （再訪時に 1 回探し直す）である。
 
 ## 6. df-pn+ の初期化（証明数の見積もり）
 
-未展開の子の pn/dn の初期値を手の種類で変える。順序付けの知見（`ordered_action` の rank、`attacker_take_score`、
-`defender_reserved_card_threat_score`、`reveal_counterexample_score`、証明の移植）をそのまま初期値に写す:
+未訪問の手・めくれは、**同じ節点で探索した兄弟（未決着のもの）の pn・dn それぞれの最大値**を初期値にする（まだ無ければ
+pn = dn = 1）。Splendor の守り側は約 30 手あるので、手を 1 つ探索すると AND の pn は 30 前後になる。試した初期値と
+ランダム終盤（seeds 0〜59・2000〜2039、深さ 3/4、DFS との時間比 = DFS / df-pn。1 より大きいと df-pn が速い）:
 
-- 攻め側（OR の子）: 移植・反復深化の手 pn = 1、15 点に届く購入 pn = 1、その他の購入 2、予約 3、取得 4
-  （dn は手の到達上界で: 到達が 15 を下回る手は生成しない＝reach cut と同じ論理を 1 手先で使う）。
+| 未訪問の初期値 | 詰み exact 深さ3 / 4 | 詰み blank 深さ3 / 4 | 不詰み exact 深さ4 | 不詰み blank 深さ4 |
+|---|---|---|---|---|
+| pn = dn = 1 | 0.37 / —（seeds 3000〜3029） | 0.28 / — | — | — |
+| 最初の兄弟の値 | 1.39 / 0.75 | 0.74 / 0.65 | 0.11 | 0.13 |
+| 兄弟の平均 | 1.15 / 0.88 | 0.59 / 0.91 | 0.57 | 0.18 |
+| **兄弟の最大値（採用）** | 0.79 / 0.85 | 0.69 / 0.75 | 0.84 | 0.62 |
+
+1 のままでは OR 節点が全ての攻め手の子を 1 段ずつ展開してから深く読む。最初の兄弟の値は、その兄弟が保留の決定
+（貴族選択など、pn が 1 のままの子）だと残りの兄弟が全て pn = 1 に見え、再訪のたびに全兄弟を展開し直して不詰みで
+最大 200 倍遅くなった（seed 3066）。最大値は「見ていない手も見た手のうち最も難しいものと同じくらい」とみなすので、
+DFS に近い順序で深く読み、病的な遅れが無い代わりに、DFS の順序より良い手を選ぶ利得もほとんど無い。同値の選択は
+DFS の手の順序（購入 → 予約 → 取得、証明の移植、反復深化の手）に任せる。手の種類で初期値を変える案（df-pn+）は
+入れていない:
+- 攻め側（OR の子）: 移植・反復深化の手 pn = 1、15 点に届く購入 pn = 1、その他の購入 2、予約 3、取得 4。
 - 守り側（AND の子）: 移植の反証手 dn = 1、攻め側の候補札を奪う購入・予約 dn = 1、その他 2、取得 3。
-- めくれ: 反例になりやすい順の最初の 1 枚 dn = 1、残りの仮想子 pn = 残り枚数。
+- めくれ: 反例になりやすい順の最初の 1 枚 dn = 1、残り（B）の pn = 1（B はほぼ証明される）。
 
 初期値は結果を変えない（0/INF でないので終端にならない）。
 
 ## 7. 証明 DAG と主手順
 
-- **主手順**: いまの `principal_line_from_memo` と同じく置換表の項をたどる。OR 節点は pn = 0 の子の手（項の
-  code）、AND 節点は最初の子（守り側の反証なら dn = 0 の手）。項に手が無い節点（カット C で証明、置換で失われた
-  項）は、いまと同じく代表の手を通常の順序で選び、その先を小さな一時表で探索して続ける。`action_count`
-  （合法手数）は主手順を作るときに局面から数える（いまの「未集計」の扱いを全節点に広げる。項から
-  `action_count` を外して pn/dn の場所を作る）。
-- **証明 DAG**（`build_proof_dag`）: いまの手順（置換表の PROVEN の項を使い、攻め側は証明手、守り側は全応手、
-  めくれは全列挙）がそのまま使える。PROVEN は pn = 0。置換で失われた部分木は `forced_win` と同じ再探索で埋める
-  （いまも `refined` の経路がある）。compact 形式への変換は Python の `proof_dag_to_compact` のまま。
-- **frontier / root 分割**: `expand_mate_frontier` と root の並列分割は子の列挙だけなので変わらない。
+- 決着値は DFS と同じ項で決着表に入る（第 5 節）: OR の PROVEN は証明手と最初のめくれ、AND の REFUTED は反証手と
+  反証しためくれ、それ以外（OR の REFUTED、AND の PROVEN）は最初の手と最初のめくれ、合法手数は手の数。
+  したがって**主手順**は DFS の `principal_line_from_memo` がそのまま作る（最終応手カットで証明された節点の先を
+  小さな一時表で探索して続ける処理も同じ）。
+- **証明 DAG**（`build_proof_dag`）は DFS の手順をそのまま使う: 決着表の PROVEN の項をたどり、攻め側は証明手、
+  守り側は全応手、めくれは全列挙で子を作り、表に無い節点（B で覆った休眠のめくれ、置換・flush で失われた項）は
+  DFS（`forced_win`）で証明し直す。DFS が証明できなければ DAG は作られない（"proof DAG reveal refinement failed"）
+  ので、DAG の検証（`validated`）は df-pn の PROVEN の独立な確認にもなる。
+- **frontier / root 分割**: `expand_mate_frontier` と root の並列分割は子の列挙だけなので変わらない（df-pn の対象外）。
 
 ## 8. 既存 API との関係と Python 版を消す条件
 
-- `solve_reveal_verified_mate_cpp`: 引数 `algorithm="dfs"|"dfpn"` を足す（既定は dfs）。結果の形（`proven`、
-  `line`、`proof_dag`、`stats`）は同じ。df-pn の統計として `expansions`（展開回数）、`reexpansions`、
-  `tt_replacements` を足す。
-- `mate_depth`（`search_reveal_verified_mate_depths` / `exact_mate_search`）: 深さごとの解決を df-pn に
-  切り替えるだけ。`verified_no_mate_through_depth` の意味は同じ（dn = 0 を反証とする）。
+- `solve_reveal_verified_mate_cpp`: 引数 `algorithm="dfs"|"dfpn"`（既定 `"dfs"`）と `dfpn_table_bytes`（df-pn 表の
+  バイト数の予算、既定 128 MiB）を足す。結果の形（`proven`、`line`、`proof_dag`、`stats`）は同じで、他の引数
+  （`exact_reveal_search`、`exhaustive_attacker_actions`、順序表、`no_take_probe`、`required_root_action`、
+  `max_memo_states` など）の意味も同じ。`nodes` は df-pn の節点の訪問回数（表の参照で戻った訪問を含む）。df-pn の
+  統計として `dfpn_expansions`（手を生成した回数）、`dfpn_table_stores`、`dfpn_table_replacements`（置換で上書き
+  した回数）、`dfpn_table_bytes`（割り当てた表のバイト数）を足す（DFS では 0）。
+- `search_reveal_verified_mate_depths`: 同じ `algorithm` / `dfpn_table_bytes` を各深さの解決（並列分割の枝を含む）に
+  渡すだけ。`verified_no_mate_through_depth` の意味は同じ（dn = 0 を反証とする）。
+- `exact_mate_search`（WASM）、`root_mate_probe`、`MateSearchSession`: 初期実装では DFS のまま。決着表を共用する
+  ので、session の持ち越し・切り詰め・制限つき探索後の反証の除去は df-pn にしても同じ規則で動く（切り替えは
+  既定を変えるときに行う）。
 - `near_mate`: 確率の閾値探索は AND/OR の値（0/1）ではなく期待値なので df-pn の対象外。現状のまま。
-- `NativeMateSearchSession`: 厳密表の持ち越しは df-pn でも同じ（pn/dn つきの項を持ち越す。制限つき探索の
-  後は反証の項を消す規則も同じ）。`trim_exact_cache` の LRU は `work` と世代で代用できる。
 - **KIFU と strategy.json**: splendorgui が読む `dfpn_mate_solver.py --kifu-output mate.kifu` の KIFU
   （`reveal:C<id>` 注釈つき）は、`solve_reveal_verified_mate` → C++ の `line` → `_reveal_verified_line` →
   `principal_line_to_kifu_text` で作られ、`strategy.json` は C++ の `proof_dag` → `proof_dag_to_compact` →
   `puzzle_persistence.save_puzzle` で作られる。どちらも Python の df-pn 本体（`DFPNMateSolver`）を通らない。
   C++ 版 df-pn は `line`（code、reveal_card、action_count）と `proof_dag` を同じ形で返せばよく、符号化は
   変えない。
-- **Python 版 df-pn を消す条件**: (1) `--kifu-dfpn`（めくれ検証なしの旧経路）を廃止し `--kifu-output` は
-  C++ の reveal-verified のみとする、(2) `solve_game_dfpn` を使うテスト（`tests/test_dfpn_mate_solver.py`、
-  `tests/test_return_phase.py`）と `scripts/benchmark_solvers.py` の df-pn 比較を C++ 側の探索に書き換える、
-  (3) `scripts/dfpn_output.py`（符号化）と `dfpn_cli.py`（CLI）は残す。これは C++ 版 df-pn が無くても
-  満たせる。C++ 版 df-pn を作る場合も同じ条件で、追加の条件は無い。
+- **Python 版 df-pn を消す条件**: C++ 版 df-pn が第 11 節の検証を通った後に、同じ branch で次を行う。
+  (1) `DFPNMateSolver` と、それだけが使う補助（並列 root の worker、`solve_game_dfpn`）を消す、
+  (2) `--kifu-dfpn`（めくれ検証なしの旧経路）を廃止し `--kifu-output` は C++ の reveal-verified のみとする、
+  (3) `solve_game_dfpn` を使うテスト（`tests/test_dfpn_mate_solver.py`、`tests/test_return_phase.py`）と
+  `scripts/benchmark_solvers.py` の df-pn 比較を C++ 側の探索に書き換えるか消す、
+  (4) `scripts/dfpn_output.py`（符号化）と `dfpn_cli.py`（CLI）、`solve_reveal_verified_mate` は残す。
+  削除の後も `dfpn_mate_solver.py --kifu-output mate.kifu` で同じ KIFU と `strategy.json` が出ることを実行して確かめる。
 
 ## 9. 期待できる効果の見積もり
 
@@ -263,21 +297,30 @@ df-pn が削るのは「固定順序が外した手の部分木」である。�
 4. **深さ5 の時間配分**: root の並列分割（`jobs`）で深さ5 を分ける。BENCH の根は攻め側で手が 30〜150 あり、
    6 スレッドで 4〜5 倍の実時間短縮が見込める（置換表は枝ごとに N 件なのでメモリは 6 倍）。
 
-## 11. 段階的な実装計画とテスト計画（df-pn を進める場合）
+## 11. 段階的な実装計画とテスト計画
 
-1. **計測**（実装前）: 外れ応手の部分木の割合を深さ別に出す一時的な計数（BENCH 深さ4/5、ランダム終盤）。
-   50 % を超える層が無ければ df-pn は見送り、第 10 節に移る。
-2. **置換表の項の拡張**: pn/dn/work を項に入れ、`action_count` を主手順の局面集計に置き換える（結果は不変。
-   ランダム終盤の判定・主手順の一致で確認。native test に項の往復）。flush を置換に変える（結果は不変ではないが
-   判定は不変。ノード数は変わる）。
-3. **df-pn 本体**: `algorithm="dfpn"` で切り替え、exact と blank の両方。DFS との**判定・主手順の一致**
-   （seeds 0〜59・2000〜2099・3000〜3099、exact/blank × 深さ 1〜3）と、`line` の `action_count`、証明 DAG の
-   `validated` を確認する。ノード数は変わるので、ノード数の比較は統計として記録するだけ。
-4. **カットの移植**: A/B/C/reach/最終ラウンド直接判定/遅延生成を df-pn に入れ、各カットの既存テスト
-   （`tests/test_mate_*.py`）を `algorithm` でパラメタ化して両方で通す。
-5. **session と並列**: 持ち越し・切り詰め・制限つき探索後の反証の除去を df-pn の表で確認（`test_reveal_verified_solver.py`
-   の session テスト）。root 分割は変更なし。
-6. **性能**: BENCH 深さ3/4/5、実対局の終盤 81 局面の深さ掃引（dlsplendor の計測と同条件）で DFS と比較し、
-   詰みの発見数と時間で採否を決める。既定を df-pn にするのは、詰みのある局面で 2 倍以上速く、不詰みで 1.3 倍以上
-   遅くならない場合。
-7. **Python 版の削除**: 第 8 節の条件で、df-pn の採否と独立に進める。
+1. **df-pn 表**（`DfpnTable`）: 予算からの容量、倍々の成長と上限、組の中の置換（work 最小）、決着時の削除を
+   native test（`tests/solver_components_unit.cpp`）で確かめる。
+2. **df-pn 本体**: `algorithm="dfpn"` で切り替え、exact と blank の両方。各カットを第 4 節の位置で呼ぶ。
+   Python のテスト（`tests/test_mate_dfpn.py`）で、fixture（five/six/seven move mate、newly revealed purchase、
+   BENCH の浅い深さ）とランダム終盤の小さな集合で DFS と判定が一致すること、主手順が再生でき証明の手で終わること、
+   証明 DAG が `validated` になること、ノード上限で未決になること、`dfpn_table_bytes` が表の大きさを抑えることを確かめる。
+   各カットの既存テスト（`tests/test_mate_*.py`）の判定のテストを `algorithm` でパラメタ化する。
+3. **判定の一致**（大きな集合、scratchpad のスクリプト）: seeds 0〜59・2000〜2099・3000〜3099 を点数 7〜13 まで乱数で
+   進めた局面 × 攻め側 2 × exact/blank × 深さ 1〜4（深さ4 は時間上限つき）で、両方が決着したケースの食い違い 0 件。
+   未決の件数は記録する。
+4. **性能**: 深さ4 までの詰みのある局面（fixture、ランダム終盤の詰み局面）、不詰みの局面、BENCH の深さ 3/4/5 で
+   DFS と時間を比べ、既定の推奨を決める。既定を df-pn に推奨するのは、詰みのある局面で 2 倍以上速く、不詰みで
+   1.3 倍以上遅くならない場合。
+5. **資料**: mate_usage.md、api_ref.md、CHANGELOG.md に API と計測を書く。
+6. **Python 版の削除**: 第 8 節の条件で行う。
+
+## 12. 構成（ファイル）
+
+- `src/dfpn_mate_solver.h`（新規）: pn/dn の型と飽和演算、`DfpnTable`、`DfpnSearchStats`、探索本体の
+  テンプレート `DfpnSearch<Host>`。Host は `RevealVerifiedSolver::Impl` で、DFS の手の生成・適用・巻き戻し・
+  鍵・カット・決着表の保存をそのまま呼ぶ（`DfpnSearch` を Impl の friend にする）。
+- `src/reveal_verified_solver.{h,cpp}`: `set_algorithm` / `set_dfpn_table_bytes` と `dfpn_stats()` を足し、
+  `solve()` の探索を algorithm で切り替える（DFS のコードは変えない）。
+- `src/bindings_solvers.cpp`: `solve_reveal_verified_mate_cpp` の引数と統計。
+- `csplendor/mate_depth.py`: `search_reveal_verified_mate_depths` の引数の受け渡し。

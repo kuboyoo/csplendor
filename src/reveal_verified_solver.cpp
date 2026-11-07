@@ -1,5 +1,6 @@
 #include "reveal_verified_solver.h"
 #include "action.h"
+#include "dfpn_mate_solver.h"
 #include "move_generator.h"
 #include "perf_counters.h"
 #include "reveal_solver_components.h"
@@ -49,6 +50,10 @@ using csplendor::solver_internal::reach_cut_applies;
 using csplendor::solver_internal::score_after_purchase;
 
 class RevealVerifiedSolver::Impl {
+  // df-pn reuses this solver's generation, transitions, keys, cuts and
+  // decided tables (src/dfpn_mate_solver.h).
+  template <typename> friend class csplendor::solver_internal::DfpnSearch;
+
 public:
   Impl(int attacker, int depth, uint64_t max_nodes, double time_limit_seconds,
        std::vector<uint64_t> preferred_attacker_actions, bool include_proof_dag,
@@ -76,9 +81,7 @@ public:
     result.attacker = attacker_;
     result.depth = depth_;
     try {
-      DepthPath path(path_reserve_capacity(depth_));
-      const ForceStatus status =
-          forced_win(game, path, depth_, exact_reveal_search_);
+      const ForceStatus status = search_root(game, exact_reveal_search_);
       result.proven = status == ForceStatus::PROVEN;
       result.reason = result.proven ? "all_reveals_verified"
                                     : "candidate_mate_not_verified";
@@ -166,6 +169,9 @@ public:
     max_memo_states_ = limit;
   }
   void set_no_take_probe(bool enabled) { no_take_probe_ = enabled; }
+  void set_algorithm(MateSearchAlgorithm algorithm) { algorithm_ = algorithm; }
+  void set_dfpn_table_bytes(size_t bytes) { dfpn_table_bytes_ = bytes; }
+  DfpnSearchStats dfpn_stats() const noexcept { return dfpn_stats_; }
 
   void set_order_hints(std::shared_ptr<const PositionOrderHints> hints,
                        int attacker_restrict_top_k) {
@@ -339,6 +345,16 @@ public:
   }
 
 private:
+  ForceStatus search_root(Game &game, bool exact) {
+    dfpn_stats_ = DfpnSearchStats();
+    if (algorithm_ == MateSearchAlgorithm::DFPN)
+      return csplendor::solver_internal::DfpnSearch<Impl>(
+                 *this, dfpn_table_bytes_, exact, dfpn_stats_)
+          .solve(game, depth_, exact);
+    DepthPath path(path_reserve_capacity(depth_));
+    return forced_win(game, path, depth_, exact);
+  }
+
   Game begin_search(const Game &input, bool clear_memo = true) {
     // The cap is fixed once per search (doc/mate_usage.md「探索のメモリ予算」).
     memo_cap_ = csplendor::resolve_max_memo_states(max_memo_states_);
@@ -595,6 +611,9 @@ private:
   // as available to the defender as gold would be). Proofs found this way are
   // sound; a failure proves nothing.
   bool no_take_probe_ = false;
+  MateSearchAlgorithm algorithm_ = MateSearchAlgorithm::DFS;
+  size_t dfpn_table_bytes_ = DEFAULT_DFPN_TABLE_BYTES;
+  DfpnSearchStats dfpn_stats_;
   // Bounded (src/solver_line_table.h); the cap follows memo_cap_.
   using LineTable = csplendor::solver_internal::LineTable;
   LineTable line_proofs_;
@@ -3379,6 +3398,18 @@ void RevealVerifiedSolver::set_order_hints(
     std::shared_ptr<const PositionOrderHints> hints,
     int attacker_restrict_top_k) {
   impl_->set_order_hints(std::move(hints), attacker_restrict_top_k);
+}
+
+void RevealVerifiedSolver::set_algorithm(MateSearchAlgorithm algorithm) {
+  impl_->set_algorithm(algorithm);
+}
+
+void RevealVerifiedSolver::set_dfpn_table_bytes(size_t bytes) {
+  impl_->set_dfpn_table_bytes(bytes);
+}
+
+DfpnSearchStats RevealVerifiedSolver::dfpn_stats() const noexcept {
+  return impl_->dfpn_stats();
 }
 
 void RevealVerifiedSolver::clear_exact_cache() { impl_->clear_exact_cache(); }

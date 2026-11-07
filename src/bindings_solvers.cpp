@@ -939,7 +939,10 @@ void bind_solvers(py::module_ &m) {
          const std::shared_ptr<RevealSearchCancellationToken>
              &cancellation_token,
          const std::optional<MateOrderHintsHandle> &order_hints,
-         bool line_transplant, bool no_take_probe, size_t max_memo_states) {
+         bool line_transplant, bool no_take_probe, size_t max_memo_states,
+         const std::string &algorithm, size_t dfpn_table_bytes) {
+        if (algorithm != "dfs" && algorithm != "dfpn")
+          throw std::invalid_argument("algorithm must be 'dfs' or 'dfpn'");
         if (proof_dag_format != "v1" && proof_dag_format != "compact") {
           throw std::invalid_argument(
               "proof_dag_format must be 'v1' or 'compact'");
@@ -960,6 +963,7 @@ void bind_solvers(py::module_ &m) {
         // clone, so cloning only after release permits a Python data race.
         Game input_snapshot = game.clone_light();
         RevealVerifiedSearchResult result;
+        DfpnSearchStats dfpn;
         {
           py::gil_scoped_release release;
           RevealVerifiedSolver solver(attacker, depth, max_nodes,
@@ -977,10 +981,14 @@ void bind_solvers(py::module_ &m) {
           solver.set_line_transplant(line_transplant);
           solver.set_no_take_probe(no_take_probe);
           solver.set_max_memo_states(max_memo_states);
+          solver.set_algorithm(algorithm == "dfpn" ? MateSearchAlgorithm::DFPN
+                                                   : MateSearchAlgorithm::DFS);
+          solver.set_dfpn_table_bytes(dfpn_table_bytes);
           if (order_hints)
             solver.set_order_hints(order_hints->table,
                                    order_hints->attacker_restrict_top_k);
           result = solver.solve(input_snapshot);
+          dfpn = solver.dfpn_stats();
         }
 
         py::dict stats;
@@ -1013,6 +1021,10 @@ void bind_solvers(py::module_ &m) {
         stats["deck_reserve_candidates"] =
             result.stats.deck_reserve_candidates;
         stats["deck_reserve_branches"] = result.stats.deck_reserve_branches;
+        stats["dfpn_expansions"] = dfpn.expansions;
+        stats["dfpn_table_stores"] = dfpn.table_stores;
+        stats["dfpn_table_replacements"] = dfpn.table_replacements;
+        stats["dfpn_table_bytes"] = dfpn.table_bytes;
         stats["elapsed_ms"] = result.stats.elapsed_ms;
 
         py::list line;
@@ -1058,7 +1070,9 @@ void bind_solvers(py::module_ &m) {
       py::arg("order_hints") = py::none(),
       py::arg("line_transplant") = true,
       py::arg("no_take_probe") = false,
-      py::arg("max_memo_states") = 0);
+      py::arg("max_memo_states") = 0,
+      py::arg("algorithm") = "dfs",
+      py::arg("dfpn_table_bytes") = DEFAULT_DFPN_TABLE_BYTES);
 }
 
 } // namespace csplendor::python
