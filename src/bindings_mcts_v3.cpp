@@ -165,6 +165,8 @@ void bind_mcts_v3(py::module_ &m) {
           "virtual_visit_total",
           [](const Session &session, int slot) { return session.game(slot).virtual_visit_total(); },
           py::arg("slot"), "Virtual visits held in the slot's tree (0 once every batch is applied)")
+      .def("set_leaf_batch_size", &Session::set_leaf_batch_size, py::arg("leaves"),
+           "Leaves a collect takes per game from now on")
       .def("set_budget", &Session::set_budget, py::arg("slot"), py::arg("simulations"),
            "Replace the slot's budget of fresh simulations; the tree stays")
       .def(

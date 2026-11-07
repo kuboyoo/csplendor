@@ -67,7 +67,9 @@ struct Config {
   // Descents that meet a leaf still waiting for its evaluation: 0 ends the
   // game's collect there (one game per batch then often fills few rows); n > 0
   // marks that path with a virtual visit and tries again, up to n times in a row.
-  // The marks are taken back when the collect returns.
+  // A retried collision takes a place of the batch like a leaf, so a tree with
+  // little independent work closes a smaller batch. The marks are taken back
+  // when the collect returns.
   int collision_retries = 0;
   // Batches a Session may have collected and not yet applied (applied oldest first).
   int max_in_flight = 1;
@@ -448,6 +450,7 @@ public:
             ++stats.collisions;
             if (!retry_collision(path))
               return; // this game waits for the outstanding evaluation
+            ++produced; // a retried collision takes a place of the batch (lc0's way)
             finished = true;
             break;
           }
@@ -533,6 +536,7 @@ public:
               ++stats.collisions;
               if (!retry_collision(path))
                 return; // enumeration of this node is still being evaluated
+              ++produced;
               finished = true;
               break;
             }
@@ -1684,6 +1688,13 @@ public:
   void set_root_visit_floor(int slot, const std::vector<std::pair<int32_t, int>> &floors) {
     check_slot(slot);
     games_[slot].set_root_visit_floor(floors);
+  }
+
+  // Leaves a collect takes per game from now on (the engine sizes it by the tree).
+  void set_leaf_batch_size(int leaves) {
+    if (leaves < 1)
+      throw std::invalid_argument("leaf batch must be positive");
+    config_.leaf_batch_size = leaves;
   }
 
   // Replace the slot's budget of fresh simulations; the tree stays.

@@ -167,3 +167,20 @@ def test_set_budget_extends_the_search_and_keeps_the_tree():
         if len(batch[3]):
             apply(session, batch)
     assert sum(session.root_visits(slot).values()) >= before + 512
+
+
+def test_retried_collisions_take_places_of_the_batch():
+    """A collision counts toward max_leaves: a batch never exceeds leaf_batch_size rows plus retries."""
+    _s, _slot, rows = search(config(retries=4, simulations=3200))
+    assert max(rows) <= 64
+
+
+def test_set_leaf_batch_size_changes_the_next_collect():
+    session = csplendor.V3SearchSession(config(retries=4))
+    slot = session.add_game(csplendor.Game(12), 0, 12, False, 3200)
+    for _ in range(6):
+        apply(session, session.collect())
+    session.set_leaf_batch_size(8)
+    assert len(session.collect()[3]) <= 8
+    with pytest.raises(ValueError):
+        session.set_leaf_batch_size(0)
