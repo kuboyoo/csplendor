@@ -1662,9 +1662,14 @@ private:
     }
     if (player.can_reserve()) {
       for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
+        const int level = get_card(card_id).level - 1;
+        // While the deck has cards, RESERVE_DECK enumerates every hidden
+        // unclaimed card of the level and reaches the same blank state as
+        // this oracle reservation (doc/mate_usage.md, oracle 予約の重複除去).
         if (!hidden_catalog_.is_initially_hidden(card_id) ||
             reveal_state_.is_claimed(game.board, card_id) ||
-            !has_blank_slot_at_level(game.board, get_card(card_id).level - 1))
+            !has_blank_slot_at_level(game.board, level) ||
+            !game.board.decks[level].empty())
           continue;
         // A return, if needed, is a separate RETURN_GEM decision chosen
         // after the reserved card is known (Board::waiting_return).

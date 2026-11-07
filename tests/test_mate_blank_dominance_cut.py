@@ -157,3 +157,44 @@ def test_blank_cut_decides_the_bench_position_at_depth_4():
     assert result["unknown_reason"] is None
     assert result["proven"] is False
     assert result["stats"]["blank_cut_proofs"] > 10_000
+
+
+def test_oracle_reserves_are_not_generated_while_the_deck_has_cards():
+    # doc/mate_usage.md, 「oracle 予約の重複除去」. After the root purchase one
+    # card is left in the level-1 deck, so P1's reply node has both a blank
+    # slot and a legal deck reservation. The deck reservation enumerates every
+    # hidden unclaimed card (2 candidates), which already covers the oracle
+    # reservations of the same cards: none is generated.
+    game = _blank_deck_fixture(14, [L1_ONE, 8, 9])
+    blank = _solve(game, 2, exact=False, required_root_action=_buy_code(game, 0))
+    assert blank["proven"] is True
+    assert blank["stats"]["deck_reserve_candidates"] == 2
+    assert blank["stats"]["oracle_reserve_actions"] == 0
+    assert blank["stats"]["oracle_purchase_actions"] == 0  # P1 has no gems
+
+
+def test_oracle_reserves_are_generated_once_the_deck_is_empty():
+    # The root purchase consumes the only deck card into the blank slot. P1
+    # cannot reserve from the empty deck, so the blank slot's card is reachable
+    # only through the oracle reservation (1 candidate: card 4).
+    game = _blank_deck_fixture(14, [L1_ONE, 8, 9])
+    game.board.decks = [[4], [], []]
+    blank = _solve(game, 2, exact=False, required_root_action=_buy_code(game, 0))
+    assert blank["proven"] is True
+    assert blank["stats"]["deck_reserve_candidates"] == 0
+    assert blank["stats"]["oracle_reserve_actions"] == 1
+
+
+def test_oracle_reserve_dedup_shrinks_the_bench_blank_search():
+    # BENCH blank search, depth 4 (2026-11-07): 20.3M generated moves with the
+    # duplicated oracle reservations, 9.1M without. The node count barely moves
+    # (1,146,066 -> 1,121,958): defender nodes are mostly refuted by an earlier
+    # move, so the duplicates cost generation time, not visits.
+    result = cs.solve_reveal_verified_mate_cpp(
+        load_game_from_usi_text(BENCH_POSITION), attacker=0, depth=4,
+        max_nodes=1_500_000, time_limit_seconds=60.0,
+        exhaustive_attacker_actions=True, max_memo_states=2_000_000)
+    assert result["unknown_reason"] is None
+    assert result["proven"] is False
+    assert result["stats"]["oracle_reserve_actions"] == 0
+    assert result["stats"]["legal_moves"] < 12_000_000

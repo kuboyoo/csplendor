@@ -206,6 +206,13 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
 # payload, node counts included, is unchanged from the previous build:
 # seed0_d1 1e00dfdc...902bf, seed7_d2 b5171a73...ea29a, purchase_dag
 # 867e5a82...6274, oracle_blank 9c9931a1...b57a.
+# 2026-11-07 (oracle 予約の重複除去): the blank search no longer generates the
+# defender's oracle reservations while the level's deck has cards (RESERVE_DECK
+# covers them). Compared with the previous build, only legal_moves,
+# oracle_reserve_actions and the line's action_count changed (seed7_d2: 403 ->
+# 355 moves, 48 -> 0 reservations; oracle_blank: 65 -> 29, 36 -> 0); verdicts,
+# node counts and lines are identical. Previous digests: seed7_d2
+# 23ba3dfc...2ca286, oracle_blank 139a076c...45f0.
 @pytest.mark.parametrize(
     ("fixture", "expected_digest"),
     [
@@ -215,7 +222,7 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
         ),
         (
             "seed7_d2",
-            "23ba3dfc636266e7109b4b47240be4eba7851624d1bc2baba81f1d6b6d2ca286",
+            "9bacde29ad7b7c38066eb5547549b76b7fe1de6cc5bee9b5696a487b922eee7f",
         ),
         (
             "purchase_dag",
@@ -228,7 +235,7 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
         ),
         (
             "oracle_blank",
-            "139a076ca6a77d13cff4bcd2044806033092d542cfad3442f1f9663cc52f45f0",
+            "14207fc5e101c66d5170724bb6c61cec6c93430dc09f1b50de0ebc6c7263a26a",
         ),
     ],
 )

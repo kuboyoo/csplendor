@@ -678,14 +678,16 @@ def test_oracle_actions_are_internal_only_for_blank_visible_slots():
     visible[0][0] = -1
     game.board.visible = visible
     game.board.current_player = 1
+    defender = game.board.get_player(1)
+    defender.gems = [3, 3, 3, 1, 0, 0]  # can afford level-1 cards
+    game.board.set_player(1, defender)
 
     result = cs.solve_reveal_verified_mate_cpp(game, attacker=0, depth=0)
 
-    assert (
-        result["stats"]["oracle_purchase_actions"]
-        + result["stats"]["oracle_reserve_actions"]
-        > 0
-    )
+    assert result["stats"]["oracle_purchase_actions"] > 0
+    # The level-1 deck has cards, so RESERVE_DECK already covers every oracle
+    # reservation (doc/mate_usage.md, oracle 予約の重複除去).
+    assert result["stats"]["oracle_reserve_actions"] == 0
 
 
 def test_reveal_verified_solver_does_not_emit_oracle_edges():
