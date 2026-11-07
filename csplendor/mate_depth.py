@@ -13,6 +13,7 @@ from ._csplendor import (
     get_card,
     get_noble,
     resolve_max_memo_states,
+    resolve_search_table_caps,
     solve_reveal_verified_mate_cpp,
     solve_reveal_verified_root_split_cpp,
 )
@@ -97,6 +98,7 @@ def _solve_parallel_branch(
     no_take_probe: bool = False,
     max_memo_states: int = 0,
     algorithm: str = "dfs",
+    dfpn_table_bytes: int = 0,
 ) -> dict[str, Any]:
     if cancellation_token.is_cancelled:
         return _unknown_native(int(edge["child_depth"]), "search cancelled")
@@ -124,6 +126,7 @@ def _solve_parallel_branch(
             no_take_probe=no_take_probe,
             max_memo_states=max_memo_states,
             algorithm=algorithm,
+            dfpn_table_bytes=dfpn_table_bytes,
         )
     )
 
@@ -143,6 +146,7 @@ def _solve_positive_portfolio(
     no_take_probe: bool = False,
     max_memo_states: int = 0,
     algorithm: str = "dfs",
+    dfpn_table_bytes: int = 0,
 ) -> dict[str, Any]:
     if cancellation_token.is_cancelled:
         return _unknown_native(depth, "search cancelled")
@@ -172,6 +176,7 @@ def _solve_positive_portfolio(
             no_take_probe=no_take_probe,
             max_memo_states=max_memo_states,
             algorithm=algorithm,
+            dfpn_table_bytes=dfpn_table_bytes,
         )
     )
 
@@ -247,6 +252,7 @@ def _solve_depth_parallel(
     no_take_probe: bool = False,
     max_memo_states: int = 0,
     algorithm: str = "dfs",
+    dfpn_table_bytes: int = 0,
 ) -> Optional[dict[str, Any]]:
     """Solve one exact depth by splitting root actions/reveals across threads."""
     split_started = time.monotonic()
@@ -396,6 +402,7 @@ def _solve_depth_parallel(
             no_take_probe=no_take_probe,
             max_memo_states=max_memo_states,
             algorithm=algorithm,
+            dfpn_table_bytes=dfpn_table_bytes,
                 )
             futures[portfolio_future] = ("portfolio", None, None)
         for index, edge in enumerate(edges):
@@ -418,6 +425,7 @@ def _solve_depth_parallel(
             no_take_probe=no_take_probe,
             max_memo_states=max_memo_states,
             algorithm=algorithm,
+            dfpn_table_bytes=dfpn_table_bytes,
                 )
             futures[future] = ("branch", edge, action_code)
 
@@ -651,6 +659,7 @@ def search_reveal_verified_mate_depths(
     no_take_probe: bool = False,
     max_memo_states: int = 0,
     algorithm: str = "dfs",
+    dfpn_table_bytes: int = 0,
 ) -> dict[str, Any]:
     """Search consecutive mate depths until a sound stopping condition.
 
@@ -673,6 +682,8 @@ def search_reveal_verified_mate_depths(
 
     ``algorithm`` selects the native search of every depth (``"dfs"`` or
     ``"dfpn"``, doc/mate_dfpn_cpp_design.md); verdicts are the same.
+    ``dfpn_table_bytes`` (0 = a quarter of the per-job memory budget) is the
+    df-pn table of every native search, parallel branches included.
     """
     if algorithm not in {"dfs", "dfpn"}:
         raise ValueError("algorithm must be 'dfs' or 'dfpn'")
@@ -716,9 +727,11 @@ def search_reveal_verified_mate_depths(
     ) or bool(no_take_probe)
     if restricted_probe and include_proof_dag:
         raise ValueError("a restricted probe cannot build a proof DAG")
-    # 0 = from the free memory, fixed once for every depth and branch
-    # (doc/mate_usage.md「探索のメモリ予算」).
-    max_memo_states = resolve_max_memo_states(max_memo_states, jobs=_effective_jobs(jobs))
+    # 0 = from the free memory, fixed once for every depth and branch; df-pn
+    # takes its table out of the same budget (doc/mate_usage.md「探索のメモリ予算」).
+    max_memo_states, dfpn_table_bytes = resolve_search_table_caps(
+        max_memo_states, dfpn_table_bytes, algorithm=algorithm, jobs=_effective_jobs(jobs)
+    )
     started = time.monotonic()
     deadline = (
         started + time_limit_seconds if time_limit_seconds > 0.0 else None
@@ -791,6 +804,7 @@ def search_reveal_verified_mate_depths(
             no_take_probe=no_take_probe,
             max_memo_states=max_memo_states,
             algorithm=algorithm,
+            dfpn_table_bytes=dfpn_table_bytes,
             )
         if native is None:
             native = solve_reveal_verified_mate_cpp(
@@ -815,6 +829,7 @@ def search_reveal_verified_mate_depths(
             no_take_probe=no_take_probe,
             max_memo_states=max_memo_states,
             algorithm=algorithm,
+            dfpn_table_bytes=dfpn_table_bytes,
             )
         native_stats = dict(native["stats"])
         nodes = int(native_stats.get("nodes", 0))

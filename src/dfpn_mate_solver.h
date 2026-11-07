@@ -20,10 +20,6 @@
 
 enum class MateSearchAlgorithm : uint8_t { DFS, DFPN };
 
-// Default byte budget of the df-pn table (undecided nodes only; decided
-// nodes live in the depth-first solver's tables).
-inline constexpr size_t DEFAULT_DFPN_TABLE_BYTES = size_t{128} << 20;
-
 struct DfpnSearchStats {
   uint64_t expansions = 0;         // nodes whose moves were generated
   uint64_t table_stores = 0;       // undecided (pn, dn) stored

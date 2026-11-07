@@ -144,20 +144,48 @@ inline uint64_t solver_memory_budget_bytes(uint64_t available_bytes,
   return total / std::max(1u, jobs);
 }
 
-// The cap a search uses: a positive `max_memo_states` as given, else the
+// df-pn (doc/mate_dfpn_cpp_design.md 第 5 節): the share of the budget given
+// to the df-pn table when its size is automatic; the decided tables take the
+// rest.
+inline constexpr uint64_t DFPN_TABLE_BUDGET_DEN = 4;
+
+struct SearchTableCaps {
+  size_t max_memo_states = 0;
+  size_t dfpn_table_bytes = 0; // 0 for the depth-first search
+};
+
+// The table sizes a search uses: positive values as given, zeros from the
 // budget (`memory_budget_bytes`, or the detected one when 0, split across
-// `jobs`) in states.
-inline size_t resolve_max_memo_states(size_t max_memo_states,
-                                      uint64_t memory_budget_bytes = 0,
-                                      unsigned jobs = 1) noexcept {
-  if (max_memo_states > 0)
-    return max_memo_states;
+// `jobs`). With df-pn the automatic df-pn table takes a quarter of the budget
+// and the automatic cap the remaining three quarters.
+inline SearchTableCaps resolve_search_table_caps(size_t max_memo_states,
+                                                 size_t dfpn_table_bytes,
+                                                 bool dfpn,
+                                                 uint64_t memory_budget_bytes = 0,
+                                                 unsigned jobs = 1) noexcept {
+  SearchTableCaps caps{max_memo_states, dfpn ? dfpn_table_bytes : 0};
+  if (caps.max_memo_states > 0 && (!dfpn || caps.dfpn_table_bytes > 0))
+    return caps;
   const uint64_t budget =
       memory_budget_bytes > 0
           ? memory_budget_bytes / std::max(1u, jobs)
           : solver_memory_budget_bytes(available_memory_bytes(), jobs);
-  return static_cast<size_t>(
-      std::max<uint64_t>(1, budget / MEMORY_BYTES_PER_MEMO_STATE));
+  const uint64_t dfpn_share = dfpn ? budget / DFPN_TABLE_BUDGET_DEN : 0;
+  if (caps.max_memo_states == 0)
+    caps.max_memo_states = static_cast<size_t>(std::max<uint64_t>(
+        1, (budget - dfpn_share) / MEMORY_BYTES_PER_MEMO_STATE));
+  if (dfpn && caps.dfpn_table_bytes == 0)
+    caps.dfpn_table_bytes = static_cast<size_t>(dfpn_share);
+  return caps;
+}
+
+// The cap a depth-first search uses.
+inline size_t resolve_max_memo_states(size_t max_memo_states,
+                                      uint64_t memory_budget_bytes = 0,
+                                      unsigned jobs = 1) noexcept {
+  return resolve_search_table_caps(max_memo_states, 0, false,
+                                   memory_budget_bytes, jobs)
+      .max_memo_states;
 }
 
 } // namespace csplendor

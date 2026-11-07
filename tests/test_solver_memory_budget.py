@@ -48,24 +48,81 @@ def test_free_memory_is_detected_on_linux():
     assert 64 * MiB // BYTES_PER_STATE <= detected <= 2 * GiB // BYTES_PER_STATE
 
 
+def test_dfpn_takes_a_quarter_of_the_budget_and_the_cap_the_rest():
+    budget = BYTES_PER_STATE * 4000
+    assert cs.resolve_search_table_caps(memory_budget_bytes=budget) == (4000, 0)
+    assert cs.resolve_search_table_caps(
+        memory_budget_bytes=budget, algorithm="dfpn") == (3000, budget // 4)
+    assert cs.resolve_search_table_caps(
+        memory_budget_bytes=budget, algorithm="dfpn", jobs=2) == (1500, budget // 8)
+    # Explicit values are kept; the other one still takes its share.
+    assert cs.resolve_search_table_caps(
+        12_345, memory_budget_bytes=budget, algorithm="dfpn") == (12_345, budget // 4)
+    assert cs.resolve_search_table_caps(
+        0, 1 << 20, algorithm="dfpn", memory_budget_bytes=budget) == (3000, 1 << 20)
+    # The depth-first search has no df-pn table.
+    assert cs.resolve_search_table_caps(0, 1 << 20, memory_budget_bytes=budget) == (4000, 0)
+    with pytest.raises(ValueError, match="algorithm"):
+        cs.resolve_search_table_caps(algorithm="bfs")
+
+
+def test_dfpn_search_sizes_its_table_from_the_budget():
+    game = load_game_from_usi_text(BENCH_POSITION)
+    _, dfpn_bytes = cs.resolve_search_table_caps(algorithm="dfpn")
+    result = cs.solve_reveal_verified_mate_cpp(
+        game, attacker=0, depth=3, exhaustive_attacker_actions=True, algorithm="dfpn")
+    assert result["proven"] is False and result["unknown_reason"] is None
+    assert 0 < result["stats"]["dfpn_table_bytes"] <= dfpn_bytes
+
+
 def test_depth_sweep_resolves_the_cap_once_per_call_with_its_jobs(monkeypatch):
     calls = []
 
-    def fake_resolve(max_memo_states=0, memory_budget_bytes=0, jobs=1):
-        calls.append((max_memo_states, jobs))
-        return max_memo_states or 50
+    def fake_resolve(max_memo_states=0, dfpn_table_bytes=0, algorithm="dfs",
+                     memory_budget_bytes=0, jobs=1):
+        calls.append((max_memo_states, dfpn_table_bytes, algorithm, jobs))
+        return max_memo_states or 50, dfpn_table_bytes or (1024 if algorithm == "dfpn" else 0)
 
-    monkeypatch.setattr(mate_depth, "resolve_max_memo_states", fake_resolve)
+    monkeypatch.setattr(mate_depth, "resolve_search_table_caps", fake_resolve)
     game = load_game_from_usi_text(BENCH_POSITION)
     options = dict(attacker=0, min_depth=1, max_depth=3, time_limit_seconds=60.0)
     result = cs.search_reveal_verified_mate_depths(game, jobs=2, **options)
-    assert calls == [(0, 2)]
+    assert calls == [(0, 0, "dfs", 2)]
     assert result["stats"]["memo_flushes"] > 0
 
     calls.clear()
     explicit = cs.search_reveal_verified_mate_depths(game, max_memo_states=5_000_000, **options)
-    assert calls == [(5_000_000, 1)]
+    assert calls == [(5_000_000, 0, "dfs", 1)]
     assert explicit["stats"]["memo_flushes"] == 0
     for searched in (result, explicit):
         assert searched["status"] == "no_mate_within_max_depth"
         assert searched["verified_no_mate_through_depth"] == 3
+
+
+
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_depth_sweep_passes_the_dfpn_table_bytes_to_every_branch(monkeypatch, jobs):
+    calls = []
+    native = mate_depth.solve_reveal_verified_mate_cpp
+
+    def fake_resolve(max_memo_states=0, dfpn_table_bytes=0, algorithm="dfs",
+                     memory_budget_bytes=0, jobs=1):
+        calls.append((algorithm, jobs))
+        return 5_000_000, 1024
+
+    def spy(game, **kwargs):
+        searches.append((kwargs["algorithm"], kwargs["dfpn_table_bytes"]))
+        return native(game, **kwargs)
+
+    searches = []
+    monkeypatch.setattr(mate_depth, "resolve_search_table_caps", fake_resolve)
+    monkeypatch.setattr(mate_depth, "solve_reveal_verified_mate_cpp", spy)
+    game = load_game_from_usi_text(BENCH_POSITION)
+    result = cs.search_reveal_verified_mate_depths(
+        game, attacker=0, min_depth=1, max_depth=3, time_limit_seconds=60.0,
+        jobs=jobs, algorithm="dfpn")
+    assert calls == [("dfpn", jobs)]
+    assert result["verified_no_mate_through_depth"] == 3
+    assert searches and set(searches) == {("dfpn", 1024)}
+    if jobs > 1:
+        assert len(searches) > 3  # the parallel branches of a depth

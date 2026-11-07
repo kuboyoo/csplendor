@@ -61,6 +61,7 @@
       "available_memory_bytes",
       "solver_memory_budget_bytes",
       "resolve_max_memo_states",
+      "resolve_search_table_caps",
       "ExactMateSearchResult",
       "NearMateSearchConfig",
       "NearMateSearchResult",

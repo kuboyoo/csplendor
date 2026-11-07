@@ -349,15 +349,20 @@ private:
     dfpn_stats_ = DfpnSearchStats();
     if (algorithm_ == MateSearchAlgorithm::DFPN)
       return csplendor::solver_internal::DfpnSearch<Impl>(
-                 *this, dfpn_table_bytes_, exact, dfpn_stats_)
+                 *this, dfpn_table_cap_, exact, dfpn_stats_)
           .solve(game, depth_, exact);
     DepthPath path(path_reserve_capacity(depth_));
     return forced_win(game, path, depth_, exact);
   }
 
   Game begin_search(const Game &input, bool clear_memo = true) {
-    // The cap is fixed once per search (doc/mate_usage.md「探索のメモリ予算」).
-    memo_cap_ = csplendor::resolve_max_memo_states(max_memo_states_);
+    // The caps are fixed once per search (doc/mate_usage.md「探索のメモリ予算」);
+    // df-pn takes its table out of the same budget.
+    const csplendor::SearchTableCaps caps = csplendor::resolve_search_table_caps(
+        max_memo_states_, dfpn_table_bytes_,
+        algorithm_ == MateSearchAlgorithm::DFPN);
+    memo_cap_ = caps.max_memo_states;
+    dfpn_table_cap_ = caps.dfpn_table_bytes;
     memo_.set_entry_limit(memo_cap_);
     exact_memo_.set_entry_limit(memo_cap_);
     line_proofs_.set_max_slots(memo_cap_);
@@ -612,7 +617,8 @@ private:
   // sound; a failure proves nothing.
   bool no_take_probe_ = false;
   MateSearchAlgorithm algorithm_ = MateSearchAlgorithm::DFS;
-  size_t dfpn_table_bytes_ = DEFAULT_DFPN_TABLE_BYTES;
+  size_t dfpn_table_bytes_ = 0; // 0 = from the memory budget
+  size_t dfpn_table_cap_ = 0;   // resolved at begin_search()
   DfpnSearchStats dfpn_stats_;
   // Bounded (src/solver_line_table.h); the cap follows memo_cap_.
   using LineTable = csplendor::solver_internal::LineTable;

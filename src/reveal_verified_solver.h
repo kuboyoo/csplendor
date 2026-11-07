@@ -81,6 +81,8 @@ public:
   // Search algorithm of solve() (doc/mate_dfpn_cpp_design.md): the
   // depth-first search (default) or df-pn over the same AND/OR graph, with a
   // df-pn table of at most `dfpn_table_bytes` for the undecided nodes.
+  // 0 = resolve_search_table_caps() at the start of each search: a quarter
+  // of the memory budget, the automatic memo cap taking the rest.
   void set_algorithm(MateSearchAlgorithm algorithm);
   void set_dfpn_table_bytes(size_t bytes);
   // The df-pn counters of the last solve() (zero after a depth-first one).

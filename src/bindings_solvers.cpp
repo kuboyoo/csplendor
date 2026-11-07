@@ -263,6 +263,14 @@ py::dict proof_dag_to_py_compact(const RevealVerifiedProofDag &dag) {
   return compact;
 }
 
+MateSearchAlgorithm parse_mate_search_algorithm(const std::string &algorithm) {
+  if (algorithm == "dfs")
+    return MateSearchAlgorithm::DFS;
+  if (algorithm == "dfpn")
+    return MateSearchAlgorithm::DFPN;
+  throw std::invalid_argument("algorithm must be 'dfs' or 'dfpn'");
+}
+
 } // namespace
 
 namespace csplendor::python {
@@ -280,6 +288,20 @@ void bind_solvers(py::module_ &m) {
   m.def("resolve_max_memo_states", &csplendor::resolve_max_memo_states,
         py::arg("max_memo_states") = 0, py::arg("memory_budget_bytes") = 0,
         py::arg("jobs") = 1);
+  m.def(
+      "resolve_search_table_caps",
+      [](size_t max_memo_states, size_t dfpn_table_bytes,
+         const std::string &algorithm, uint64_t memory_budget_bytes,
+         unsigned jobs) {
+        const csplendor::SearchTableCaps caps = csplendor::resolve_search_table_caps(
+            max_memo_states, dfpn_table_bytes,
+            parse_mate_search_algorithm(algorithm) == MateSearchAlgorithm::DFPN,
+            memory_budget_bytes, jobs);
+        return py::make_tuple(caps.max_memo_states, caps.dfpn_table_bytes);
+      },
+      py::arg("max_memo_states") = 0, py::arg("dfpn_table_bytes") = 0,
+      py::arg("algorithm") = "dfs", py::arg("memory_budget_bytes") = 0,
+      py::arg("jobs") = 1);
   using csplendor::RootMateProbeConfig;
   using csplendor::RootMateProbeResult;
   py::class_<RootMateProbeConfig>(m, "RootMateProbeConfig")
@@ -941,8 +963,8 @@ void bind_solvers(py::module_ &m) {
          const std::optional<MateOrderHintsHandle> &order_hints,
          bool line_transplant, bool no_take_probe, size_t max_memo_states,
          const std::string &algorithm, size_t dfpn_table_bytes) {
-        if (algorithm != "dfs" && algorithm != "dfpn")
-          throw std::invalid_argument("algorithm must be 'dfs' or 'dfpn'");
+        const MateSearchAlgorithm search_algorithm =
+            parse_mate_search_algorithm(algorithm);
         if (proof_dag_format != "v1" && proof_dag_format != "compact") {
           throw std::invalid_argument(
               "proof_dag_format must be 'v1' or 'compact'");
@@ -981,8 +1003,7 @@ void bind_solvers(py::module_ &m) {
           solver.set_line_transplant(line_transplant);
           solver.set_no_take_probe(no_take_probe);
           solver.set_max_memo_states(max_memo_states);
-          solver.set_algorithm(algorithm == "dfpn" ? MateSearchAlgorithm::DFPN
-                                                   : MateSearchAlgorithm::DFS);
+          solver.set_algorithm(search_algorithm);
           solver.set_dfpn_table_bytes(dfpn_table_bytes);
           if (order_hints)
             solver.set_order_hints(order_hints->table,
@@ -1072,7 +1093,7 @@ void bind_solvers(py::module_ &m) {
       py::arg("no_take_probe") = false,
       py::arg("max_memo_states") = 0,
       py::arg("algorithm") = "dfs",
-      py::arg("dfpn_table_bytes") = DEFAULT_DFPN_TABLE_BYTES);
+      py::arg("dfpn_table_bytes") = 0);
 }
 
 } // namespace csplendor::python
