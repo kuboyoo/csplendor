@@ -284,6 +284,15 @@ public:
     action_count_ = solver_tt_detail::checked_action_count(value);
   }
   bool replayable() const noexcept { return (flags_ & (1U << 3)) != 0; }
+  // The full reply list's size was not generated (LazyReplies); the
+  // principal line computes it from the position.
+  bool action_count_deferred() const noexcept {
+    return (flags_ & (1U << 4)) != 0;
+  }
+  void defer_action_count() noexcept {
+    action_count_ = 0;
+    flags_ = static_cast<uint8_t>(flags_ | (1U << 4));
+  }
 
 private:
   uint64_t action_code_ = 0;
@@ -325,6 +334,15 @@ public:
     action_count_ = solver_tt_detail::checked_action_count(value);
   }
   bool replayable() const noexcept { return (flags_ & (1U << 3)) != 0; }
+  // The full reply list's size was not generated (LazyReplies); the
+  // principal line computes it from the position.
+  bool action_count_deferred() const noexcept {
+    return (flags_ & (1U << 4)) != 0;
+  }
+  void defer_action_count() noexcept {
+    action_count_ = 0;
+    flags_ = static_cast<uint8_t>(flags_ | (1U << 4));
+  }
 
   uint64_t generation() const noexcept { return generation_; }
   uint64_t last_touched() const noexcept { return last_touched_; }

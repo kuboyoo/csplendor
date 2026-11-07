@@ -224,6 +224,12 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
 # 355 -> 0, line empty); the other three payloads change only by the new key.
 # Previous digests: seed0_d1 1054ca5d...0ee0dd83, seed7_d2 bc3aa5be...e79170f8,
 # purchase_dag 4fc8e7c7...5de613d8, oracle_blank e1b3053d...7882939e.
+# 2026-11-07 (守り側の応手の遅延生成): the defender's replies are generated
+# group by group, so legal_moves counts only the generated moves. oracle_blank
+# (defender to move, refuted by its first purchase) generates 11 moves instead
+# of 29; the line's action_count stays 29 (resolved from the position), and
+# every other field of every payload is unchanged. Previous digest:
+# oracle_blank 1b6401ce...b3f25f.
 @pytest.mark.parametrize(
     ("fixture", "expected_digest"),
     [
@@ -246,7 +252,7 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
         ),
         (
             "oracle_blank",
-            "1b6401ce95fed826fd91a3acc6072ff4b5b00cbf288a4481e9fb55b828b3f25f",
+            "8ab6054ae4896316dd0963534de63dda1b9bbf34361aecc5eccf928130d6a4b6",
         ),
     ],
 )

@@ -1,5 +1,6 @@
 #include "reveal_verified_solver.h"
 #include "action.h"
+#include "move_generator.h"
 #include "perf_counters.h"
 #include "reveal_solver_components.h"
 #include "rule_transition.h"
@@ -11,6 +12,7 @@
 #include "solver_tt_types.h"
 #include "solver_win_threshold.h"
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <iterator>
 #include <map>
@@ -537,9 +539,12 @@ private:
 
   struct SearchScratchFrame {
     std::vector<OrderedAction> actions;
+    std::array<std::vector<OrderedAction>, 4> groups;
     std::vector<int> reveal_cards;
     void clear() noexcept {
       actions.clear();
+      for (auto &group : groups)
+        group.clear();
       reveal_cards.clear();
     }
   };
@@ -660,6 +665,179 @@ private:
   static constexpr size_t ATTACKER_TAKE_LIMIT = 6;
   static constexpr size_t ATTACKER_RESERVE_LIMIT = 3;
 
+  // A defender's replies generated group by group in the order the full list
+  // visits them (doc/mate_usage.md「守り側の応手の遅延生成」): group 0 the
+  // purchases (with the blank search's oracle purchases), 1 the visible
+  // reserves (with oracle reserves), 2 the token takes, 3 the deck reserves;
+  // the rank of ordered_action(). Each group is sorted as the full list sorts
+  // it, so the concatenation is the full ordered list, and a refutation found
+  // in an early group saves generating the later ones (the takes with their
+  // token returns are the bulk of a defender's moves).
+  class LazyReplies {
+  public:
+    static constexpr int GROUPS = 4;
+    // Takes (at most 665 with ten tokens) and visible reserves (at most 15)
+    // plus this many purchases stay below MAX_MOVES, so the ordinary
+    // generator would not have capped the full list.
+    static constexpr size_t MAX_LAZY_PURCHASES = MAX_MOVES - 665 - 15;
+
+    LazyReplies(Impl &impl, const Game &game, bool exact,
+                std::array<std::vector<OrderedAction>, GROUPS> &groups)
+        : impl_(impl), game_(game), exact_(exact), groups_(groups) {
+      for (auto &group : groups_)
+        group.clear();
+    }
+
+    // Forgets the generated groups (the eager path generates everything).
+    void discard() {
+      impl_.stats_.legal_moves -= total();
+      for (auto &group : groups_)
+        group.clear();
+      generated_ = {false, false, false, false};
+    }
+
+    bool exact() const noexcept { return exact_; }
+
+    std::vector<OrderedAction> &group(int index) {
+      if (!generated_[index]) {
+        impl_.fill_reply_group(game_, exact_, index, groups_[index]);
+        impl_.stats_.legal_moves += groups_[index].size();
+        generated_[index] = true;
+      }
+      return groups_[index];
+    }
+
+    bool all_generated() const noexcept {
+      return generated_[0] && generated_[1] && generated_[2] && generated_[3];
+    }
+
+    size_t total() const noexcept {
+      size_t count = 0;
+      for (const auto &group : groups_)
+        count += group.size();
+      return count;
+    }
+
+    // Whether the full list holds a move of this group; the takes and the
+    // deck reserves are decided from the board without generating them.
+    bool nonempty(int index) {
+      if (generated_[index])
+        return !groups_[index].empty();
+      const Board &board = game_.board;
+      if (index == 2) {
+        for (int color = 0; color < 5; ++color)
+          if (board.bank[color] > 0)
+            return true;
+        return false;
+      }
+      if (index == 3) {
+        if (!board.players[board.current_player].can_reserve())
+          return false;
+        for (int level = 0; level < 3; ++level)
+          if (!board.decks[level].empty())
+            return true;
+        return false;
+      }
+      return !group(index).empty();
+    }
+
+    // The full list's first action with `code` (0: an oracle action, which
+    // has no code), or nullptr when it is not legal here.
+    const OrderedAction *find(uint64_t code) {
+      int first = 0;
+      int last = GROUPS - 1;
+      if (code != 0)
+        first = last = rank_group(ordered_action(Action::unpack(code), code));
+      for (int index = first; index <= last; ++index) {
+        for (const OrderedAction &ordered : group(index))
+          if (ordered.code == code)
+            return &ordered;
+      }
+      return nullptr;
+    }
+
+    // Whether `action` is the full list's first element.
+    bool is_first_overall(const OrderedAction *action) {
+      if (action == nullptr)
+        return false;
+      for (int index = 0; index < GROUPS; ++index) {
+        if (!nonempty(index))
+          continue;
+        return &group(index).front() == action;
+      }
+      return false;
+    }
+
+    // Whether the full list has at least two moves.
+    bool at_least_two() {
+      size_t count = 0;
+      for (int index = 0; index < GROUPS && count < 2; ++index) {
+        if (generated_[index] || index < 2)
+          count += group(index).size();
+        else if (nonempty(index))
+          count += 1; // at least one; exact size only if it decides
+      }
+      for (int index = 2; index < GROUPS && count < 2; ++index)
+        if (!generated_[index] && nonempty(index))
+          count += group(index).size() - 1;
+      return count >= 2;
+    }
+
+  private:
+    static int rank_group(const OrderedAction &ordered) noexcept {
+      return ordered.rank == 9 ? 3 : ordered.rank;
+    }
+
+    Impl &impl_;
+    const Game &game_;
+    bool exact_ = false;
+    std::array<std::vector<OrderedAction>, GROUPS> &groups_;
+    std::array<bool, GROUPS> generated_ = {false, false, false, false};
+  };
+
+  // One group of a defender's replies (see LazyReplies), sorted and filtered
+  // as the full list would be.
+  void fill_reply_group(const Game &game, bool exact, int index,
+                        std::vector<OrderedAction> &out) {
+    out.clear();
+    auto push = [&](uint64_t code) {
+      out.push_back(ordered_action(Action::unpack(code), code));
+      return true;
+    };
+    const Board &board = game.board;
+    switch (index) {
+    case 0:
+      MoveGenerator::emit_purchase_codes(board, game.simple_payment_mode, push);
+      if (!exact)
+        add_oracle_purchases(game, out);
+      break;
+    case 1:
+      MoveGenerator::emit_reserve_visible_codes(board, push);
+      if (!exact)
+        add_oracle_reserves(game, out);
+      break;
+    case 2:
+      MoveGenerator::emit_take_codes(board, push);
+      break;
+    default:
+      MoveGenerator::emit_reserve_deck_codes(board, push);
+      break;
+    }
+    std::sort(out.begin(), out.end());
+    filter_probe_actions(false, out);
+  }
+
+  // The size of the full ordered reply list of a defender node whose entry
+  // deferred it (LazyReplies); the oracle counters are left as the search
+  // left them.
+  size_t full_reply_count(const Game &game, bool exact) {
+    const RevealVerifiedSearchStats saved_stats = stats_;
+    std::vector<OrderedAction> all;
+    fill_ordered_actions(game, all, exact);
+    stats_ = saved_stats;
+    return all.size();
+  }
+
   static size_t path_reserve_capacity(int remaining_depth) noexcept {
     const size_t depth = static_cast<size_t>(std::max(remaining_depth, 1));
     return depth * 4 + 4;
@@ -756,47 +934,71 @@ private:
 
 #ifdef CSPLENDOR_REUSE_SEARCH_SCRATCH
     SearchScratch::Lease scratch_lease(scratch_);
-    auto &actions = scratch_lease.get().actions;
+    SearchScratchFrame &frame = scratch_lease.get();
 #else
-    std::vector<OrderedAction> actions;
+    SearchScratchFrame frame;
 #endif
-    if (last_move)
-      fill_winning_last_moves(game, actions);
-    else
-      fill_ordered_actions(game, actions, exact_refinement);
-    CSPLENDOR_PERF_INC(SolverTemporaryVectorAllocations);
-    filter_probe_actions(game.current_player() == attacker_, actions);
-    apply_order_hints(state.board_hash(), game.current_player() == attacker_,
-                      actions);
-    if (exact_refinement)
-      prefer_iterative_action(state, depth, game.current_player(), actions);
-    prefer_line_move(game.current_player() == attacker_, actions);
-    if (game.current_player() == attacker_) {
-#ifdef CSPLENDOR_REUSE_SEARCH_SCRATCH
-      // The exhaustive path only reordered a copy. Keep this frame's capacity;
-      // constrained/filtering paths retain the existing selection algorithm.
-      if (exhaustive_attacker_actions_ && !strict_preferred_attacker_actions_ &&
-          strict_preferred_attacker_prefix_ == 0 &&
-          !(path.empty() && required_root_action_ != UINT64_MAX))
-        prefer_candidate_action(actions, depth);
+    auto &actions = frame.actions;
+    const int current_player = game.current_player();
+    const bool attacker_node = current_player == attacker_;
+    // Defender replies come group by group (doc/mate_usage.md「守り側の応手の
+    // 遅延生成」); `front` holds the remembered replies tried first.
+    LazyReplies replies(*this, game, exact_refinement, frame.groups);
+    std::array<const OrderedAction *, 2> front = {nullptr, nullptr};
+    const bool lazy = !attacker_node && lazy_replies_apply(game) &&
+                      prefer_remembered_replies(replies, state, depth, front);
+    if (!lazy) {
+      if (last_move)
+        fill_winning_last_moves(game, actions);
       else
+        fill_ordered_actions(game, actions, exact_refinement);
+      CSPLENDOR_PERF_INC(SolverTemporaryVectorAllocations);
+      filter_probe_actions(attacker_node, actions);
+      apply_order_hints(state.board_hash(), attacker_node, actions);
+      if (exact_refinement)
+        prefer_iterative_action(state, depth, current_player, actions);
+      prefer_line_move(attacker_node, actions);
+      if (attacker_node) {
+#ifdef CSPLENDOR_REUSE_SEARCH_SCRATCH
+        // The exhaustive path only reordered a copy. Keep this frame's
+        // capacity; constrained/filtering paths retain the existing selection
+        // algorithm.
+        if (exhaustive_attacker_actions_ &&
+            !strict_preferred_attacker_actions_ &&
+            strict_preferred_attacker_prefix_ == 0 &&
+            !(path.empty() && required_root_action_ != UINT64_MAX))
+          prefer_candidate_action(actions, depth);
+        else
 #endif
-        actions = forced_attacker_actions(game, actions, depth, path.empty());
-    }
-    stats_.legal_moves += actions.size();
-    if (actions.empty()) {
-      ++stats_.terminal_nodes;
-      store_entry(memo, key, MemoEntry{ForceStatus::REFUTED, 0, -1, false, 0});
-      return ForceStatus::REFUTED;
+          actions = forced_attacker_actions(game, actions, depth, path.empty());
+      }
+      stats_.legal_moves += actions.size();
+      if (actions.empty()) {
+        ++stats_.terminal_nodes;
+        store_entry(memo, key, MemoEntry{ForceStatus::REFUTED, 0, -1, false, 0});
+        return ForceStatus::REFUTED;
+      }
     }
 
-    const int current_player = game.current_player();
     ScopedPathEntry<DepthPath> path_entry(path, path_key);
     bool has_unknown = false;
     MemoEntry representative;
-    representative.set_action_count(actions.size());
-
-    for (const OrderedAction &ordered : actions) {
+    // The entry's action count is the full list's size: known now in the
+    // eager path, after the last group in the lazy path, and resolved by the
+    // principal line when a reply refutes before the last group is generated.
+    const auto decided_entry = [&](ForceStatus status,
+                                   const OrderedAction &ordered, int reveal) {
+      MemoEntry entry{status, ordered.code, reveal, true,
+                      lazy ? (replies.all_generated() ? replies.total() : 0)
+                           : actions.size(),
+                      is_replayable(ordered)};
+      if (lazy && !replies.all_generated())
+        entry.defer_action_count();
+      return entry;
+    };
+    ForceStatus decided = ForceStatus::UNKNOWN;
+    // Visits one action; true when it decides the node (`decided` is set).
+    const auto visit = [&](const OrderedAction &ordered) {
       bool action_unknown = false;
       bool action_refuted = false;
       int representative_reveal = -1;
@@ -831,7 +1033,7 @@ private:
         return proven;
       };
       const uint64_t line_before = line_hash_;
-      if (current_player == attacker_)
+      if (attacker_node)
         line_hash_ = mix_line_hash(line_before, ordered.code);
       const bool completed =
           exact_refinement
@@ -842,40 +1044,116 @@ private:
         action_unknown = true;
 
       if (!representative.has_action()) {
-        representative =
-            MemoEntry{ForceStatus::UNKNOWN,  ordered.code,
-                      representative_reveal, true,
-                      actions.size(),        is_replayable(ordered)};
+        representative = MemoEntry{ForceStatus::UNKNOWN, ordered.code,
+                                   representative_reveal, true, 0,
+                                   is_replayable(ordered)};
       }
-      if (current_player == attacker_ && !action_refuted && !action_unknown) {
+      if (attacker_node && !action_refuted && !action_unknown) {
         if (line_transplant_)
           line_proofs_.put(line_hash_, ordered.code);
-        store_entry(memo, key,
-                    MemoEntry{ForceStatus::PROVEN, ordered.code,
-                              representative_reveal, true, actions.size(),
-                              is_replayable(ordered)});
-        return ForceStatus::PROVEN;
+        store_entry(memo, key, decided_entry(ForceStatus::PROVEN, ordered,
+                                             representative_reveal));
+        decided = ForceStatus::PROVEN;
+        return true;
       }
-      if (current_player != attacker_ && action_refuted) {
+      if (!attacker_node && action_refuted) {
         if (line_transplant_)
           line_refutations_.put(line_hash_, ordered.code);
-        store_entry(memo, key,
-                    MemoEntry{ForceStatus::REFUTED, ordered.code,
-                              representative_reveal, true, actions.size(),
-                              is_replayable(ordered)});
-        return ForceStatus::REFUTED;
+        store_entry(memo, key, decided_entry(ForceStatus::REFUTED, ordered,
+                                             representative_reveal));
+        decided = ForceStatus::REFUTED;
+        return true;
       }
       has_unknown = has_unknown || action_unknown;
+      return false;
+    };
+
+    if (lazy) {
+      for (const OrderedAction *preferred : front)
+        if (preferred != nullptr && visit(*preferred))
+          return decided;
+      for (int group = 0; group < LazyReplies::GROUPS; ++group) {
+        for (const OrderedAction &ordered : replies.group(group)) {
+          if (&ordered == front[0] || &ordered == front[1])
+            continue;
+          if (visit(ordered))
+            return decided;
+        }
+      }
+    } else {
+      for (const OrderedAction &ordered : actions)
+        if (visit(ordered))
+          return decided;
     }
 
     if (has_unknown)
       return ForceStatus::UNKNOWN;
-    const ForceStatus status = current_player == attacker_
-                                   ? ForceStatus::REFUTED
-                                   : ForceStatus::PROVEN;
+    const ForceStatus status =
+        attacker_node ? ForceStatus::REFUTED : ForceStatus::PROVEN;
     representative.set_status(status);
+    representative.set_action_count(lazy ? replies.total() : actions.size());
     store_entry(memo, key, representative);
     return status;
+  }
+
+  // Defender nodes whose replies are generated group by group: no pending
+  // decision, no external order hints (they reorder the whole list), and the
+  // ordinary generator's MAX_MOVES cap out of reach (at most ten tokens; the
+  // purchase count is checked once generated).
+  bool lazy_replies_apply(const Game &game) const {
+    const Board &board = game.board;
+    return !board.waiting_noble && !board.waiting_return && !order_hints_ &&
+           board.players[board.current_player].total_gems() <=
+               Board::MAX_TOKENS;
+  }
+
+  // The replies the eager path would rotate to the front, in visiting order:
+  // the line-transplant refutation, then the shallower exact entry's
+  // refutation (prefer_line_move after prefer_iterative_action). False when
+  // the lazy path must not be used (the defender has no move at all, or so
+  // many purchases that the ordinary generator could hit its cap).
+  bool prefer_remembered_replies(LazyReplies &replies, const StateKey &state,
+                                 int depth,
+                                 std::array<const OrderedAction *, 2> &front) {
+    if (replies.group(0).size() > LazyReplies::MAX_LAZY_PURCHASES ||
+        (!replies.nonempty(0) && !replies.nonempty(1) &&
+         !replies.nonempty(2) && !replies.nonempty(3))) {
+      replies.discard(); // the cap may apply, or PASS is the only move
+      return false;
+    }
+    const OrderedAction *iterative = nullptr;
+    if (replies.exact() && depth > 0) {
+      for (int cached_depth = depth - 1;
+           cached_depth >= 0 && iterative == nullptr; --cached_depth) {
+        CSPLENDOR_PERF_TT_PROBE_SCOPE(iterative_memo_probe);
+        const PersistentEntry *cached =
+            exact_memo_.find(ExactDepthStateKey{state, cached_depth});
+        CSPLENDOR_PERF_TT_PROBE_FINISH(iterative_memo_probe);
+        if (cached != nullptr)
+          CSPLENDOR_PERF_INC(SolverTtHits);
+        if (cached == nullptr || !cached->has_action() ||
+            cached->status() != ForceStatus::REFUTED)
+          continue;
+        iterative = replies.find(cached->action_code());
+      }
+      if (iterative != nullptr && replies.at_least_two())
+        ++stats_.iterative_order_hits;
+    }
+    const OrderedAction *line = nullptr;
+    if (line_transplant_) {
+      const auto *slot =
+          line_refutations_.find(line_hash_ == 0 ? 1 : line_hash_);
+      if (slot != nullptr)
+        line = replies.find(slot->code);
+      const bool already_first = iterative != nullptr
+                                     ? line == iterative
+                                     : replies.is_first_overall(line);
+      if (line != nullptr && !already_first && replies.at_least_two())
+        ++stats_.line_order_hits;
+    }
+    front[0] = line;
+    front[1] = iterative != line ? iterative : nullptr;
+    return true;
   }
 
   // Defender's last-reply cut (doc/mate_usage.md「守り側の最終応手カット」):
@@ -1713,6 +1991,12 @@ private:
 
   void add_oracle_actions(const Game &game,
                           std::vector<OrderedAction> &actions) {
+    add_oracle_purchases(game, actions);
+    add_oracle_reserves(game, actions);
+  }
+
+  void add_oracle_purchases(const Game &game,
+                            std::vector<OrderedAction> &actions) {
     const PlayerState &player = game.board.players[game.current_player()];
     for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
       if (!hidden_catalog_.is_initially_hidden(card_id) ||
@@ -1731,6 +2015,11 @@ private:
       add_oracle_purchase_actions(player, card, effective_cost, 0, 0, {},
                                   actions);
     }
+  }
+
+  void add_oracle_reserves(const Game &game,
+                           std::vector<OrderedAction> &actions) {
+    const PlayerState &player = game.board.players[game.current_player()];
     if (player.can_reserve()) {
       for (int card_id = 0; card_id < CARD_COUNT; ++card_id) {
         const int level = get_card(card_id).level - 1;
@@ -3026,7 +3315,9 @@ private:
           break;
         code = entry.action_code();
         reveal_card = entry.reveal_card();
-        action_count = entry.action_count();
+        action_count = entry.action_count_deferred()
+                           ? full_reply_count(game, exact_refinement)
+                           : entry.action_count();
       } else {
         // Proven by the last-reply cut (doc/mate_usage.md): follow the first
         // ordinary reply, revealing the top of the deck in the exact search.

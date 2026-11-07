@@ -344,8 +344,14 @@ void test_solver_tt_layout_and_value_contracts() {
   transient.set_status(ForceStatus::REFUTED);
   transient.set_action_count(70001);
   require(transient.status() == ForceStatus::REFUTED &&
-              transient.action_count() == 70001,
+              transient.action_count() == 70001 &&
+              !transient.action_count_deferred(),
           "transient reveal TT entry update changed semantics");
+  transient.defer_action_count();
+  require(transient.action_count_deferred() && transient.action_count() == 0 &&
+              transient.status() == ForceStatus::REFUTED &&
+              transient.has_action() && !transient.replayable(),
+          "deferring the action count disturbed the other entry fields");
 
   RevealPersistentEntry persistent(ForceStatus::PROVEN, 84, CARD_COUNT - 1,
                                    true, MAX_MOVES, true);
@@ -358,10 +364,15 @@ void test_solver_tt_layout_and_value_contracts() {
               persistent.reveal_card() == CARD_COUNT - 1 &&
               persistent.has_action() &&
               persistent.action_count() == MAX_MOVES &&
+              !persistent.action_count_deferred() &&
               persistent.replayable() && !non_replayable.replayable() &&
               persistent.generation() == UINT64_MAX - 1 &&
               persistent.last_touched() == UINT64_MAX,
           "persistent reveal TT entry lost a field or counter width");
+  persistent.defer_action_count();
+  require(persistent.action_count_deferred() && persistent.action_count() == 0 &&
+              persistent.generation() == UINT64_MAX - 1,
+          "deferring the persistent action count disturbed the other fields");
 
   VisibleMemoEntry visible(1, VisibleMemoEntry::Bound::LOWER,
 #ifdef CSPLENDOR_COMPACT_SOLVER_REASONS

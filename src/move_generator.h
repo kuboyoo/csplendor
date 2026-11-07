@@ -219,6 +219,46 @@ public:
                                  simple_payment_mode, sink);
   }
 
+  // The legal codes of one kind of move of the side to move, in generation
+  // order and without the MAX_MOVES cap, for callers that visit a player's
+  // moves group by group (doc/mate_usage.md「守り側の応手の遅延生成」).
+  // Outside a pending decision, with a move available and below the cap, the
+  // four groups together are exactly consume_all_codes_capped's codes.
+  template <typename Sink>
+  static bool emit_purchase_codes(const Board &board, bool simple_payment_mode,
+                                  Sink &sink) {
+    validate_purchase_source_ids(board);
+    auto code_sink = [&sink](const Action &action) {
+      return sink(action.pack());
+    };
+    return emit_purchase(board, simple_payment_mode, code_sink);
+  }
+
+  template <typename Sink>
+  static bool emit_reserve_visible_codes(const Board &board, Sink &sink) {
+    auto code_sink = [&sink](const Action &action) {
+      return sink(action.pack());
+    };
+    return emit_reserve_visible(board, code_sink);
+  }
+
+  template <typename Sink>
+  static bool emit_reserve_deck_codes(const Board &board, Sink &sink) {
+    auto code_sink = [&sink](const Action &action) {
+      return sink(action.pack());
+    };
+    return emit_reserve_deck(board, code_sink);
+  }
+
+  template <typename Sink>
+  static bool emit_take_codes(const Board &board, Sink &sink) {
+    auto base_sink = [&board, &sink](const Action &action) {
+      return emit_codes_with_returns(board, action, sink);
+    };
+    return emit_take_different(board, base_sink) &&
+           emit_take_same(board, base_sink);
+  }
+
 private:
   friend class Game;
   friend class ActionEncoderCpp;
