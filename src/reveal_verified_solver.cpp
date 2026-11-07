@@ -987,6 +987,10 @@ private:
           has_representative_reveal = true;
         }
         if (child == ForceStatus::REFUTED) {
+          // A defender's refutation is represented by the refuting reveal
+          // (as in df-pn, doc/mate_dfpn_cpp_design.md 第 7 節).
+          if (!attacker_node)
+            representative_reveal = reveal_card;
           action_refuted = true;
           return false;
         }
