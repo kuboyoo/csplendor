@@ -37,9 +37,11 @@ using csplendor::solver_internal::SearchLimit;
 using csplendor::solver_internal::SearchLimitExceeded;
 using csplendor::solver_internal::StateKeyCore;
 using csplendor::solver_internal::TerminalResult;
+using csplendor::solver_internal::attacker_may_reach_win_in_two_moves;
 using csplendor::solver_internal::can_win_this_turn;
 using csplendor::solver_internal::last_move_cut_applies;
 using csplendor::solver_internal::max_noble_points;
+using csplendor::solver_internal::reach_cut_applies;
 using csplendor::solver_internal::score_after_purchase;
 
 class RevealVerifiedSolver::Impl {
@@ -750,6 +752,17 @@ private:
       store_entry(memo, key, MemoEntry{ForceStatus::REFUTED, 0, -1, false, 0});
       return ForceStatus::REFUTED;
     }
+    if (reach_cut_applies(game, attacker_, depth)) {
+      CardList oracle_now;
+      HiddenCards hidden;
+      collect_hidden_cards(game, exact_refinement, oracle_now, hidden);
+      if (!attacker_may_reach_win_in_two_moves(game.board, attacker_, hidden)) {
+        ++stats_.reach_cut_refutations;
+        ++stats_.terminal_nodes;
+        store_entry(memo, key, MemoEntry{ForceStatus::REFUTED, 0, -1, false, 0});
+        return ForceStatus::REFUTED;
+      }
+    }
     if (last_reply_cut_applies(game, depth)) {
       ++stats_.last_reply_cut_attempts;
       if (attacker_wins_after_any_reply(game, exact_refinement)) {
@@ -892,15 +905,22 @@ private:
            !game.board.waiting_return;
   }
 
-  // Hidden cards the defender may get: in the exact search the deck arrays;
-  // in the blank search the hidden unclaimed cards of every level that still
-  // has a deck or a blank slot (those of blank-slot levels are purchasable
-  // now through the oracle moves).
   bool attacker_wins_after_any_reply(const Game &game,
                                      bool exact_refinement) const {
-    const Board &board = game.board;
     CardList oracle_now;
     HiddenCards hidden;
+    collect_hidden_cards(game, exact_refinement, oracle_now, hidden);
+    return csplendor::solver_internal::attacker_wins_after_any_reply(
+        game.board, attacker_, oracle_now, hidden);
+  }
+
+  // Hidden cards that may surface: in the exact search the deck arrays; in
+  // the blank search the hidden unclaimed cards of every level that still has
+  // a deck or a blank slot (`oracle_now`: those of blank-slot levels, which
+  // the defender may buy now through the oracle moves).
+  void collect_hidden_cards(const Game &game, bool exact_refinement,
+                            CardList &oracle_now, HiddenCards &hidden) const {
+    const Board &board = game.board;
     for (int level = 0; level < 3; ++level) {
       CardList &later = hidden.by_level[level];
       if (exact_refinement) {
@@ -919,8 +939,6 @@ private:
           oracle_now.add(card_id);
       }
     }
-    return csplendor::solver_internal::attacker_wins_after_any_reply(
-        board, attacker_, oracle_now, hidden);
   }
 
   // The attacker's remaining depth drops when the attacker's turn ends

@@ -520,6 +520,7 @@ void bind_solvers(py::module_ &m) {
         stats["blank_cut_proofs"] = result.stats.blank_cut_proofs;
         stats["last_reply_cut_attempts"] = result.stats.last_reply_cut_attempts;
         stats["last_reply_cut_proofs"] = result.stats.last_reply_cut_proofs;
+        stats["reach_cut_refutations"] = result.stats.reach_cut_refutations;
             stats["memo_hits"] = result.stats.memo_hits;
             stats["persistent_memo_hits"] =
                 result.stats.persistent_memo_hits;
@@ -664,6 +665,7 @@ void bind_solvers(py::module_ &m) {
         stats["blank_cut_proofs"] = result.stats.blank_cut_proofs;
         stats["last_reply_cut_attempts"] = result.stats.last_reply_cut_attempts;
         stats["last_reply_cut_proofs"] = result.stats.last_reply_cut_proofs;
+        stats["reach_cut_refutations"] = result.stats.reach_cut_refutations;
         stats["memo_hits"] = result.stats.memo_hits;
         stats["terminal_nodes"] = result.stats.terminal_nodes;
         stats["legal_moves"] = result.stats.legal_moves;
@@ -760,6 +762,7 @@ void bind_solvers(py::module_ &m) {
         stats["blank_cut_proofs"] = result.stats.blank_cut_proofs;
         stats["last_reply_cut_attempts"] = result.stats.last_reply_cut_attempts;
         stats["last_reply_cut_proofs"] = result.stats.last_reply_cut_proofs;
+        stats["reach_cut_refutations"] = result.stats.reach_cut_refutations;
         stats["hint_hits"] = result.stats.hint_hits;
         stats["elapsed_ms"] = result.stats.elapsed_ms;
         py::list root_actions;
@@ -846,6 +849,7 @@ void bind_solvers(py::module_ &m) {
         stats["blank_cut_proofs"] = result.stats.blank_cut_proofs;
         stats["last_reply_cut_attempts"] = result.stats.last_reply_cut_attempts;
         stats["last_reply_cut_proofs"] = result.stats.last_reply_cut_proofs;
+        stats["reach_cut_refutations"] = result.stats.reach_cut_refutations;
         stats["memo_hits"] = result.stats.memo_hits;
         stats["terminal_nodes"] = result.stats.terminal_nodes;
         stats["legal_moves"] = result.stats.legal_moves;
@@ -975,6 +979,7 @@ void bind_solvers(py::module_ &m) {
         stats["blank_cut_proofs"] = result.stats.blank_cut_proofs;
         stats["last_reply_cut_attempts"] = result.stats.last_reply_cut_attempts;
         stats["last_reply_cut_proofs"] = result.stats.last_reply_cut_proofs;
+        stats["reach_cut_refutations"] = result.stats.reach_cut_refutations;
         stats["memo_hits"] = result.stats.memo_hits;
         stats["terminal_nodes"] = result.stats.terminal_nodes;
         stats["legal_moves"] = result.stats.legal_moves;

@@ -106,8 +106,10 @@ def test_reveal_solver_proof_dag_and_action_order_golden():
     # 2026-11-07 (守り側の最終応手カット) added last_reply_cut_attempts /
     # last_reply_cut_proofs (both 0 here); otherwise unchanged from
     # 472f243c...7fe50f.
+    # 2026-11-07 (攻め側の2手の到達上界による反証) added reach_cut_refutations
+    # (0 here); otherwise unchanged from cc1273eb...0936e54c.
     assert _digest_without_elapsed(result) == (
-        "cc1273eb5d68cd68e24bad971036a53a721c09e41ffd7306265a7cf40936e54c"
+        "e3a9874ae59794cee36f87adf0430f634520610d2c52d576dd8588b4006d4a3b"
     )
 
 

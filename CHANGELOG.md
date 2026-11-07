@@ -1,5 +1,23 @@
 # 変更履歴 / Changelog
 
+## 未出荷：詰み探索に攻め側の2手の到達上界による反証（reach cut）を入れる（2026-11-07）
+
+- 最終ラウンドでない局面で攻め側の手番、残り2手、保留の決定なしの節点で、攻め側が自分の2手番で到達できる点の上界 U を
+  守り側の最終応手カットの D2 と同じ関数（`two_move_reach_at_least`、旧 `defender_two_move_reach_at_least`）で計算し、
+  U < 15 なら手を作らずに REFUTED にする（`doc/mate_usage.md` の「攻め側の2手の到達上界による反証」に健全性の根拠）。
+  反証だけを足すので PROVEN の集合・証明 DAG・主手順は変わらず、反証された部分木を省く分だけノード数が減る。統計
+  `reach_cut_refutations` を足した（golden digest はこのキーの追加と、seed7_d2 fixture が root で反証されるようになった
+  こと（25 → 1 ノード）で変わる）。適用先はめくれ検証の解決器（厳密・blank）。準詰み・visible-only は従来どおり。
+- 計測（1 スレッド、置換表 200万件、8c16782 との比較）: ランダム終盤では効果が大きく、seeds 2000〜2099 の 1,164 ケースで
+  合計ノード 130.4万 → 84.0万（深さ2 で 55〜66%、深さ3 で 54〜71%）、360 ケースで 40.2万 → 23.8万、判定と詰みの主手順は
+  全て一致。BENCH（攻め側が 5 点で 2 手の到達上界が 15 を下回ることが少ない）では深さ4 が 150.9万 → 148.5万ノードと
+  ほぼ変わらず、深さ5 は 240 秒でも未決のまま。
+
+English: refutes an attacker node with two moves left, without generating
+moves, when an upper bound on the attacker's points after two of its turns
+(the same bound as the last-reply cut's D2) stays below 15. Proofs, proof
+DAGs and lines are unchanged; random endgames use 36-41% fewer nodes.
+
 ## 未出荷：詰み探索の最終ラウンドの直接判定を置換表の前に行う（2026-11-07）
 
 - 攻め側の最終手のあとの守り側の節点（最終ラウンド、P1 の手番、保留の決定なし）を守り側の全手の到達点から直接決める

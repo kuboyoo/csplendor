@@ -298,21 +298,20 @@ struct HiddenCards {
   CardList by_level[3];
 };
 
-// D2: whether the defender may hold `threshold` points or more after two
-// moves (its reply and its final-round move), as an upper bound. The reply
-// is a purchase (visible, reserved, `oracle_now`) paid with the least gold, a
-// reservation (one gold; any hidden card may be the reserved one) or a token
-// take (`take_reduction`, bank ignored); the second purchase is any visible
-// or reserved card, or a hidden card of a level that was refilled: by the
-// reply's own purchase or reservation, or by the attacker's winning purchase
-// (`attacker_levels`, a bit per level). Nobles: the two best of the final
-// bonuses (one visit per turn).
-inline bool defender_two_move_reach_at_least(const Board &board, int defender,
-                                             const CardList &oracle_now,
-                                             const HiddenCards &hidden,
-                                             int attacker_levels,
-                                             int threshold) {
-  const PlayerState &player = board.players[defender];
+// Whether `player_index` may hold `threshold` points or more after two of its
+// moves, as an upper bound (D2 of the defender's last-reply cut, U of the
+// attacker's reach cut). The first move is a purchase (visible, reserved,
+// `oracle_now`) paid with the least gold, a reservation (one gold; any hidden
+// card may be the reserved one) or a token take (`take_reduction`, bank
+// ignored); the second purchase is any visible or reserved card, or a hidden
+// card of a level that was refilled: by the first move's own purchase or
+// reservation, or by the other side (`other_levels`, a bit per level).
+// Nobles: the two best of the final bonuses (one visit per turn).
+inline bool two_move_reach_at_least(const Board &board, int player_index,
+                                    const CardList &oracle_now,
+                                    const HiddenCards &hidden, int other_levels,
+                                    int threshold) {
+  const PlayerState &player = board.players[player_index];
   const int base = static_cast<int>(player.points);
   if (base + top_two_noble_points(board, player.bonuses) >= threshold)
     return true;
@@ -349,8 +348,8 @@ inline bool defender_two_move_reach_at_least(const Board &board, int defender,
             return true;
     return false;
   };
-  // Token take: no refill by the defender.
-  if (second_purchase(player.gems, player.bonuses, base, attacker_levels, 0,
+  // Token take: no refill of its own.
+  if (second_purchase(player.gems, player.bonuses, base, other_levels, 0,
                       true, -1))
     return true;
   // Reservation: one gold, the reserved card may be any hidden card.
@@ -369,7 +368,7 @@ inline bool defender_two_move_reach_at_least(const Board &board, int defender,
     if (points + top_two_noble_points(board, bonuses) >= threshold)
       return true;
     const int levels =
-        attacker_levels | (refills ? 1 << (card.level - 1) : 0);
+        other_levels | (refills ? 1 << (card.level - 1) : 0);
     return second_purchase(gems_after_purchase(player.gems, player.bonuses, card),
                            bonuses, points, levels, 0, false, card_id);
   };
@@ -417,9 +416,29 @@ inline bool attacker_wins_after_any_reply(const Board &board, int attacker,
     return false;
   if (attacker == 1)
     return true; // the attacker's turn completes the round
-  return !defender_two_move_reach_at_least(
-      board, defender, oracle_now, hidden,
-      attacker_refill_levels(board, attacker), score);
+  return !two_move_reach_at_least(board, defender, oracle_now, hidden,
+                                  attacker_refill_levels(board, attacker), score);
+}
+
+// ---------------------------------------------------------------------------
+// Attacker's reach cut (doc/mate_usage.md「攻め側の2手の到達上界による反証」):
+// at an attacker node outside the final round with two moves left and no
+// pending decision, the attacker cannot win when even the upper bound of its
+// points after two turns stays below WIN_POINTS.
+
+inline bool reach_cut_applies(const Game &game, int attacker, int depth) {
+  return depth == 2 && game.current_player() == attacker &&
+         !game.board.final_round && !game.board.waiting_noble &&
+         !game.board.waiting_return;
+}
+
+// `hidden`: the cards that may surface (every level may be refilled by either
+// side); the attacker never buys from a blank slot, so no `oracle_now`.
+inline bool attacker_may_reach_win_in_two_moves(const Board &board,
+                                                int attacker,
+                                                const HiddenCards &hidden) {
+  return two_move_reach_at_least(board, attacker, CardList{}, hidden, 0b111,
+                                 WIN_POINTS);
 }
 
 // The last-move cut applies to the attacker with one move left outside the

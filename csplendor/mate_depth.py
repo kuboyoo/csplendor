@@ -56,6 +56,7 @@ def _empty_native_stats() -> dict[str, int | float]:
         "blank_cut_proofs": 0,
         "last_reply_cut_attempts": 0,
         "last_reply_cut_proofs": 0,
+        "reach_cut_refutations": 0,
         "elapsed_ms": 0.0,
     }
 

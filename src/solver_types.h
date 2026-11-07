@@ -74,6 +74,9 @@ struct RevealVerifiedSearchStats {
   // proven without generating the replies.
   uint64_t last_reply_cut_attempts = 0;
   uint64_t last_reply_cut_proofs = 0;
+  // Attacker's reach cut (doc/mate_usage.md「攻め側の2手の到達上界による反証」):
+  // attacker nodes with two moves left refuted by the two-move upper bound.
+  uint64_t reach_cut_refutations = 0;
   double elapsed_ms = 0.0;
 };
 

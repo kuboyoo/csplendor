@@ -59,7 +59,9 @@ void test_public_solver_value_contracts() {
               first.unknown_reason == second.unknown_reason,
           "visible solver copy changed its limit/result contract");
 
-  RevealVerifiedSolver reveal(0, 3, 500, 0.0, {}, false, 100000, 500000,
+  // Depth 5: the reach cut refutes a depth-3 search from the opening (the
+  // attacker cannot reach 15 in two turns) within the node limit.
+  RevealVerifiedSolver reveal(0, 5, 500, 0.0, {}, false, 100000, 500000,
                               UINT64_MAX, false, 0, true, true);
   const auto interrupted = reveal.solve(Game(42));
   require(interrupted.unknown_reason == "node limit exceeded",
@@ -884,12 +886,20 @@ void test_reveal_solver_sidecar_restores_on_node_limit() {
   // blank visible slots, so the defender's non-exact search also traverses
   // oracle purchases (the defender's bonuses afford the hidden cards; oracle
   // reservations are not generated while the deck has cards, see
-  // doc/mate_usage.md). Depth two keeps the root out of the last-move cut (a
-  // 0-point attacker cannot reach 15 in one move). The deliberately small
-  // limit exits from a nested branch; verify builds compare the restored root
-  // sidecar after the exception is caught.
+  // doc/mate_usage.md). Depth two keeps the root out of the last-move cut,
+  // and the attacker (12 points, two bonuses and two gems of each colour: a
+  // 3-point card is two tokens short, so no one-move win, but a take puts it
+  // within reach) keeps the root out of the reach cut and the defender nodes
+  // out of the last-reply cut. The deliberately small limit exits from a
+  // nested branch; verify builds compare the restored root sidecar after the
+  // exception is caught.
   Game game(0);
-  PlayerState &defender = game.board.begin_editor_mutation().players[1];
+  Board &board = game.board.begin_editor_mutation();
+  board.players[0].points = 12;
+  board.players[0].gems = {2, 2, 2, 2, 2, 0};
+  board.players[0].bonuses = {2, 2, 2, 2, 2};
+  board.players[0].sync_packed();
+  PlayerState &defender = board.players[1];
   defender.bonuses = {7, 7, 7, 7, 7};
   defender.sync_packed();
   RevealVerifiedSolver solver(0, 2, 20, 0.0);
