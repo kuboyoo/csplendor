@@ -199,11 +199,13 @@ def test_whole_probe_respects_one_shared_deadline(limit_ms):
 
 
 def test_exact_endgame_sweep_matches_reference():
-    # The anytime (blank) sweep runs out of its 2,000-node endgame budget; the
+    # The anytime (blank) sweep runs out of its 1,000-node endgame budget; the
     # exact sweep proves the mate in 2 within the same budget (seed 139 was
-    # used until the blank search of 2026-11-07 proved it directly).
+    # used until the blank search of 2026-11-07 proved it directly, and the
+    # budget was 2,000 until the last-reply cut of 2026-11-07 let the blank
+    # sweep prove this seed within it).
     game = _endgame(107, 10)
-    config = _node_only_config(max_nodes=50, endgame_max_nodes=2_000)
+    config = _node_only_config(max_nodes=50, endgame_max_nodes=1_000)
     native = _native(game, config)
     assert native["stop_reason"] == "exact_endgame_mate" and native["proven"]
     assert native == _reference_probe(game, config)

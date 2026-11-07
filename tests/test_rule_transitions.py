@@ -213,16 +213,21 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
 # 355 moves, 48 -> 0 reservations; oracle_blank: 65 -> 29, 36 -> 0); verdicts,
 # node counts and lines are identical. Previous digests: seed7_d2
 # 23ba3dfc...2ca286, oracle_blank 139a076c...45f0.
+# 2026-11-07 (守り側の最終応手カット) adds the counters last_reply_cut_attempts
+# and last_reply_cut_proofs (seed7_d2 tests 12 reply nodes, oracle_blank 1; no
+# proof in any fixture). Every other field of every payload is unchanged:
+# seed0_d1 949f9990...fc4948, seed7_d2 9bacde29...2eee7f, purchase_dag
+# 0061b0e8...6bfa869, oracle_blank 14207fc5...263a26a.
 @pytest.mark.parametrize(
     ("fixture", "expected_digest"),
     [
         (
             "seed0_d1",
-            "949f9990c4ce2865e98ef3a46dad2f737a243de5c85a81e231c9ad4e2cfc4948",
+            "1054ca5dda2be7ccd33a87416a180e54a99c78160373d63db16b8aed0ee0dd83",
         ),
         (
             "seed7_d2",
-            "9bacde29ad7b7c38066eb5547549b76b7fe1de6cc5bee9b5696a487b922eee7f",
+            "bc3aa5beff86f218d247d6b81cf169204c3a1322d061d409b2fcbe42e79170f8",
         ),
         (
             "purchase_dag",
@@ -231,11 +236,11 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
             # 2026-11-07: VISIT_NOBLE ends the attacker's turn, so the terminal
             # children of the noble choice are labelled depth 0 (was 1, digest
             # df6b13364b59ba3826ad566c1530e0a86405498cb392511f1a94e00bd2f0b097).
-            "0061b0e893ab536995f0543904d0ffc1ad13ccc65ab7fdf860ad5a0d26bfa869",
+            "4fc8e7c76066720f457f9ea681943830ce6c29c791a6280892f6314d5de613d8",
         ),
         (
             "oracle_blank",
-            "14207fc5e101c66d5170724bb6c61cec6c93430dc09f1b50de0ebc6c7263a26a",
+            "e1b3053d598af03d5f5e360e1348bb9c43d23be3496c98f6367ce1767882939e",
         ),
     ],
 )

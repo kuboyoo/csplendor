@@ -103,8 +103,11 @@ def test_reveal_solver_proof_dag_and_action_order_golden():
     # (VISIT_NOBLE ends the attacker's turn); before, c95c3c49...fa92.
     # 2026-11-07 added the counters blank_cut_attempts / blank_cut_proofs
     # (both 0 here); every other field is unchanged from 71e6e7bc...b033e74.
+    # 2026-11-07 (守り側の最終応手カット) added last_reply_cut_attempts /
+    # last_reply_cut_proofs (both 0 here); otherwise unchanged from
+    # 472f243c...7fe50f.
     assert _digest_without_elapsed(result) == (
-        "472f243c73f8907ba7e5db2b3233d8931ef4d8f1e1ead7369bd4bdcbd17fe50f"
+        "cc1273eb5d68cd68e24bad971036a53a721c09e41ffd7306265a7cf40936e54c"
     )
 
 

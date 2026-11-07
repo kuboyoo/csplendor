@@ -23,7 +23,9 @@
 
 using csplendor::solver_internal::ActionOrderKey;
 using csplendor::solver_internal::CardEquivalenceMask;
+using csplendor::solver_internal::CardList;
 using csplendor::solver_internal::ForceStatus;
+using csplendor::solver_internal::HiddenCards;
 using csplendor::solver_internal::HiddenOutcomeCatalog;
 using csplendor::solver_internal::OracleActionMetadata;
 using csplendor::solver_internal::ProofDagBuildAborted;
@@ -738,6 +740,14 @@ private:
       store_entry(memo, key, MemoEntry{ForceStatus::REFUTED, 0, -1, false, 0});
       return ForceStatus::REFUTED;
     }
+    if (last_reply_cut_applies(game, depth)) {
+      ++stats_.last_reply_cut_attempts;
+      if (attacker_wins_after_any_reply(game, exact_refinement)) {
+        ++stats_.last_reply_cut_proofs;
+        store_entry(memo, key, MemoEntry{ForceStatus::PROVEN, 0, -1, false, 0});
+        return ForceStatus::PROVEN;
+      }
+    }
 
 #ifdef CSPLENDOR_REUSE_SEARCH_SCRATCH
     SearchScratch::Lease scratch_lease(scratch_);
@@ -861,6 +871,46 @@ private:
     representative.set_status(status);
     store_entry(memo, key, representative);
     return status;
+  }
+
+  // Defender's last-reply cut (doc/mate_usage.md「守り側の最終応手カット」):
+  // the defender is to move outside the final round with no pending decision
+  // and the attacker has one move left after the reply.
+  bool last_reply_cut_applies(const Game &game, int depth) const {
+    return depth == 1 && game.current_player() != attacker_ &&
+           !game.board.final_round && !game.board.waiting_noble &&
+           !game.board.waiting_return;
+  }
+
+  // Hidden cards the defender may get: in the exact search the deck arrays;
+  // in the blank search the hidden unclaimed cards of every level that still
+  // has a deck or a blank slot (those of blank-slot levels are purchasable
+  // now through the oracle moves).
+  bool attacker_wins_after_any_reply(const Game &game,
+                                     bool exact_refinement) const {
+    const Board &board = game.board;
+    CardList oracle_now;
+    HiddenCards hidden;
+    for (int level = 0; level < 3; ++level) {
+      CardList &later = hidden.by_level[level];
+      if (exact_refinement) {
+        for (uint8_t card_id : board.decks[level])
+          later.add(card_id);
+        continue;
+      }
+      const bool blank = has_blank_slot_at_level(board, level);
+      if (!blank && board.decks[level].empty())
+        continue;
+      for (uint8_t card_id : hidden_catalog_.hidden_at(level)) {
+        if (reveal_state_.is_claimed(board, card_id))
+          continue;
+        later.add(card_id);
+        if (blank)
+          oracle_now.add(card_id);
+      }
+    }
+    return csplendor::solver_internal::attacker_wins_after_any_reply(
+        board, attacker_, oracle_now, hidden);
   }
 
   // The attacker's remaining depth drops when the attacker's turn ends
@@ -2821,10 +2871,12 @@ private:
       throw ProofDagBuildAborted("proof DAG references unmaterialized subtree");
     }
     const Entry &entry = memo_it->second;
-    if (!entry.has_action()) {
+    if (!entry.has_action() && can_resolve_final_round(game)) {
       expand_final_round_proof_summary(game, depth, id);
       return id;
     }
+    // A defender node proven by the last-reply cut has no action either: its
+    // replies are enumerated below and each child is proven on its own.
 
     std::vector<OrderedAction> actions = proof_ordered_actions(game);
     if (game.current_player() == attacker_) {
@@ -2879,12 +2931,14 @@ private:
 
   template <typename MemoType>
   std::vector<RevealVerifiedLineEntry>
-  principal_line_from_memo(Game &game, bool exact_refinement,
-                           const MemoType &memo) {
+  principal_line_from_memo(Game &game, bool exact_refinement, MemoType &memo) {
     std::vector<RevealVerifiedLineEntry> line;
     CSPLENDOR_PERF_INC(SolverTemporarySetAllocations);
     std::unordered_set<DepthStateKey, DepthStateKeyHash> seen;
     int depth = depth_;
+    // True right after a defender node proven by the last-reply cut: its
+    // replies were never searched, so the attacker node below has no entry.
+    bool behind_cut = false;
     for (int ply = 0; ply < 200 && depth >= 0; ++ply) {
       if (game.is_game_over())
         break;
@@ -2899,12 +2953,61 @@ private:
       CSPLENDOR_PERF_TT_PROBE_FINISH(line_memo_probe);
       if (it != memo.end())
         CSPLENDOR_PERF_INC(SolverTtHits);
-      if (it == memo.end() || !it->second.has_action() ||
-          !it->second.replayable())
+      typename MemoType::mapped_type entry;
+      bool found = it != memo.end();
+      if (found) {
+        entry = it->second;
+      } else if (behind_cut) {
+        // Search the skipped attacker node into a scratch table (a few
+        // nodes), leaving the table, its recency order and the statistics as
+        // the search left them.
+        MemoType scratch;
+        const RevealVerifiedSearchStats saved_stats = stats_;
+        bool searched = true;
+        try {
+          DepthPath path(path_reserve_capacity(depth));
+          forced_win_with_memo(game, path, depth, exact_refinement, scratch);
+        } catch (const SearchLimitExceeded &) {
+          searched = false;
+        }
+        stats_ = saved_stats;
+        if (!searched)
+          break;
+        const auto hit = scratch.find(key);
+        found = hit != scratch.end();
+        if (found)
+          entry = hit->second;
+      }
+      behind_cut = false;
+      if (!found)
         break;
       const int current_player = game.current_player();
-      const Action action = Action::unpack(it->second.action_code());
-      const int reveal_card = it->second.reveal_card();
+      uint64_t code = 0;
+      int reveal_card = -1;
+      size_t action_count = 0;
+      if (entry.has_action()) {
+        if (!entry.replayable())
+          break;
+        code = entry.action_code();
+        reveal_card = entry.reveal_card();
+        action_count = entry.action_count();
+      } else {
+        // Proven by the last-reply cut (doc/mate_usage.md): follow the first
+        // ordinary reply, revealing the top of the deck in the exact search.
+        if (entry.status() != ForceStatus::PROVEN ||
+            current_player == attacker_ || can_resolve_final_round(game))
+          break;
+        const std::vector<OrderedAction> actions = proof_ordered_actions(game);
+        if (actions.empty())
+          break;
+        code = actions.front().code;
+        if (exact_refinement)
+          reveal_card =
+              final_round_representative_reveal(game, Action::unpack(code));
+        action_count = actions.size();
+        behind_cut = true;
+      }
+      const Action action = Action::unpack(code);
       bool applied = false;
       if (action.type == RESERVE_DECK && reveal_card >= 0) {
         applied = apply_deck_reserve_outcome(game, action, reveal_card);
@@ -2914,12 +3017,11 @@ private:
         applied = apply_visible_refill_outcome(game, action, level, slot,
                                                reveal_card);
       } else {
-        applied = apply_action_code_tracked(game, it->second.action_code());
+        applied = apply_action_code_tracked(game, code);
       }
       if (!applied)
         break;
-      line.push_back(RevealVerifiedLineEntry{
-          it->second.action_code(), reveal_card, it->second.action_count()});
+      line.push_back(RevealVerifiedLineEntry{code, reveal_card, action_count});
       depth = child_depth(depth, current_player, game);
     }
     return line;

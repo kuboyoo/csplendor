@@ -1,5 +1,30 @@
 # 変更履歴 / Changelog
 
+## 未出荷：詰み探索の守り側の最終応手カット（2026-11-07）
+
+- 守り側の手番で攻め側の残りが1手の節点（最終ラウンドでなく、守り側に貴族選択・返却が残っていない）で、守り側がどう応じて
+  も攻め側が次の手番で勝つことを応手を作らずに判定し、成り立てば PROVEN にする（`doc/mate_usage.md` の「守り側の最終応手
+  カット」）。判定は、守り側の1手で変わらない攻め側の持ち物（トークン・ボーナス・予約札）から保証できる手番終わりの点
+  S\*（守り側は公開札を高々1枚、貴族を高々1人しか取れない）と、守り側の1手・2手の到達点の上界 D1・D2（銀行を無視した
+  取得、補充が起こりうる段の全未知札、貴族2人）の比較で、結果は厳密なまま。厳密探索と blank 探索の両方に入れ、証明 DAG は
+  このカットで証明された節点の応手を列挙して個別に証明し、主手順は代表の応手を進んでその先を一時的な表で探索して続ける。
+  統計 `last_reply_cut_attempts` / `last_reply_cut_proofs` を足した（golden digest はこの2キーの追加だけで変わり、他の
+  全フィールドは同じ）。
+- 層ごとの計測（BENCH 深さ5）で、残り攻め手数 1 以下の層が時間の 93% を占め、守り側 d=1 の証明される節点（展開の 10%）が
+  その子（攻め側 d=1 の 75%、守り側 d=0 の大半）を生むことが分かったのが根拠。
+- 計測: BENCH の厳密探索は深さ4 が 233.8万 → 150.9万ノード・3.4 → 1.9 秒、深さ5 は 240 秒では両方とも未決。ランダム終盤
+  360 ケースで判定の食い違いなし、未決 5 → 0、合計ノード 128.1万 → 40.1万。
+- `tests/test_mate_blank_dominance_cut.py` の blank 意味論の数え上げは、守り側の応手が列挙されることを前提にしていたので、
+  カットが成立しない守り側の脅威（銀行が空で実際には買えない札）を fixture に足した。`tests/test_root_mate_probe.py` の
+  厳密な終盤探索の参照テストは、blank 探索が同じ予算で詰みを出すようになったので終盤予算を 2,000 → 1,000 ノードにした。
+
+English: adds the defender's last-reply cut to the reveal-verified mate
+search: a defender node with one attacker move left is proven without
+generating the replies when the attacker's guaranteed turn-end score (from
+cards the defender cannot take away) beats upper bounds on the defender's
+one- and two-move reach. Exact results are unchanged; BENCH depth 4 runs in
+1.9 s instead of 3.4 s and random endgames use 31% of the nodes.
+
 ## 未出荷：詰み探索のめくれ節点の blank 支配カットと blank 意味論の修正（2026-11-07）
 
 - 厳密探索（`exact_reveal_search=True`）のめくれ節点で、最初の具体めくれを証明したあと、残りのめくれを blank の子局面

@@ -19,26 +19,33 @@ L1_ONE = 7                     # level-1 card worth 1 point
 L2_TWO = 42                    # level-2 card worth 2 points
 
 
-def _blank_deck_fixture(points, reserved):
+def _blank_deck_fixture(points, reserved, defender_threat=False):
     """P0 (attacker, bonuses 10) can buy anything; P1 can only reserve.
 
     Level-1 market: four 0-point cards face up, two more in the deck. Every
     purchase refills from that deck, so the blank search consumes a deck card
     into a blank slot at once.
+
+    `defender_threat`: P1 has 13 points and gems U3 G1 next to the face-up
+    2-point card 50 (cost W1 U4 G2). P1 can never buy it (the bank is empty, so
+    the missing W1 U1 G1 cannot be taken), but the two-move bound of the
+    last-reply cut (doc/mate_usage.md) ignores the bank, so the cut does not
+    fire and the defender's replies are enumerated.
     """
     game = cs.Game(seed=0)
     board = game.board
     board.bank = [0, 0, 0, 0, 0, 0]
-    board.visible = [[0, 1, 2, 3], [-1] * 4, [-1] * 4]
+    board.visible = [[0, 1, 2, 3], [50 if defender_threat else -1, -1, -1, -1],
+                     [-1] * 4]
     board.decks = [[4, 5], [], []]
     board.nobles = []
     board.current_player = 0
     board.turn = 0
     for index in range(2):
         player = board.get_player(index)
-        player.gems = [0] * 6
+        player.gems = [0, 3, 1, 0, 0, 0] if index == 1 and defender_threat else [0] * 6
         player.bonuses = [10] * 5 if index == 0 else [0] * 5
-        player.points = points if index == 0 else 0
+        player.points = points if index == 0 else 13 if defender_threat else 0
         player.acquired_nobles = []
         player.reserved = list(reserved) if index == 0 else [-1, -1, -1]
         player.reserved_is_hidden = [False] * 3
@@ -61,8 +68,9 @@ def _solve(game, depth, *, exact, **kwargs):
 
 def test_blank_deck_reserve_candidates_include_the_card_consumed_into_a_blank_slot():
     # P0 (14) buys a 0-point card; P1 answers (every answer loses to the
-    # reserved 1-point card), so the defender node enumerates every reply.
-    game = _blank_deck_fixture(14, [L1_ONE, 8, 9])
+    # reserved 1-point card). The defender threat keeps the last-reply cut
+    # from proving the reply node outright, so it enumerates every reply.
+    game = _blank_deck_fixture(14, [L1_ONE, 8, 9], defender_threat=True)
     root = _buy_code(game, 0)
 
     blank = _solve(game, 2, exact=False, required_root_action=root)
@@ -82,21 +90,23 @@ def test_blank_deck_reserve_candidates_include_the_card_consumed_into_a_blank_sl
 
 def test_oracle_actions_consume_a_deck_card_like_the_real_refill():
     # P0 (11) needs both reserved 2-point cards: root purchase, then two more
-    # moves. After the root purchase one card is left in the deck. P1's reply
-    # (oracle purchase/reserve of the blank slot, deck reserve or a visible
-    # reserve) always consumes it, so P1's second turn has no deck to reserve
-    # from: the only deck reservations are P1's first-turn ones (two
-    # candidates, see the test above). Before 2026-11-07 the oracle move left
-    # its card in the deck array; a later deck reservation then had no
-    # candidate at all and the search stopped undecided instead of proving.
-    game = _blank_deck_fixture(11, [L2_TWO, 43, -1])
+    # moves. After the root purchase one card is left in the deck. Every P1
+    # reply that touches level 1 (oracle purchase/reserve of the blank slot,
+    # deck reserve, visible reserve) consumes it, so P1's second turn has no
+    # deck to reserve from after those replies: the deck reservations are P1's
+    # first-turn one (two candidates, see the test above) and the second-turn
+    # one after the reply that reserves the level-2 threat card (two more).
+    # Before 2026-11-07 the oracle move left its card in the deck array; a
+    # later deck reservation then had no candidate at all and the search
+    # stopped undecided instead of proving.
+    game = _blank_deck_fixture(11, [L2_TWO, 43, -1], defender_threat=True)
     root = _buy_code(game, 0)
     assert _solve(game, 2, exact=False, required_root_action=root)["proven"] is False
 
     blank = _solve(game, 3, exact=False, required_root_action=root)
     assert blank["proven"] is True
     assert blank["stats"]["oracle_reserve_actions"] > 0
-    assert blank["stats"]["deck_reserve_candidates"] == 2
+    assert blank["stats"]["deck_reserve_candidates"] == 4
 
 
 def _late_position(seed):
@@ -165,7 +175,7 @@ def test_oracle_reserves_are_not_generated_while_the_deck_has_cards():
     # slot and a legal deck reservation. The deck reservation enumerates every
     # hidden unclaimed card (2 candidates), which already covers the oracle
     # reservations of the same cards: none is generated.
-    game = _blank_deck_fixture(14, [L1_ONE, 8, 9])
+    game = _blank_deck_fixture(14, [L1_ONE, 8, 9], defender_threat=True)
     blank = _solve(game, 2, exact=False, required_root_action=_buy_code(game, 0))
     assert blank["proven"] is True
     assert blank["stats"]["deck_reserve_candidates"] == 2
@@ -177,7 +187,7 @@ def test_oracle_reserves_are_generated_once_the_deck_is_empty():
     # The root purchase consumes the only deck card into the blank slot. P1
     # cannot reserve from the empty deck, so the blank slot's card is reachable
     # only through the oracle reservation (1 candidate: card 4).
-    game = _blank_deck_fixture(14, [L1_ONE, 8, 9])
+    game = _blank_deck_fixture(14, [L1_ONE, 8, 9], defender_threat=True)
     game.board.decks = [[4], [], []]
     blank = _solve(game, 2, exact=False, required_root_action=_buy_code(game, 0))
     assert blank["proven"] is True

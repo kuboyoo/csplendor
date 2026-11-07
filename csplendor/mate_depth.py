@@ -54,6 +54,8 @@ def _empty_native_stats() -> dict[str, int | float]:
         "deck_reserve_branches": 0,
         "blank_cut_attempts": 0,
         "blank_cut_proofs": 0,
+        "last_reply_cut_attempts": 0,
+        "last_reply_cut_proofs": 0,
         "elapsed_ms": 0.0,
     }
 

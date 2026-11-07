@@ -69,6 +69,11 @@ struct RevealVerifiedSearchStats {
   // those proven (the remaining concrete reveals were skipped).
   uint64_t blank_cut_attempts = 0;
   uint64_t blank_cut_proofs = 0;
+  // Defender's last-reply cut (doc/mate_usage.md「守り側の最終応手カット」):
+  // defender nodes with one attacker move left that were tested, and those
+  // proven without generating the replies.
+  uint64_t last_reply_cut_attempts = 0;
+  uint64_t last_reply_cut_proofs = 0;
   double elapsed_ms = 0.0;
 };
 
