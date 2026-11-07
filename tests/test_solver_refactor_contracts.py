@@ -101,8 +101,10 @@ def test_reveal_solver_proof_dag_and_action_order_golden():
     # hashes to 6b2453972ede6937b7a1d7bf0b36013d5303ca004b48f32de3ae9d2e8a29717e.
     # 2026-11-07 labels the terminal children of the noble choice depth 0
     # (VISIT_NOBLE ends the attacker's turn); before, c95c3c49...fa92.
+    # 2026-11-07 added the counters blank_cut_attempts / blank_cut_proofs
+    # (both 0 here); every other field is unchanged from 71e6e7bc...b033e74.
     assert _digest_without_elapsed(result) == (
-        "71e6e7bc5b9ac51525095d7c9389967c42a586c0d6a25deb45f055e04b033e74"
+        "472f243c73f8907ba7e5db2b3233d8931ef4d8f1e1ead7369bd4bdcbd17fe50f"
     )
 
 

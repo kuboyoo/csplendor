@@ -52,6 +52,8 @@ def _empty_native_stats() -> dict[str, int | float]:
         "oracle_reserve_actions": 0,
         "deck_reserve_candidates": 0,
         "deck_reserve_branches": 0,
+        "blank_cut_attempts": 0,
+        "blank_cut_proofs": 0,
         "elapsed_ms": 0.0,
     }
 

@@ -1,5 +1,26 @@
 # 変更履歴 / Changelog
 
+## 未出荷：詰み探索のめくれ節点の blank 支配カットと blank 意味論の修正（2026-11-07）
+
+- 厳密探索（`exact_reveal_search=True`）のめくれ節点で、最初の具体めくれを証明したあと、残りのめくれを blank の子局面
+  1回の探索でまとめて証明する（blank 意味論は守り側に多く、攻め側に少なく許すので、blank で PROVEN なら全ての具体
+  めくれで PROVEN。`doc/mate_usage.md` の「blank 意味論の支配」）。blank の子が証明できなければ従来どおり列挙する。
+  主手順は最初の具体めくれを通る。証明 DAG・frontier・root 分割・準詰みは使わない。統計 `blank_cut_attempts` /
+  `blank_cut_proofs` を足した（golden digest はこの2キーの追加だけで変わり、他の全フィールドは同じ）。
+  計測: BENCH 局面の exact 深さ3 が 32,609 → 11,845 ノード、深さ4 が 240 秒・3.87億ノードで未決 → 242万ノード・3.5 秒で
+  不詰みを確定。ランダム終盤 360 ケースで判定の食い違いなし、未決 31 → 5、合計ノード 558万 → 128万。
+- blank 意味論（公開札だけの探索・anytime の正の証明）の山札を実際と一致させた（P3）: 山札予約の候補に blank の枡へ
+  消費された札を含め（配列にない候補は山札の一番上と入れ替えて予約する）、oracle 手（blank の枡の札の購入・予約）は
+  実際の補充と同じく山札を1枚消費する。これまでは消費された札が候補から落ち、oracle 手の後に山札の枚数が実際より
+  多くなり、oracle で取った札が配列に残って山札予約の候補が空になる（探索が未決で止まる）ことがあった。
+- blank の置換表は探索ごとに捨てる（`MateSearchSession` が持ち越すのは厳密表だけ）。
+
+English: adds the blank dominance cut to the exact reveal-verified search
+(after the first concrete reveal of a refill is proven, one blank/oracle
+search covers the remaining reveals), and makes the blank semantics' deck
+faithful (deck-reserve candidates include cards consumed into blank slots;
+oracle moves consume a deck card).
+
 ## 未出荷：詰み探索の最終手カット（2026-11-07）
 
 - 最終ラウンドでない局面で攻め側の残りが1手のとき、手番の終わりに15点に届く手（購入＋貴族、`VISIT_NOBLE`、

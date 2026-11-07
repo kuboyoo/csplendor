@@ -201,16 +201,21 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
 # node (lines are only consumed for proven mates). Previous digests:
 # seed0_d1 060611af...cbb44c, seed7_d2 fe20c195...ec752, oracle_blank
 # c880392b...61c63e.
+# 2026-11-07 (blank dominance cut) adds the counters blank_cut_attempts and
+# blank_cut_proofs (0 in all four fixtures). Every other field of every
+# payload, node counts included, is unchanged from the previous build:
+# seed0_d1 1e00dfdc...902bf, seed7_d2 b5171a73...ea29a, purchase_dag
+# 867e5a82...6274, oracle_blank 9c9931a1...b57a.
 @pytest.mark.parametrize(
     ("fixture", "expected_digest"),
     [
         (
             "seed0_d1",
-            "1e00dfdc929dbcdc997e933a808902b94496aa28351e3b475ea1fb6c91c902bf",
+            "949f9990c4ce2865e98ef3a46dad2f737a243de5c85a81e231c9ad4e2cfc4948",
         ),
         (
             "seed7_d2",
-            "b5171a73ca81b9b0eac5c1756b53449dc955781e98342bc4a8e54e45674ea29a",
+            "23ba3dfc636266e7109b4b47240be4eba7851624d1bc2baba81f1d6b6d2ca286",
         ),
         (
             "purchase_dag",
@@ -219,11 +224,11 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
             # 2026-11-07: VISIT_NOBLE ends the attacker's turn, so the terminal
             # children of the noble choice are labelled depth 0 (was 1, digest
             # df6b13364b59ba3826ad566c1530e0a86405498cb392511f1a94e00bd2f0b097).
-            "867e5a823de565bbdadbe8fea93812f0c4e4c802912f7c583cb0b738af06a274",
+            "0061b0e893ab536995f0543904d0ffc1ad13ccc65ab7fdf860ad5a0d26bfa869",
         ),
         (
             "oracle_blank",
-            "9c9931a133db3bd7a4a1312a1d47127e14fdadda346037fffd2dcfd34dbbb57a",
+            "139a076ca6a77d13cff4bcd2044806033092d542cfad3442f1f9663cc52f45f0",
         ),
     ],
 )

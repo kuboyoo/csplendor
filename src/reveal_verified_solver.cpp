@@ -332,10 +332,11 @@ public:
 
 private:
   Game begin_search(const Game &input, bool clear_memo = true) {
-    if (clear_memo) {
-      memo_.clear();
+    // The blank table never outlives a search: its oracle moves depend on the
+    // cards hidden at this root. Only the exact table is carried over.
+    memo_.clear();
+    if (clear_memo)
       exact_memo_.clear();
-    }
     line_proofs_.clear();
     line_refutations_.clear();
     line_hash_ = 0x9E3779B97F4A7C15ull;
@@ -800,12 +801,26 @@ private:
         action_unknown = action_unknown || child == ForceStatus::UNKNOWN;
         return true;
       };
+      // Blank dominance cut (doc/mate_usage.md): once the first concrete
+      // reveal of a refill is proven, one blank search covers the rest.
+      const auto blank_cut = [&](Game &blank, const Action &action) {
+        ++stats_.blank_cut_attempts;
+        blank.blank_refill_mode = true;
+        if (!apply_action_tracked(blank, action))
+          return false;
+        const int next_depth = child_depth(depth, current_player, blank);
+        const bool proven =
+            forced_win_with_memo(blank, path, next_depth, false, memo_) ==
+            ForceStatus::PROVEN;
+        stats_.blank_cut_proofs += proven;
+        return proven;
+      };
       const uint64_t line_before = line_hash_;
       if (current_player == attacker_)
         line_hash_ = mix_line_hash(line_before, ordered.code);
       const bool completed =
           exact_refinement
-              ? for_each_proof_outcome(game, ordered, visit_outcome)
+              ? for_each_proof_outcome(game, ordered, visit_outcome, blank_cut)
               : for_each_search_outcome(game, ordered, visit_outcome);
       line_hash_ = line_before;
       if (!completed && !action_refuted)
@@ -931,16 +946,23 @@ private:
     return visitor(-1);
   }
 
-  template <typename Visitor>
+  static bool no_blank_cut(Game &, const Action &) { return false; }
+
+  // Every concrete outcome of `ordered`. `blank_cut(game, action)` is asked,
+  // after the first reveal of a refill survived, whether one blank search
+  // proves the remaining reveals (the proof DAG, frontier and root split
+  // enumerate them all and pass no_blank_cut).
+  template <typename Visitor, typename BlankCut = decltype(&no_blank_cut)>
   bool for_each_proof_outcome(Game &game, const OrderedAction &ordered,
-                              Visitor visitor) {
+                              Visitor visitor,
+                              BlankCut blank_cut = &no_blank_cut) {
     const Action action = Action::unpack(ordered.code);
     if (action.type == RESERVE_DECK)
       return for_each_deck_reserve_outcome(game, action, visitor);
 
     const int level = visible_refill_level(action);
     if (level >= 0 && !game.board.decks[level].empty())
-      return for_each_visible_refill_outcome(game, action, visitor);
+      return for_each_visible_refill_outcome(game, action, visitor, blank_cut);
 
     ScopedBranchRollback rollback(*this, game);
     rollback.mark_mutated();
@@ -953,9 +975,9 @@ private:
     return ordered.oracle_card < 0 && !ordered.oracle_reserve;
   }
 
-  template <typename Visitor>
+  template <typename Visitor, typename BlankCut>
   bool for_each_visible_refill_outcome(Game &game, const Action &action,
-                                       Visitor visitor) {
+                                       Visitor visitor, BlankCut blank_cut) {
     const int level = visible_refill_level(action);
     const int slot = visible_refill_slot(game.board, action);
     if (level < 0 || level >= 3 || slot < 0 || game.board.decks[level].empty())
@@ -973,7 +995,16 @@ private:
     RefillVisitCounter visits(action, cards.size());
 #endif
     ScopedBranchRollback rollback(*this, game);
+    size_t visited = 0;
+    bool cut_tried = false;
     for (int card_id : cards) {
+      if (visited == 1 && !cut_tried) {
+        cut_tried = true;
+        rollback.restore();
+        rollback.mark_mutated();
+        if (blank_cut(game, action))
+          return true;
+      }
       rollback.restore();
       rollback.mark_mutated();
       if (!apply_visible_refill_outcome(game, action, level, slot, card_id))
@@ -983,6 +1014,7 @@ private:
 #endif
       if (!visitor(card_id))
         return false;
+      ++visited;
     }
     return true;
   }
@@ -1061,6 +1093,14 @@ private:
           remember_card_equivalence(legacy_seen, class_seen, card_id))
         cards.push_back(static_cast<int>(card_id));
     }
+    // Blank search: a card consumed into a blank slot left the deck array but
+    // may sit in the real deck (doc/mate_usage.md, blank 意味論). In the exact
+    // search every hidden unclaimed card is still in the array: nothing added.
+    for (uint8_t card_id : consumed_hidden_cards(game.board, level)) {
+      if (!reveal_state_.is_claimed(game.board, card_id) &&
+          remember_card_equivalence(legacy_seen, class_seen, card_id))
+        cards.push_back(static_cast<int>(card_id));
+    }
     if (game.current_player() != attacker_ && cards.size() > 1) {
       CSPLENDOR_PERF_ADD(SolverDefenderReserveSortCandidates, cards.size());
       csplendor::solver_internal::sort_reveal_cards_by_score(
@@ -1070,6 +1110,19 @@ private:
     }
     CSPLENDOR_PERF_ADD(SolverRevealCandidates, cards.size());
     record_reveal_scratch_size(cards.size());
+  }
+
+  // Cards of `level` hidden at the root that are no longer in the deck array
+  // (consumed into blank slots); claimed ones are filtered by the caller.
+  CardSet consumed_hidden_cards(const Board &board, int level) const {
+    CardSet in_deck;
+    if (reveal_state_.active()) {
+      in_deck = reveal_state_.remaining_by_level()[level];
+    } else {
+      for (uint8_t card_id : board.decks[level])
+        in_deck.add(card_id);
+    }
+    return hidden_catalog_.hidden_at(level).minus(in_deck);
   }
 
   static void record_reveal_scratch_size(size_t count) {
@@ -1224,16 +1277,32 @@ private:
     return true;
   }
 
+  // Puts the reveal `card_id` on top of the deck. A card that is not in the
+  // array was consumed into a blank slot (blank search only); it takes the
+  // place of the current top card, which becomes consumed instead.
   bool prepare_reveal_card(Game &game, int level, int card_id) {
+    auto &deck = game.board.decks[level];
+    const bool in_deck =
+        std::find(deck.begin(), deck.end(), static_cast<uint8_t>(card_id)) !=
+        deck.end();
     if (reveal_state_.active()) {
-      if (reveal_state_.move_deck_card_to_back(game.board, level, card_id))
+      if (in_deck ? reveal_state_.move_deck_card_to_back(game.board, level,
+                                                         card_id)
+                  : reveal_state_.replace_deck_top(game.board, level, card_id))
         return true;
       if (reveal_state_.active())
         return false;
     }
-    if (!remove_card_from_deck_legacy(game.board, level, card_id))
+    if (in_deck) {
+      if (!remove_card_from_deck_legacy(game.board, level, card_id))
+        return false;
+      return deck.try_push_back(static_cast<uint8_t>(card_id));
+    }
+    if (deck.empty())
       return false;
-    return game.board.decks[level].try_push_back(static_cast<uint8_t>(card_id));
+    game.board.invalidate_hash();
+    deck.back() = static_cast<uint8_t>(card_id);
+    return true;
   }
 
   bool apply_visible_refill_outcome(Game &game, const Action &action, int level,
@@ -1670,18 +1739,27 @@ private:
       csplendor::detail::reserve_card_unchecked(
           board, mutation, ordered.oracle_reserve_card, true);
       csplendor::detail::grant_reserve_gold(board, mutation);
-      // As for a deck reservation, any excess token is returned by a
-      // following RETURN_GEM decision of the same player.
-      if (player.total_gems() > Board::MAX_TOKENS) {
-        mutation.set_waiting_return(true);
-        csplendor::detail::record_decision_outcome(board, mutation, false, 0);
-        mutation.commit();
-        return true;
-      }
     } else {
       return false;
     }
-
+    // The real purchase or reservation of the blank slot's card refills the
+    // slot from the deck: consume one deck card so the deck keeps its real
+    // size (the slot stays blank; the consumed card stays hidden and unclaimed).
+    const int level =
+        get_card(ordered.oracle_card >= 0 ? ordered.oracle_card
+                                          : ordered.oracle_reserve_card)
+            .level -
+        1;
+    if (!board.decks[level].empty())
+      mutation.pop_deck(level);
+    // As for a deck reservation, any excess token is returned by a following
+    // RETURN_GEM decision of the same player.
+    if (ordered.oracle_reserve && player.total_gems() > Board::MAX_TOKENS) {
+      mutation.set_waiting_return(true);
+      csplendor::detail::record_decision_outcome(board, mutation, false, 0);
+      mutation.commit();
+      return true;
+    }
     csplendor::detail::finish_standard_action(board, mutation);
     csplendor::detail::record_decision_outcome(board, mutation, false, 0);
     mutation.commit();

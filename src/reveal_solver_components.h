@@ -28,6 +28,8 @@ public:
 
   bool is_initially_known(int card_id) const noexcept;
   bool is_initially_hidden(int card_id) const noexcept;
+  // The cards of `level` (0-based) that were in the deck at the root.
+  const CardSet &hidden_at(int level) const noexcept;
   static bool is_claimed(const Board &board, int card_id) noexcept;
   static CardSet claimed_cards(const Board &board) noexcept;
   CardSet unseen_cards(const Board &board) const noexcept;
@@ -36,6 +38,7 @@ public:
 private:
   CardSet known_;
   CardSet hidden_;
+  std::array<CardSet, 3> hidden_by_level_{};
 };
 
 // Solver-owned sidecar for canonical reveal-search roots.  It deliberately
@@ -70,6 +73,10 @@ public:
   // this sidecar's deck component are adjusted by the same positional salts.
   bool move_deck_card_to_back(Board &board, int level,
                               int card_id) noexcept;
+  // Blank search: put `card_id` (a hidden card that left the deck array into
+  // a blank slot) on top of the deck in place of the current top card, which
+  // takes its place as a consumed card. Hashes and remaining sets follow.
+  bool replace_deck_top(Board &board, int level, int card_id) noexcept;
 
   bool matches_reference(const Board &board,
                          const HiddenOutcomeCatalog &catalog) const noexcept;

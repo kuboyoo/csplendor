@@ -515,6 +515,8 @@ void bind_solvers(py::module_ &m) {
         stats["line_order_hits"] = result.stats.line_order_hits;
         stats["probe_dropped_actions"] = result.stats.probe_dropped_actions;
         stats["memo_flushes"] = result.stats.memo_flushes;
+        stats["blank_cut_attempts"] = result.stats.blank_cut_attempts;
+        stats["blank_cut_proofs"] = result.stats.blank_cut_proofs;
             stats["memo_hits"] = result.stats.memo_hits;
             stats["persistent_memo_hits"] =
                 result.stats.persistent_memo_hits;
@@ -655,6 +657,8 @@ void bind_solvers(py::module_ &m) {
         stats["line_order_hits"] = result.stats.line_order_hits;
         stats["probe_dropped_actions"] = result.stats.probe_dropped_actions;
         stats["memo_flushes"] = result.stats.memo_flushes;
+        stats["blank_cut_attempts"] = result.stats.blank_cut_attempts;
+        stats["blank_cut_proofs"] = result.stats.blank_cut_proofs;
         stats["memo_hits"] = result.stats.memo_hits;
         stats["terminal_nodes"] = result.stats.terminal_nodes;
         stats["legal_moves"] = result.stats.legal_moves;
@@ -747,6 +751,8 @@ void bind_solvers(py::module_ &m) {
         stats["line_order_hits"] = result.stats.line_order_hits;
         stats["probe_dropped_actions"] = result.stats.probe_dropped_actions;
         stats["memo_flushes"] = result.stats.memo_flushes;
+        stats["blank_cut_attempts"] = result.stats.blank_cut_attempts;
+        stats["blank_cut_proofs"] = result.stats.blank_cut_proofs;
         stats["hint_hits"] = result.stats.hint_hits;
         stats["elapsed_ms"] = result.stats.elapsed_ms;
         py::list root_actions;
@@ -829,6 +835,8 @@ void bind_solvers(py::module_ &m) {
         stats["line_order_hits"] = result.stats.line_order_hits;
         stats["probe_dropped_actions"] = result.stats.probe_dropped_actions;
         stats["memo_flushes"] = result.stats.memo_flushes;
+        stats["blank_cut_attempts"] = result.stats.blank_cut_attempts;
+        stats["blank_cut_proofs"] = result.stats.blank_cut_proofs;
         stats["memo_hits"] = result.stats.memo_hits;
         stats["terminal_nodes"] = result.stats.terminal_nodes;
         stats["legal_moves"] = result.stats.legal_moves;
@@ -954,6 +962,8 @@ void bind_solvers(py::module_ &m) {
         stats["line_order_hits"] = result.stats.line_order_hits;
         stats["probe_dropped_actions"] = result.stats.probe_dropped_actions;
         stats["memo_flushes"] = result.stats.memo_flushes;
+        stats["blank_cut_attempts"] = result.stats.blank_cut_attempts;
+        stats["blank_cut_proofs"] = result.stats.blank_cut_proofs;
         stats["memo_hits"] = result.stats.memo_hits;
         stats["terminal_nodes"] = result.stats.terminal_nodes;
         stats["legal_moves"] = result.stats.legal_moves;

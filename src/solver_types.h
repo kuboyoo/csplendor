@@ -65,6 +65,10 @@ struct RevealVerifiedSearchStats {
   uint64_t oracle_reserve_actions = 0;
   uint64_t deck_reserve_candidates = 0;
   uint64_t deck_reserve_branches = 0;
+  // Blank dominance cut of the exact search: blank children searched, and
+  // those proven (the remaining concrete reveals were skipped).
+  uint64_t blank_cut_attempts = 0;
+  uint64_t blank_cut_proofs = 0;
   double elapsed_ms = 0.0;
 };
 

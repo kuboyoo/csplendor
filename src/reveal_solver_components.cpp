@@ -15,10 +15,13 @@ void HiddenOutcomeCatalog::remember_initial_position(
   known_.clear();
   hidden_.clear();
   for (int level = 0; level < 3; ++level) {
+    hidden_by_level_[level].clear();
     for (int slot = 0; slot < Board::CARDS_PER_LEVEL; ++slot)
       known_.add(game.board.visible[level][slot]);
-    for (uint8_t card_id : game.board.decks[level])
+    for (uint8_t card_id : game.board.decks[level]) {
       hidden_.add(card_id);
+      hidden_by_level_[level].add(card_id);
+    }
   }
   for (int player = 0; player < Board::NUM_PLAYERS; ++player) {
     for (int slot = 0; slot < Board::MAX_RESERVED; ++slot)
@@ -32,6 +35,10 @@ bool HiddenOutcomeCatalog::is_initially_known(int card_id) const noexcept {
 
 bool HiddenOutcomeCatalog::is_initially_hidden(int card_id) const noexcept {
   return hidden_.contains(card_id);
+}
+
+const CardSet &HiddenOutcomeCatalog::hidden_at(int level) const noexcept {
+  return hidden_by_level_[static_cast<size_t>(level)];
 }
 
 bool HiddenOutcomeCatalog::is_claimed(const Board &board,
@@ -411,6 +418,36 @@ bool RevealSearchState::move_deck_card_to_back(Board &board, int level,
   }
   board.cached_hash ^= delta;
   deck_order_hash_ ^= delta;
+  return true;
+}
+
+bool RevealSearchState::replace_deck_top(Board &board, int level,
+                                         int card_id) noexcept {
+  if (!active_ || level < 0 || level >= 3 || !is_valid_card_id(card_id) ||
+      board.decks[level].empty())
+    return false;
+  if (!board.hash_valid) {
+    runtime_fallback("exact board hash is unavailable before reveal");
+    return false;
+  }
+  auto &deck = board.decks[level];
+  const size_t position = deck.size() - 1;
+  const int displaced = deck.back();
+  if (displaced == card_id)
+    return true;
+  const Zobrist &zobrist = Zobrist::get_instance();
+  const uint64_t delta =
+      Board::exact_deck_card_salt(zobrist, level, position,
+                                  static_cast<uint8_t>(displaced)) ^
+      Board::exact_deck_card_salt(zobrist, level, position,
+                                  static_cast<uint8_t>(card_id));
+  deck.back() = static_cast<uint8_t>(card_id);
+  board.cached_hash ^= delta;
+  deck_order_hash_ ^= delta;
+  remaining_by_level_[level].remove(displaced);
+  remaining_by_level_[level].add(card_id);
+  remaining_all_.remove(displaced);
+  remaining_all_.add(card_id);
   return true;
 }
 
