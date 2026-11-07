@@ -45,10 +45,17 @@ public:
   using serial_table = FlatMemoTable;
   static constexpr bool concurrent = false;
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4324) // padding to the cache line is the intent
+#endif
   struct alignas(64) Slot {
     Key key;
     Entry entry;
   };
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
   static constexpr size_t MIN_CAPACITY = 1024;
   // Maximum load factor LOAD_NUM / LOAD_DEN.
