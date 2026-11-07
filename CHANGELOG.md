@@ -13,7 +13,8 @@
   統計に `dfpn_expansions`・`dfpn_table_stores`・`dfpn_table_replacements`・`dfpn_table_bytes` を足した（DFS では 0。
   `legal_moves` などの数え上げは df-pn では再展開を含む）。
 - DFS の守り側の反証の項の代表めくれを、最初のめくれから反証しためくれに改めた（df-pn と同じ）。判定・詰みの証明 DAG は
-  変わらず、不詰みの主手順のめくれだけが変わり得る。
+  変わらず、不詰みの主手順だけが変わり得る（ランダム終盤 3,012 ケースで 98 ケース。ノード数は同一）。DFS と df-pn の
+  主手順は同じケースで全て一致した。
 - `MateSearchAlgorithm` と `DfpnSearchStats` は `src/solver_types.h` に置き、公開ヘッダ `reveal_verified_solver.h` は
   `dfpn_mate_solver.h` を含まない。
 - 計測（1 スレッド）: ランダム終盤 4,016 ケース（3 系統の seeds × 攻め側 2 × exact/blank × 深さ 1〜4）で DFS と判定の

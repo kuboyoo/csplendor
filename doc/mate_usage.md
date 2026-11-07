@@ -285,7 +285,7 @@ visible-only は従来どおり全手を作る。
 `search_reveal_verified_mate_depths(..., algorithm="dfpn", dfpn_table_bytes=...)` は、上の DFS と同じ AND/OR グラフ（手の生成・絞り込み・
 順序、めくれ、深さ、各カット）を証明数・反証数で展開する（`src/dfpn_mate_solver.h`、[設計](mate_dfpn_cpp_design.md)）。
 既定は `"dfs"` のままで、結果の形と意味は同じ。判定と詰みの証明 DAG は DFS と同じで、詰みの主手順も同じ検証を通る
-（攻め側の証明手は探索の順で選ぶので DFS と違う手のこともある）。不詰みの主手順は、反証した応手が探索の順で違い得る。
+（証明手・反証手は探索の順で選ぶので、DFS と違う手になり得る。ランダム終盤 3,012 ケースでは詰み・不詰みとも全て同じ）。
 `MateSearchSession` / `NativeMateSearchSession` と `search_reveal_verified_mate_anytime` は DFS だけで動く（`algorithm` を
 持たない）。
 
