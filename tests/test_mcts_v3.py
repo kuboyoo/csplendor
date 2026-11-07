@@ -664,20 +664,25 @@ GOLDEN_REUSE = Path(__file__).parent / "data" / "v3_reuse_golden_a00c5f2.json"
 
 
 def _reuse_net(features, ids, offsets, slots):
-    """Deterministic pseudo-network that depends only on the batch contents."""
+    """Deterministic pseudo-network that depends only on the batch contents.
+
+    Only exactly rounded arithmetic (no libm), so every platform gets the same numbers."""
     priors = np.empty(len(ids), dtype=np.float32)
     values = np.empty(len(slots), dtype=np.float32)
     for row in range(len(slots)):
         a, b = offsets[row], offsets[row + 1]
-        h = np.abs(np.sin(features[row, :64].astype(np.float64).sum() * 12.9898 + ids[a:b] * 0.37))
+        s = features[row].astype(np.float64).sum()
+        h = np.mod(s * 12.9898 + ids[a:b] * 0.37, 1.0)
         p = (h + 1e-3).astype(np.float32)
         priors[a:b] = p / p.sum()
-        values[row] = np.float32(np.tanh(np.sin(float(features[row].astype(np.float64).sum()) * 3.1)) * 0.6)
+        values[row] = np.float32((np.mod(s * 3.1, 1.0) - 0.5) * 1.2)
     return priors, values
 
 
 def _reuse_trace(variant, seed, simulations=96, plies=24):
-    """Self-play with one slot per observer and advance_game, as dlsplendor drives it."""
+    """Self-play with one slot per observer and advance_game, as dlsplendor drives it.
+
+    No root noise: std::gamma_distribution differs between standard libraries."""
     config = cs.V3SearchConfig()
     config.num_simulations = simulations
     config.leaf_batch_size = 16
@@ -698,11 +703,11 @@ def _reuse_trace(variant, seed, simulations=96, plies=24):
         observer = game.current_player
         search_seed = 1000 * seed + ply
         if observer not in slots:
-            slots[observer] = session.add_game(game, observer, search_seed, ply < 2, simulations)
+            slots[observer] = session.add_game(game, observer, search_seed, False, simulations)
             reused = False
         else:
             since = actions[root_ply[observer]:]
-            reused = session.advance_game(slots[observer], game, since, observer, search_seed, ply < 2, simulations)
+            reused = session.advance_game(slots[observer], game, since, observer, search_seed, False, simulations)
         slot = slots[observer]
         root_ply[observer] = len(actions)
         nodes_after_advance = session.node_count(slot)
