@@ -6,7 +6,7 @@
   解く（`doc/parallel_search_design.md` 第 2 節、`doc/mate_usage.md`「並列の詰み探索」）。root の手 × めくれと、その下の
   手 × めくれを仕事にして訪問順に配り（節点と手の 2 番目以降の子は最初の子が返ってから）、OR の証明・AND の反証で
   兄弟の仕事を階層化した取り消し token で止める。置換表は全スレッドで 1 組（`ConcurrentFlatMemoTable`。状態バイトの
-  CAS で書き、完成後は不変、`FlatMemoTable` と同じはしごで伸長し、ピークは 2 表で約 209 バイト/件）。`jobs=1`（既定）は従来とビット単位で同じ、`jobs=0` は
+  CAS で書き、完成後は不変、`FlatMemoTable` と同じはしごで伸長し、ピークは 2 表で約 209 バイト/件、上限で flush）。`jobs=1`（既定）は従来とビット単位で同じ、`jobs=0` は
   `default_mate_jobs()`（`CSPLENDOR_MATE_JOBS`、なければ clamp(物理コア − 2, 1, 8)）。返り値に使ったスレッド数 `jobs`、
   関数 `physical_core_count()`・`default_mate_jobs()` を足した。WASM（pthreads なし）は常に 1 スレッド。
 - 1 スレッドの DFS でも、めくれを 1 つも適用できなかった手を（空の AND として証明にせず）未決にした（並列と同じ。

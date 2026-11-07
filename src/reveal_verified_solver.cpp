@@ -719,6 +719,8 @@ private:
     stats_ = RevealVerifiedSearchStats();
     for (const auto &worker : workers)
       add_search_stats(stats_, worker->stats_);
+    stats_.memo_flushes +=
+        shared_tables_->exact.flushes() + shared_tables_->blank.flushes();
     // This thread reads the shared tables until solve() ends.
     shared_ = shared_tables_.get();
     shared_->growth.attach();

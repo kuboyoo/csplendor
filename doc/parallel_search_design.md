@@ -123,13 +123,13 @@ C は Splendor の太い木（1 段 60〜130 倍）では重複した探索が�
   2 表）。スロットごとの状態バイト（別配列）を「空 → CAS で書き込み中 → 鍵と項を書く → release で完成」と進め、読み手は
   完成したスロットだけ鍵を比べる（書き込み中は飛ばす。見逃しは再探索になるだけ）。書くのは決着した項だけ（現行の DFS も
   未決は保存しない）。同じ鍵に 2 スレッドが同時に書くと 2 つのスロットに入り得るが、どちらも同じ真偽。上限 N 件
-  （`memo_cap_` と同じ）の後は書かない（現行の flush と同じく健全性に影響しない）。配列は 2^15 スロットから始めて 6 割で
-  2 倍にする（上限の配列を最初から取ると、まばらに書いたページの確保と解放で BENCH 深さ4 に 0.6 秒（CPU）と 0.1 秒かかった）。
-  伸長は、表を使う全スレッドがノードごとの safepoint（表へのポインタを持たない点）に来たところで、全員で旧配列を分担して
-  移す。移植の表（`solver_line_table.h`）は手の順序のヒントなので、スレッドごとに持つ（共有しない。結果の真偽に関わらない。
+  （`memo_cap_` と同じ）に達すると 1 スレッドと同じく flush する（満杯の後の保存を捨て続けると、深さ5 で再探索が 5 倍に
+  増えた）。配列は `FlatMemoTable` と同じはしご（C >> k から C/8 まで 2 倍、C/8 → C）で伸びる（上限の配列を最初から取ると、
+  まばらに書いたページの確保と解放で BENCH 深さ4 に 0.6 秒（CPU）と 0.1 秒かかった）。伸長と flush は、表を使う全スレッドが
+  ノードごとの safepoint（表へのポインタを持たない点）に来たところで、全員で分担して行う。移植の表（`solver_line_table.h`）は手の順序のヒントなので、スレッドごとに持つ（共有しない。結果の真偽に関わらない。
   共有版も試したが、ノード数・時間とも差がなかった）。
 - **統計**: `nodes`・`memo_hits` は原子加算でなく、スレッドごとに持って終わりに足す。`stats_.legal_moves` などは同じ。
-- **メモリ**: 表は 1 組なので `solver_memory_budget_bytes(available, jobs=1)` を使い、スレッドごとの作業領域
+- **メモリ**: 表は 1 組なので `solver_memory_budget_bytes(available)` を割らずに使い、スレッドごとの作業領域
   （移植の表 2 × 2^17 スロット = 4 MiB と経路・手の作業領域）だけを jobs 倍する。ブラウザは JS 側の予算をそのまま 1 表に渡す。
 - **入口**: `search_reveal_verified_mate_depths(jobs=N)` の `_solve_depth_parallel`（Python の `ThreadPoolExecutor`）を、
   C++ の `solve_reveal_verified_mate_cpp(game, attacker, depth, ..., jobs=N)`（`RevealVerifiedSolver::set_jobs`）の 1 回呼び出しに置き換える。
@@ -239,7 +239,7 @@ C は Splendor の太い木（1 段 60〜130 倍）では重複した探索が�
 
 ### 5.4 メモリ予算とスレッド数
 
-- 共有表（第 2 節）では予算を jobs で割らない。`solver_memory_budget_bytes(available, 1)` を 1 表に使い、スレッドの作業領域は
+- 共有表（第 2 節）では予算を jobs で割らない。`solver_memory_budget_bytes(available)` を 1 組の表に使い、スレッドの作業領域は
   別に見積もる（1 スレッド 8 MB 以下）。`mate_usage.md`「探索のメモリ予算」の表の `jobs` 列はこれに合わせて書き換える。
 - ブラウザは JS が `navigator.deviceMemory`（Safari は未実装 → `isAppleMobile` なら 4 GB とみなす）から予算を決める。
   iPhone: MCTS Worker の wasm（網＋木）と詰み Worker の wasm（表）の合計を 512 MiB 以下に収める（詰みの表 128 MiB）。

@@ -197,10 +197,11 @@ class ConcurrentTableGrowth {
 public:
   class Table {
   public:
-    // Under the growth: allocate the larger array (false: no growth wanted,
-    // or the allocation failed, after which the table keeps its array and
-    // drops new entries), move part `part` of `parts` of the entries (threads
-    // run the parts at once), and switch to the larger array.
+    // Under the growth: allocate the larger array, or mark a full table for
+    // a flush (false: neither wanted, or the allocation failed, after which
+    // the table keeps its array and flushes when it fills), move or clear
+    // part `part` of `parts` of the slots (threads run the parts at once),
+    // and switch to the larger (or emptied) array.
     virtual bool prepare_growth() noexcept = 0;
     virtual void migrate(size_t part, size_t parts) noexcept = 0;
     virtual void finish_growth() noexcept = 0;
@@ -309,10 +310,11 @@ private:
 // ladder: with C = capacity_for(max_entries), from the smallest C >> k
 // (k >= 3) not below MIN_CAPACITY, doubling up to C / 8, then C. The one
 // growth that copies a large table (both arrays alive) starts from C / 8, so
-// the peak stays at 1.125 C slots per table. The table never flushes or
-// erases: an insert beyond max_entries entries is dropped, which only costs
-// re-searching that node. A pointer from find() stays valid until the
-// caller's next safepoint.
+// the peak stays at 1.125 C slots per table. At max_entries entries the
+// table is flushed (all slots emptied) at the next growth, as the serial
+// table flushes; until then inserts are dropped, which only costs
+// re-searching. Without `growth` inserts beyond max_entries are dropped. A
+// pointer from find() stays valid until the caller's next safepoint.
 template <typename Key, typename Entry, typename Hash>
 class ConcurrentFlatMemoTable final : public ConcurrentTableGrowth::Table {
 public:
@@ -378,7 +380,10 @@ public:
   bool insert(const Key &key, const Entry &entry) noexcept {
     if (size_.load(std::memory_order_relaxed) >=
         limit_.load(std::memory_order_relaxed)) {
+      // Full: dropped until the threads flush the table at a safepoint.
       dropped_.fetch_add(1, std::memory_order_relaxed);
+      if (growth_)
+        growth_->request();
       return false;
     }
     Array &array = *current_.load(std::memory_order_acquire);
@@ -403,16 +408,21 @@ public:
 
   bool prepare_growth() noexcept override {
     const Array &array = *current_.load(std::memory_order_relaxed);
-    if (array.capacity >= final_capacity_ ||
-        size_.load(std::memory_order_relaxed) <= grow_at(array.capacity))
+    const size_t size = size_.load(std::memory_order_relaxed);
+    if (size >= limit_.load(std::memory_order_relaxed)) {
+      flushing_ = true; // full: clear it, as the serial table flushes
+      return true;
+    }
+    if (array.capacity >= final_capacity_ || size <= grow_at(array.capacity))
       return false;
     const size_t capacity = array.capacity >= (final_capacity_ >> 3)
                                 ? final_capacity_
                                 : array.capacity * 2;
     next_ = Array::create(capacity, allocate_);
     if (next_ == nullptr) {
-      // Out of memory: keep this array and its entries, store no more.
-      limit_.store(size_.load(std::memory_order_relaxed),
+      // Out of memory: keep this array, flushing it at load 0.7 from now on.
+      limit_.store(std::min(limit_.load(std::memory_order_relaxed),
+                            array.capacity / 10 * 7),
                    std::memory_order_relaxed);
       final_capacity_ = array.capacity;
       return false;
@@ -421,21 +431,34 @@ public:
   }
 
   void migrate(size_t part, size_t parts) noexcept override {
-    if (next_ == nullptr)
+    if (next_ == nullptr && !flushing_)
       return;
     const Array &array = *current_.load(std::memory_order_relaxed);
     const size_t begin = array.capacity * part / parts;
     const size_t end = array.capacity * (part + 1) / parts;
-    for (size_t i = begin; i < end; ++i)
-      if (array.states[i].load(std::memory_order_relaxed) == READY)
+    for (size_t i = begin; i < end; ++i) {
+      if (flushing_)
+        array.states[i].store(EMPTY, std::memory_order_relaxed);
+      else if (array.states[i].load(std::memory_order_relaxed) == READY)
         place(*next_, array.slots[i].key, array.slots[i].entry);
+    }
   }
 
   void finish_growth() noexcept override {
+    if (flushing_) {
+      size_.store(0, std::memory_order_relaxed);
+      flushes_.fetch_add(1, std::memory_order_relaxed);
+      flushing_ = false;
+    }
     if (next_ == nullptr)
       return;
     delete current_.exchange(next_, std::memory_order_release);
     next_ = nullptr;
+  }
+
+  // Flushes at the entry limit (see insert()).
+  uint64_t flushes() const noexcept {
+    return flushes_.load(std::memory_order_relaxed);
   }
 
 private:
@@ -525,8 +548,10 @@ private:
   Allocate allocate_;
   std::atomic<Array *> current_{nullptr};
   Array *next_ = nullptr; // during a growth
+  bool flushing_ = false; // during a flush
   std::atomic<size_t> size_{0};
   std::atomic<uint64_t> dropped_{0};
+  std::atomic<uint64_t> flushes_{0};
 };
 
 } // namespace csplendor::solver_internal

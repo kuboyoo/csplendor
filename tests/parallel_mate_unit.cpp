@@ -144,9 +144,38 @@ void test_table_growth_allocation_failure() {
   for (std::thread &thread : pool)
     thread.join();
   require(table.capacity() == start, "the failed growth kept the array");
-  require(table.size() <= start, "entries stop at the array's size");
-  require(table.dropped() > 0, "later entries are dropped");
-  require(table.find(Key{1}) != nullptr, "earlier entries stay readable");
+  require(table.size() <= start / 10 * 7 + 4, "the array fills to load 0.7");
+  require(table.flushes() > 0, "then it is flushed and refilled");
+  require(table.size() > 0, "and keeps storing");
+}
+
+// At its entry limit the table is flushed at a safepoint (as the serial
+// table), and every entry read back is right.
+void test_table_flush_at_the_limit() {
+  ConcurrentTableGrowth growth;
+  const size_t limit = 5000;
+  Table table(limit, &growth);
+  std::atomic<bool> wrong{false};
+  std::vector<std::thread> pool;
+  for (int t = 0; t < 6; ++t)
+    pool.emplace_back([&, t] {
+      growth.attach();
+      std::mt19937_64 rng(static_cast<uint64_t>(t) + 100);
+      for (int i = 0; i < 40000; ++i) {
+        const uint64_t k = 1 + rng() % 100000;
+        table.insert(Key{k}, Value{k + 1});
+        const Value *found = table.find(Key{k});
+        if (found != nullptr && found->value != k + 1)
+          wrong.store(true);
+        growth.safepoint();
+      }
+      growth.detach();
+    });
+  for (std::thread &thread : pool)
+    thread.join();
+  require(!wrong.load(), "a flushed table never returns a wrong entry");
+  require(table.flushes() > 0, "the full table was flushed");
+  require(table.size() <= limit + 6, "never far beyond the limit");
 }
 
 // ---- The scheduler over synthetic trees --------------------------------
@@ -484,6 +513,7 @@ int main() {
     test_table_single_thread();
     test_table_growth_under_threads();
     test_table_growth_allocation_failure();
+    test_table_flush_at_the_limit();
     test_scheduler_matches_the_tree_value();
     test_scheduler_limits_and_failures();
     test_solver_verdicts_match_the_serial_search();
