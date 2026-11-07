@@ -3,11 +3,19 @@
 ## 未出荷：C++ 版 df-pn 詰み探索を併設し、Python 版 df-pn を削除する（2026-11-07）
 
 - `solve_reveal_verified_mate_cpp(algorithm="dfpn", dfpn_table_bytes=...)` と
-  `search_reveal_verified_mate_depths(algorithm="dfpn")` で、DFS と同じ AND/OR グラフ（手の生成・順序、めくれ、深さ、
+  `search_reveal_verified_mate_depths(algorithm="dfpn", dfpn_table_bytes=...)` で、DFS と同じ AND/OR グラフ（手の生成・順序、めくれ、深さ、
   各カット）を証明数・反証数で展開する df-pn を選べる（`src/dfpn_mate_solver.h`、`doc/mate_dfpn_cpp_design.md`）。
   既定は `"dfs"` のまま。決着した節点は DFS と同じ表と項に入るので、主手順・証明 DAG は DFS のコードで作られる。
-  未決着の値は容量固定の df-pn 表（バイト数の予算、既定 128 MiB、work 最小を置換）に置く。統計に
-  `dfpn_expansions`・`dfpn_table_stores`・`dfpn_table_replacements`・`dfpn_table_bytes` を足した（DFS では 0）。
+  未決着の値は容量固定の df-pn 表（`dfpn_table_bytes` バイト以下、伸長の一時領域を含む。work 最小を置換）に置く。
+  既定の 0 は自動で、探索のメモリ予算の 1/4 を df-pn 表に、残りの 3/4 を決着表の件数（`max_memo_states=0` のとき）に
+  割る（`resolve_search_table_caps(max_memo_states, dfpn_table_bytes, algorithm, memory_budget_bytes, jobs)` を足した）。
+  深さ掃引は `jobs` で割った予算から両方を決めて全深さ・全枝に渡す。`MateSearchSession` と anytime 探索は DFS のまま。
+  統計に `dfpn_expansions`・`dfpn_table_stores`・`dfpn_table_replacements`・`dfpn_table_bytes` を足した（DFS では 0。
+  `legal_moves` などの数え上げは df-pn では再展開を含む）。
+- DFS の守り側の反証の項の代表めくれを、最初のめくれから反証しためくれに改めた（df-pn と同じ）。判定・詰みの証明 DAG は
+  変わらず、不詰みの主手順のめくれだけが変わり得る。
+- `MateSearchAlgorithm` と `DfpnSearchStats` は `src/solver_types.h` に置き、公開ヘッダ `reveal_verified_solver.h` は
+  `dfpn_mate_solver.h` を含まない。
 - 計測（1 スレッド）: ランダム終盤 4,016 ケース（3 系統の seeds × 攻め側 2 × exact/blank × 深さ 1〜4）で DFS と判定の
   食い違い 0・未決 0。速さは DFS の 0.7〜0.9 倍（詰みのある局面の深さ4 で exact 0.87、blank 0.72）で、既定は変えない。
 - Python 版 df-pn（`scripts/dfpn_mate_solver.py` の `DFPNMateSolver`、並列 root worker、`solve_game_dfpn`、

@@ -95,7 +95,8 @@ Python 版の設計仕様（第 5〜8 節）を踏襲し、置換表に載るの
 守り側の手番は 1 回で攻め側に戻り、保留の決定（貴族選択・返却）は盤面を単調に変える（札・トークンが減る）ので、
 同じ (局面, 残り) に戻る経路は存在しない。したがって GHI（graph history interaction）も千日手も起こらず、
 経路スタック（`RecursionPath`）の「経路上の再訪は UNKNOWN」は df-pn では不要である（いまの探索でもこの分岐は
-実際には起こらない。安全弁として assert に残す）。ゲームの千日手引き分けの規則（`test_repetition_draw.py`）は
+実際には起こらない）。df-pn の層は経路を持たず、この確認もしない（残り 1 以下で呼ぶ DFS の葉の探索は、番兵を積んだ
+経路で従来どおり確認する）。ゲームの千日手引き分けの規則（`test_repetition_draw.py`）は
 履歴を見るが、解決器は履歴なしで `apply_trusted` しているので、いまも df-pn でも扱わない（文書化する）。
 
 ## 3. 探索手順（df-pn+、しきい値つき反復）
@@ -144,6 +145,10 @@ move(m, th_pn, th_dn):                   // 手は AND（第 2 節）
   （`fill_ordered_actions` / `fill_winning_last_moves`、`filter_probe_actions`、`apply_order_hints`、反復深化の手、
   証明の移植、`forced_attacker_actions`）で、同値の pn/dn の選択順にだけ効く。
 - 例外（ノード・時間の上限、取り消し）は DFS と同じ `SearchLimitExceeded` で根まで戻り、結果は未決になる。
+- 手・めくれの適用の失敗（規則の不整合で、実際には起こらない）も根まで戻して全体を未決にする（DFS はその手だけを
+  未決にして続ける）。未決の値を pn/dn で表さず、例外文で原因を区別する: 適用の失敗は
+  `"dfpn: a reveal could not be applied"`、DFS の葉の探索の未決は `"dfpn: undecided depth-first leaf"`、最終ラウンドの
+  展開の未決は `"dfpn: undecided final-round node"`。未決の項は決着表に書かない。
 
 ## 4. 既存カットの再利用
 
@@ -170,14 +175,18 @@ dn = 0 ⇔ 反証」の帰納法で保たれる。カットの関数は DFS の�
   決着表を共用するので、主手順（`principal_line_from_memo`）、証明 DAG、`MateSearchSession` の持ち越しと
   制限つき探索後の反証の除去は DFS と同じコードがそのまま使える。
 - **df-pn 表は容量固定**: 1 スロット = 鍵（exact 32 B / blank 48 B）+ pn 4 B + dn 4 B + work 4 B（exact 48 B、
-  blank 64 B）、4 スロットの組（set-associative）。容量は**バイト数の予算**から決め（`dfpn_table_bytes`、既定
-  128 MiB）、それを超えて割り当てない。表は 256 組から倍々に伸び（小さな探索で大きな表を初期化しない。
-  上限の 1/8 からは上限へ跳ぶので、最後の伸長の間だけ予算の 1/8 を余分に持つ）、上限に達するまでは負荷 3/4 か
+  blank 64 B）、4 スロットの組（set-associative）。容量は**バイト数の予算**から決め（`dfpn_table_bytes`）、
+  伸長の一時領域を含めてそれを超えて割り当てない。表は 256 組から倍々に伸び（小さな探索で大きな表を初期化しない）、
+  上限の 1/8 からは上限へ跳ぶ。最後の伸長の間は古い表（上限の 1/8 以下）と新しい表を同時に持つので、上限の組数は
+  予算の 8/9 から決める（ピーク ≤ 予算）。上限に達するまでは負荷 3/4 か
   鍵の組が埋まったときに伸ばして置換しない。上限の組数に達したら伸びずに置換する。組に空きが無ければ **work（その節点の下で訪問した節点数）が最小**の項を
   上書きする。exact の探索では予算の全部を exact 表に、blank の探索では全部を blank 表に割る（B は DFS なので
   exact の探索に blank の df-pn 表は要らない）。
-- 予算は引数で受け取る（`solve_reveal_verified_mate_cpp(dfpn_table_bytes=...)`）。端末の空きメモリから決める
-  仕組みを入れるときは、この引数に渡す値をそこから決めるだけでよい。
+- 予算は引数で受け取る（`solve_reveal_verified_mate_cpp(dfpn_table_bytes=...)`）。既定の 0 は「自動」で、探索の開始時に
+  [探索のメモリ予算](mate_usage.md)（空きメモリの 1/4 を 64 MiB〜2 GiB に挟み、ジョブ数で割る）の 1/4 を df-pn 表に、
+  残りの 3/4 を決着表の件数（`max_memo_states=0` のとき、1 件 256 バイト）に割る（`src/solver_memory_budget.h` の
+  `resolve_search_table_caps`）。深さ掃引は呼び出しの開始時に `jobs` で割った予算から両方を1回だけ決め、全深さ・
+  全枝に渡すので、`jobs` 本の枝の合計も予算に収まる。
 - 置換・flush された節点は再訪時に再初期化（未訪問の初期値か、子からの再計算）される。正しさは保たれ、時間だけが
   増える。
 - 決着表の flush（上限で空にする）は DFS と同じ。df-pn の未決着の値は df-pn 表に残るので、flush で失うのは決着値だけ
@@ -211,9 +220,12 @@ DFS の手の順序（購入 → 予約 → 取得、証明の移植、反復深
 ## 7. 証明 DAG と主手順
 
 - 決着値は DFS と同じ項で決着表に入る（第 5 節）: OR の PROVEN は証明手と最初のめくれ、AND の REFUTED は反証手と
-  反証しためくれ、それ以外（OR の REFUTED、AND の PROVEN）は最初の手と最初のめくれ、合法手数は手の数。
+  反証しためくれ、それ以外（OR の REFUTED、AND の PROVEN）は最初の手と最初のめくれ、合法手数は手の数。DFS も
+  AND の REFUTED の代表めくれを反証しためくれにする（2026-11-07 に最初のめくれから改めた。不詰みの主手順だけが
+  変わり、判定と詰みの証明 DAG は変わらない）。
   したがって**主手順**は DFS の `principal_line_from_memo` がそのまま作る（最終応手カットで証明された節点の先を
-  小さな一時表で探索して続ける処理も同じ）。
+  小さな一時表で探索して続ける処理も同じ）。詰みの主手順は DFS と同じ検証（再生でき、証明の手で終わる）を通るが、
+  証明手・反証手は探索の順で選ぶので DFS と同じ手とは限らない。
 - **証明 DAG**（`build_proof_dag`）は DFS の手順をそのまま使う: 決着表の PROVEN の項をたどり、攻め側は証明手、
   守り側は全応手、めくれは全列挙で子を作り、表に無い節点（B で覆った休眠のめくれ、置換・flush で失われた項）は
   DFS（`forced_win`）で証明し直す。DFS が証明できなければ DAG は作られない（"proof DAG reveal refinement failed"）
@@ -223,16 +235,18 @@ DFS の手の順序（購入 → 予約 → 取得、証明の移植、反復深
 ## 8. 既存 API との関係と Python 版を消す条件
 
 - `solve_reveal_verified_mate_cpp`: 引数 `algorithm="dfs"|"dfpn"`（既定 `"dfs"`）と `dfpn_table_bytes`（df-pn 表の
-  バイト数の予算、既定 128 MiB）を足す。結果の形（`proven`、`line`、`proof_dag`、`stats`）は同じで、他の引数
+  バイト数の予算、既定 0 = 自動、第 5 節）を足す。結果の形（`proven`、`line`、`proof_dag`、`stats`）は同じで、他の引数
   （`exact_reveal_search`、`exhaustive_attacker_actions`、順序表、`no_take_probe`、`required_root_action`、
   `max_memo_states` など）の意味も同じ。`nodes` は df-pn の節点の訪問回数（表の参照で戻った訪問を含む）。df-pn の
   統計として `dfpn_expansions`（手を生成した回数）、`dfpn_table_stores`、`dfpn_table_replacements`（置換で上書き
-  した回数）、`dfpn_table_bytes`（割り当てた表のバイト数）を足す（DFS では 0）。
+  した回数）、`dfpn_table_bytes`（割り当てた表のバイト数）を足す（DFS では 0）。df-pn は再訪のたびに手を作り直すので、
+  `legal_moves`・`blank_cut_attempts`・`deck_reserve_*` は再展開の分を含む。
 - `search_reveal_verified_mate_depths`: 同じ `algorithm` / `dfpn_table_bytes` を各深さの解決（並列分割の枝を含む）に
   渡すだけ。`verified_no_mate_through_depth` の意味は同じ（dn = 0 を反証とする）。
-- `exact_mate_search`（WASM）、`root_mate_probe`、`MateSearchSession`: 初期実装では DFS のまま。決着表を共用する
-  ので、session の持ち越し・切り詰め・制限つき探索後の反証の除去は df-pn にしても同じ規則で動く（切り替えは
-  既定を変えるときに行う）。
+- `exact_mate_search`（WASM）、`root_mate_probe`、`MateSearchSession` / `NativeMateSearchSession`
+  （`solve_reusing_exact_cache`）、`search_reveal_verified_mate_anytime`: DFS だけで動く（`algorithm` を持たない）。
+  決着表を共用するので、session の持ち越し・切り詰め・制限つき探索後の反証の除去は df-pn にしても同じ規則で動く
+  （切り替えは既定を変えるときに行う）。
 - `near_mate`: 確率の閾値探索は AND/OR の値（0/1）ではなく期待値なので df-pn の対象外。現状のまま。
 - **KIFU と strategy.json**: splendorgui が読む `dfpn_mate_solver.py --kifu-output mate.kifu` の KIFU
   （`reveal:C<id>` 注釈つき）は、`solve_reveal_verified_mate` → C++ の `line` → `_reveal_verified_line` →
@@ -321,7 +335,10 @@ df-pn が削るのは「固定順序が外した手の部分木」である。�
 
 ## 12. 構成（ファイル）
 
-- `src/dfpn_mate_solver.h`（新規）: pn/dn の型と飽和演算、`DfpnTable`、`DfpnSearchStats`、探索本体の
+- `src/solver_types.h`: `MateSearchAlgorithm` と `DfpnSearchStats`（公開ヘッダ `reveal_verified_solver.h` は
+  `dfpn_mate_solver.h` を含まない）。
+- `src/solver_memory_budget.h`: `resolve_search_table_caps`（df-pn 表と決着表への予算の割り振り）。
+- `src/dfpn_mate_solver.h`（新規）: pn/dn の型と飽和演算、`DfpnTable`、探索本体の
   テンプレート `DfpnSearch<Host>`。Host は `RevealVerifiedSolver::Impl` で、DFS の手の生成・適用・巻き戻し・
   鍵・カット・決着表の保存をそのまま呼ぶ（`DfpnSearch` を Impl の friend にする）。
 - `src/reveal_verified_solver.{h,cpp}`: `set_algorithm` / `set_dfpn_table_bytes` と `dfpn_stats()` を足し、
@@ -329,7 +346,7 @@ df-pn が削るのは「固定順序が外した手の部分木」である。�
 - `src/bindings_solvers.cpp`: `solve_reveal_verified_mate_cpp` の引数と統計。
 - `csplendor/mate_depth.py`: `search_reveal_verified_mate_depths` の引数の受け渡し。
 
-## 13. 計測結果（2026-11-07、1 スレッド、置換表 200万件）
+## 13. 計測結果（2026-11-07、1 スレッド、置換表 200万件、df-pn 表 128 MiB）
 
 時間比 = DFS / df-pn（1 より大きいと df-pn が速い）。ランダム終盤は seeds 0〜59・2000〜2099・3000〜3099 を点数 7〜13 まで
 乱数で進めた局面 × 攻め側 2 × exact/blank × 深さ 1〜4（深さ4 は 20 秒上限）、4,016 ケース。判定の食い違い 0、未決 0（両方）。

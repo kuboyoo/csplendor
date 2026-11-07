@@ -282,9 +282,12 @@ visible-only は従来どおり全手を作る。
 ノード数・`memo_hits` は 69bd2fb と同一で、違うのは `legal_moves` だけ（1,168 ケースで減少）。
 
 **df-pn（`algorithm="dfpn"`）**: `solve_reveal_verified_mate_cpp(..., algorithm="dfpn", dfpn_table_bytes=...)` と
-`search_reveal_verified_mate_depths(..., algorithm="dfpn")` は、上の DFS と同じ AND/OR グラフ（手の生成・絞り込み・
+`search_reveal_verified_mate_depths(..., algorithm="dfpn", dfpn_table_bytes=...)` は、上の DFS と同じ AND/OR グラフ（手の生成・絞り込み・
 順序、めくれ、深さ、各カット）を証明数・反証数で展開する（`src/dfpn_mate_solver.h`、[設計](mate_dfpn_cpp_design.md)）。
-既定は `"dfs"` のままで、結果の形・判定・主手順と証明 DAG の意味は同じ。
+既定は `"dfs"` のままで、結果の形と意味は同じ。判定と詰みの証明 DAG は DFS と同じで、詰みの主手順も同じ検証を通る
+（攻め側の証明手は探索の順で選ぶので DFS と違う手のこともある）。不詰みの主手順は、反証した応手が探索の順で違い得る。
+`MateSearchSession` / `NativeMateSearchSession` と `search_reveal_verified_mate_anytime` は DFS だけで動く（`algorithm` を
+持たない）。
 
 - **めくれ**: 補充の起こる手は「最初の具体めくれ c0、blank の子 B、休眠の残り」を子にする。B は c0 が証明されてから
   blank の DFS で決着まで探索し、証明されれば残りを省き（blank 支配カット）、そうでなければ残りを起こして具体的に探索する。
@@ -292,12 +295,20 @@ visible-only は従来どおり全手を作る。
 - **深さ**: 鍵は DFS と同じ「局面と残り攻め手数」で、(局面, 残り) のグラフは DAG なので経路の繰り返しの確認は要らない。
   残り攻め手数 1 以下の節点（攻め側の最終手と、その前の守り側の手）は DFS（`forced_win_with_memo`）で決める。
 - **置換表とメモリ**: 決着した節点は DFS と同じ exact/blank の表（`max_memo_states`、flush）に DFS と同じ項で入れるので、
-  主手順・証明 DAG・session の持ち越しは DFS のコードがそのまま扱う。未決着の (pn, dn, work) は容量固定の df-pn 表
-  （`dfpn_table_bytes`、既定 128 MiB。4 スロットの組で、満杯なら work 最小を置換）にだけ置き、予算を超えて割り当てない。
+  主手順・証明 DAG は DFS のコードがそのまま扱う。未決着の (pn, dn, work) は容量固定の df-pn 表
+  （`dfpn_table_bytes`。4 スロットの組で、満杯なら work 最小を置換）にだけ置き、伸長の一時領域を含めて
+  `dfpn_table_bytes` を超えて割り当てない。既定の 0 は「自動」で、下の「探索のメモリ予算」の予算の 1/4 を df-pn 表に、
+  残りの 3/4 を決着表の件数（`max_memo_states=0` のとき）に割る。
+- **適用の失敗**: 手やめくれを適用できない（規則の不整合）とき、DFS はその手だけを未決にして続けるが、df-pn は探索全体を
+  未決で打ち切る（`unknown_reason` が `"dfpn: a reveal could not be applied"`。DFS の葉の探索が未決を返したときは
+  `"dfpn: undecided depth-first leaf"`、最終ラウンドの展開が未決のときは `"dfpn: undecided final-round node"`）。
+  未決の項は決着表に書かない。
 - **カット**: 終局・最終ラウンドの直接判定・最終ラウンドの展開・最終手カット（直接生成）・reach cut・最終応手カット・
   blank 支配カット・証明の移植と反復深化の順序は DFS の関数をそのまま呼ぶ。未訪問の兄弟は、探索した兄弟（未決着）の
   pn・dn の最大値で見積もる。
 - 統計に `dfpn_expansions`、`dfpn_table_stores`、`dfpn_table_replacements`、`dfpn_table_bytes` が加わる（DFS では 0）。
+  df-pn は節点を再訪するたびに手とめくれを作り直すので、`legal_moves`・`blank_cut_attempts`・`deck_reserve_candidates`・
+  `deck_reserve_branches` は再展開の分を含む（`dfpn_expansions` も再展開を数える）。
 
 計測（2026-11-07、1 スレッド、置換表 200万件、DFS との比較。時間比 = DFS / df-pn で、1 より大きいと df-pn が速い）:
 ランダム終盤（seeds 0〜59・2000〜2099・3000〜3099 を点数 7〜13 まで乱数で進めた局面 × 攻め側 2 × exact/blank × 深さ 1〜4、
@@ -555,10 +566,14 @@ result = cs.search_reveal_verified_mate_depths(game, attacker=1, min_depth=1, ma
    1 件あたり 256 バイトで割った件数。256 バイトは、厳密と blank の 2 表の定常（2 × 91）、最後の再ハッシュの一時領域
    （C/8）、2 つの移植の表（各 `bit_floor(N)` スロット × 16 バイトと倍化の一時領域）の合計の上界。準詰みの
    `prob_memo_` と visible-only の 3 表も同じ件数で flush する。
+4. **df-pn**（`algorithm="dfpn"`、`resolve_search_table_caps(max_memo_states, dfpn_table_bytes, algorithm, memory_budget_bytes, jobs)`）:
+   `dfpn_table_bytes=0` なら予算の 1/4 を df-pn 表のバイト数にし、`max_memo_states=0` の件数は残りの 3/4 から決める
+   （どちらも予算は 2 と同じくジョブ数で割った値なので、並列の枝の合計も予算に収まる）。正の値はそのまま使う。
+   DFS では df-pn 表は 0 バイトで、件数は 3 と同じ。
 
 | 呼び出し | 決める場所 | jobs |
 |---|---|---|
-| `search_reveal_verified_mate_depths` / `search_reveal_verified_mate_anytime` | 関数の開始時（全深さ・全枝で同じ N） | 引数 `jobs` |
+| `search_reveal_verified_mate_depths` / `search_reveal_verified_mate_anytime` | 関数の開始時（全深さ・全枝で同じ N と df-pn 表のバイト数） | 引数 `jobs` |
 | `MateSearchSession.search` / `search_anytime` | 呼び出しの開始時 | `MateSearchSession(jobs=...)` |
 | `near_mate_search` / `search_near_mate`、`exact_mate_search`、`root_mate_probe` | 関数の開始時（設定の `memory_budget_bytes`） | 1 |
 | `solve_reveal_verified_mate_cpp` などの1回の探索、`NativeMateSearchSession.search`、`solve_visible_only_winner_cpp` | 探索の開始時 | 1 |
