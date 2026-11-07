@@ -2,6 +2,7 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _distribution_version
 
 from ._csplendor import (
+    DEFAULT_MAX_MEMO_STATES,
     MCTS,
     Action,
     ActionEncoderCpp,
@@ -102,6 +103,7 @@ __all__ = [
     "near_mate_probability_cpp",
     "near_mate_search",
     "exact_mate_search",
+    "DEFAULT_MAX_MEMO_STATES",
     "ExactMateSearchConfig",
     "ExactMateSearchResult",
     "NearMateSearchConfig",

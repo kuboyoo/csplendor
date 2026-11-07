@@ -1,5 +1,26 @@
 # 変更履歴 / Changelog
 
+## 未出荷：詰み探索の不具合3件の修正と置換表の既定上限（2026-11-07）
+
+- visible-only ソルバー（`solve_visible_only_winner_cpp`、`--reveal-verified` の候補探索）が、反復窓が
+  8局面を超える局面からの探索で PASS に出会うと `abort()` していたのを直した。`RepetitionWindow` の代入は
+  確保済みの領域を縮めない。
+- 貴族選択（`VISIT_NOBLE`）で攻め側の手番が終わるとき、root の並列分割・`expand_mate_frontier`・証明 DAG の
+  深さが減っていなかったのを直した。貴族選択待ちの root から `jobs > 1` の深さ掃引が詰み手数を1手短く
+  報告していた。深さの規則は探索本体と同じ1か所（`child_depth`）にまとめた。player1 が攻め側で最終ラウンドの
+  貴族選択を通る証明 DAG が `complete=False` になっていたのも同じ規則で直った。
+- `NativeMateSearchSession` で、攻め手を削る探索（`no_take_probe`、`attacker_restrict_top_k > 0`）の反証が
+  持ち越され、その後の全手の探索が詰みを見逃していたのを直した。制限つきの探索の後は反証を表から除く。
+- 詰み・準詰みの置換表の上限 `max_memo_states` の既定を 0（無制限）から `DEFAULT_MAX_MEMO_STATES`
+  （200万件、約 180 MB）に変えた。0 を渡すと従来どおり無制限。session が持ち越す表は探索前に上限の半分以下に
+  切り詰め、次の探索の最初の保存で持ち越しが全部消えないようにした。
+
+English: fixes a visible-only solver abort (repetition window lost capacity on
+move-assignment), VISIT_NOBLE depth labels in root split/frontier/proof DAG
+(parallel sweeps reported mates one move short), restricted refutations
+poisoning NativeMateSearchSession, and caps mate transposition tables at
+DEFAULT_MAX_MEMO_STATES (2M) by default.
+
 ## 未出荷：レビューで見つかった6件の不具合の修正（2026-10-20）
 
 - `V3SearchSession.apply()` は `offsets` が 0 から始まり、行ごとに増え（合法手0の行を拒否）、`legal_ids` の長さで

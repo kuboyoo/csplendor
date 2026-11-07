@@ -32,7 +32,7 @@ struct NearMateSearchConfig {
   double time_limit_seconds = 0.0; // cumulative over all queries, 0 = unlimited
   bool no_take_probe = false;
   bool line_transplant = true;
-  size_t max_memo_states = 0;
+  size_t max_memo_states = DEFAULT_MAX_MEMO_STATES;
 };
 
 struct NearMateDepthBound {

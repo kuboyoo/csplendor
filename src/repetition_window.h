@@ -20,6 +20,31 @@ public:
   RepetitionWindow(const uint64_t *first, const uint64_t *last) {
     assign(first, last);
   }
+  RepetitionWindow(const RepetitionWindow &) = default;
+  RepetitionWindow(RepetitionWindow &&other) noexcept
+      : inline_(other.inline_), size_(other.size_),
+        heap_(std::move(other.heap_)) {
+    other.size_ = 0;
+  }
+  // Assignment never shrinks the heap: rollback paths reserve capacity once
+  // and then restore parents without allocating (fits_without_allocation),
+  // even after a child Board built from a shorter window was moved in.
+  RepetitionWindow &operator=(const RepetitionWindow &other) {
+    if (this != &other)
+      assign(other.begin(), other.end());
+    return *this;
+  }
+  RepetitionWindow &operator=(RepetitionWindow &&other) noexcept {
+    if (this == &other)
+      return *this;
+    if (fits_without_allocation(other.size_))
+      assign(other.begin(), other.end()); // reuses inline or heap capacity
+    else
+      heap_ = std::move(other.heap_);
+    size_ = other.size_;
+    other.size_ = 0;
+    return *this;
+  }
 
   std::size_t size() const noexcept { return size_; }
   bool empty() const noexcept { return size_ == 0; }

@@ -2,6 +2,19 @@
 
 [README](../README.md)の詰み探索APIの補足です。以下のコマンドはリポジトリルートで実行します。
 
+### C++ 解決器の探索方式
+
+C++ の解決器（`solve_reveal_verified_mate_cpp`、`exact_mate_search`、`MateSearchSession`、
+`solve_visible_only_winner_cpp`、準詰み）は、深さ制限つきの深さ優先 AND/OR 探索です。攻め側の節点は
+1手でも証明できれば証明、守り側の節点とめくれは1つでも反例があれば反証です。置換表のキーは
+「局面と残り攻め手数」で、未決着（予算切れ）は保存しません。反復深化は呼び出し側（深さ掃引）が行います。
+証明数・反証数を持つ DFPN は Python 版 `scripts/dfpn_mate_solver.py`（`--reveal-verified` なし）だけです。
+
+深さ（残り攻め手数）は、**攻め側の手番が終わる手**で1減ります。購入して貴族選択待ちや返却待ちに
+入る手は手番の途中なので減らさず、その後の `VISIT_NOBLE` や返却で手番が終わったときに減らします。
+探索本体、root の並列分割（`child_depth`）、`expand_mate_frontier` の `child_depth`、証明 DAG の
+深さラベルと検証は、すべてこの規則に従います。
+
 
 `scripts/dfpn_mate_solver.py` は、任意局面から player0 または player1 の強制勝利を探索します。
 
@@ -217,9 +230,18 @@ result = cs.search_reveal_verified_mate_depths(game, attacker=1, min_depth=1, ma
   最も金を使わない支払いだけを試します（攻め側が銀行を使わない前提では、金を手元に残す支払いが他の
   支払いを支配するため）。見つかった詰みは正しい証明、失敗は不詰みの証明になりません
   （`exhaustive_attacker_actions=True` と併用すると拒否、深さ掃引では `restricted_probe` 扱い）。
+- **制限つき探索と置換表**: 攻め手を削る設定（`no_take_probe=True`、`attacker_restrict_top_k > 0` の
+  順序表、`required_root_action`、候補手順の prefix 固定）の下での反証は不詰みの証明ではありません。
+  反証はその探索の中でだけ使います。探索をまたいで置換表を持ち越す `NativeMateSearchSession` で攻め手を
+  削れるのは `no_take_probe` と `attacker_restrict_top_k` だけで（`required_root_action` と prefix 固定は
+  毎回解除される）、これらを使った探索が終わった時点で反証を表から除き、証明だけを残します。したがって
+  制限つきの探索の後に全手の探索をしても、詰みを見逃しません。
 - **置換表の上限（`max_memo_states=N`）**: 表が N 件に達すると空にして詰め直します（結果は厳密のまま、
   直近の局面を再探索する分だけ遅くなる）。1 件あたり約 90 バイトで、6 スレッドの並列分割では枝ごとに
-  表を持つので合計は N×スレッド数になります。無制限（既定 0）の長い探索は数分で 10 GB を超えます。
+  表を持つので合計は N×スレッド数になります。既定は `DEFAULT_MAX_MEMO_STATES`（200万件、約 180 MB）で、
+  0 を渡すと無制限です。無制限の長い探索は数分で 10 GB を超えるので、メモリに余裕があるときだけ使います。
+  `NativeMateSearchSession` が持ち越す表（`max_cache_states`）は、探索の前に `max_memo_states` の半分以下に
+  切り詰めます。持ち越した表が上限ちょうどだと、次の探索の最初の保存で全部消えてしまうためです。
 
 計測（dlsplendor `doc/native_v3_search_20260929.md` 参照）: 3 手詰めの局面で証明の移植はノード数を
 1,989 万 → 424 万（4.7 分の 1）、時間を 4.8 秒 → 2.8 秒にした。実対局の終盤 81 局面（深さ 1〜4 の掃引、

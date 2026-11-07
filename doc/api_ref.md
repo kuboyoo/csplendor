@@ -145,6 +145,7 @@ Represents a game move.
 - `csplendor.search_reveal_verified_mate_depths(game, *, attacker, min_depth, max_depth, ...) -> dict`: Safely tests consecutive reveal-verified depths. A conclusive bounded refutation advances to `N + 1`; mate, `Unknown`, cumulative budget exhaustion, or `max_depth` stops the sweep. It never extrapolates bounded no-mate, but can return `permanent_no_mate` with a terminal or score-ceiling certificate.
 - `csplendor.search_reveal_verified_mate_anytime(game, *, attacker, min_depth, max_depth, jobs=..., ...) -> dict`: Deadline-oriented positive-proof search. It may advance after an inconclusive depth and therefore never reports bounded no-mate or minimality.
 - `csplendor.MateSearchSession(attacker, *, jobs=..., max_cache_states=2_000_000)`: Reusable AI-facing search session with cooperative cancellation and a bounded exact transposition table retained across depths and turns. It reuses exact descendant results and shallower-depth move ordering. Use `search_anytime()` for live play, `search()` for minimal-depth analysis, and `clear()` between games.
+- `csplendor.DEFAULT_MAX_MEMO_STATES` (2,000,000): Default `max_memo_states` of every mate and near-mate search. The table is flushed and refilled at the cap; pass 0 for an unbounded table.
 - `csplendor.MateSearchCancellationToken`: Cooperative cancellation token accepted by the stateless mate-search APIs.
 
 ## V5 action encoder helpers

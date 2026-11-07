@@ -99,8 +99,10 @@ def test_reveal_solver_proof_dag_and_action_order_golden():
     # 2026-10-05 added "waiting_return" to every proof-DAG node and result
     # (the post-deck-reservation return phase); without it the payload still
     # hashes to 6b2453972ede6937b7a1d7bf0b36013d5303ca004b48f32de3ae9d2e8a29717e.
+    # 2026-11-07 labels the terminal children of the noble choice depth 0
+    # (VISIT_NOBLE ends the attacker's turn); before, c95c3c49...fa92.
     assert _digest_without_elapsed(result) == (
-        "c95c3c496fd8f39ea308ddf25b0b33c203f3394d63e7e23187940ed8b065fa92"
+        "71e6e7bc5b9ac51525095d7c9389967c42a586c0d6a25deb45f055e04b033e74"
     )
 
 

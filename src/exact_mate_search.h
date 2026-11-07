@@ -50,7 +50,7 @@ struct ExactMateSearchConfig {
   int max_depth = 3;
   uint64_t max_nodes = 0;          // cumulative over all depths, 0 = unlimited
   double time_limit_seconds = 0.0; // cumulative over all depths, 0 = unlimited
-  size_t max_memo_states = 0;      // 0 = unbounded
+  size_t max_memo_states = DEFAULT_MAX_MEMO_STATES; // 0 = unbounded
 };
 
 struct ExactMateSearchResult {

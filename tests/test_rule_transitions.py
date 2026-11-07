@@ -210,7 +210,10 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
             "purchase_dag",
             # Proof-DAG nodes gained "waiting_return" (2026-10-05); without it
             # the digest is a79c4e195b0d6c0d08049369ef21fedf8a39950f4675be1c4237f6adc59e53ff.
-            "df6b13364b59ba3826ad566c1530e0a86405498cb392511f1a94e00bd2f0b097",
+            # 2026-11-07: VISIT_NOBLE ends the attacker's turn, so the terminal
+            # children of the noble choice are labelled depth 0 (was 1, digest
+            # df6b13364b59ba3826ad566c1530e0a86405498cb392511f1a94e00bd2f0b097).
+            "867e5a823de565bbdadbe8fea93812f0c4e4c802912f7c583cb0b738af06a274",
         ),
         (
             "oracle_blank",

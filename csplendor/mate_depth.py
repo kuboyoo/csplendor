@@ -8,6 +8,7 @@ from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 
 from ._csplendor import (
+    DEFAULT_MAX_MEMO_STATES,
     Game,
     MateSearchCancellationToken,
     get_card,
@@ -89,7 +90,7 @@ def _solve_parallel_branch(
     order_hints: Any = None,
     line_transplant: bool = True,
     no_take_probe: bool = False,
-    max_memo_states: int = 0,
+    max_memo_states: int = DEFAULT_MAX_MEMO_STATES,
 ) -> dict[str, Any]:
     if cancellation_token.is_cancelled:
         return _unknown_native(int(edge["child_depth"]), "search cancelled")
@@ -133,7 +134,7 @@ def _solve_positive_portfolio(
     order_hints: Any = None,
     line_transplant: bool = True,
     no_take_probe: bool = False,
-    max_memo_states: int = 0,
+    max_memo_states: int = DEFAULT_MAX_MEMO_STATES,
 ) -> dict[str, Any]:
     if cancellation_token.is_cancelled:
         return _unknown_native(depth, "search cancelled")
@@ -235,7 +236,7 @@ def _solve_depth_parallel(
     order_hints: Any = None,
     line_transplant: bool = True,
     no_take_probe: bool = False,
-    max_memo_states: int = 0,
+    max_memo_states: int = DEFAULT_MAX_MEMO_STATES,
 ) -> Optional[dict[str, Any]]:
     """Solve one exact depth by splitting root actions/reveals across threads."""
     split_started = time.monotonic()
@@ -636,7 +637,7 @@ def search_reveal_verified_mate_depths(
     order_hints: Any = None,
     line_transplant: bool = True,
     no_take_probe: bool = False,
-    max_memo_states: int = 0,
+    max_memo_states: int = DEFAULT_MAX_MEMO_STATES,
 ) -> dict[str, Any]:
     """Search consecutive mate depths until a sound stopping condition.
 
@@ -901,7 +902,7 @@ def search_reveal_verified_mate_anytime(
     order_hints: Any = None,
     line_transplant: bool = True,
     no_take_probe: bool = False,
-    max_memo_states: int = 0,
+    max_memo_states: int = DEFAULT_MAX_MEMO_STATES,
 ) -> dict[str, Any]:
     """Search progressively deeper for a sound mate without proving minimality.
 

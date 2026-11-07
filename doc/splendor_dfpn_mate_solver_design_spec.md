@@ -1,5 +1,13 @@
 # Splendor 2人戦用「めくれ全称分岐つきDFPN詰み証明探索」設計仕様書
 
+> **実装状況（2026-11-07）**: 証明数・反証数を持つDFPNは Python 版 `scripts/dfpn_mate_solver.py` の
+> `DFPNSolver`（`--reveal-verified` なしの経路）だけである。実戦・解析で使う C++ の解決器
+> （`RevealVerifiedSolver`・visible-only ソルバー・`exact_mate_search`・`MateSearchSession`）は、
+> 本仕様の深さの数え方・めくれの全称分岐・終局判定に従うが、探索は **深さ制限つきの深さ優先 AND/OR 探索**
+> （局面と残り攻め手数をキーとする置換表、手の順序付け、証明の移植つき）であり、証明数・反証数は持たない。
+> C++ 版を DFPN にするかは、最終手カットとめくれ節点の blank 支配カットを入れた後の計測で決める
+> （[mate_usage.md](mate_usage.md) の「C++ 解決器の探索方式」）。Python 版は C++ 版 DFPN が安定してから削除する。
+
 ## 1. 目的
 
 本仕様書は、Splendor 2人戦の任意局面に対して、指定深さ以内に「相手がどう受けても、購入・予約後に何がめくれても、攻撃側の勝利が保証される詰み」が存在するかを判定するための、DFPN（Depth-First Proof-Number Search）ベースのソルバー設計を定義する。

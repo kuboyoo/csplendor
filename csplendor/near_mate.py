@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from ._csplendor import NearMateSearchConfig, near_mate_search
+from ._csplendor import DEFAULT_MAX_MEMO_STATES, NearMateSearchConfig, near_mate_search
 from .api.usi_kifu import action_to_usi
 from .mate_depth import MateSearchCancellationToken
 
@@ -38,7 +38,7 @@ def search_near_mate(
     time_limit_seconds: float = 0.0,
     no_take_probe: bool = False,
     line_transplant: bool = True,
-    max_memo_states: int = 0,
+    max_memo_states: int = DEFAULT_MAX_MEMO_STATES,
     order_hints: Any = None,
     cancellation_token: Optional[MateSearchCancellationToken] = None,
 ) -> dict[str, Any]:

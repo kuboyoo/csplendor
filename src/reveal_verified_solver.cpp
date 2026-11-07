@@ -104,11 +104,23 @@ public:
     include_proof_dag_ = false;
     max_cache_states_ = max_cache_states;
 
-    trim_exact_cache(max_cache_states);
+    // Keep the carried-over table at most half of the flush cap, so that the
+    // first new entries do not flush everything the session retained.
+    trim_exact_cache(max_memo_states_ ? std::min(max_cache_states,
+                                                 std::max<size_t>(1, max_memo_states_ / 2))
+                                      : max_cache_states);
     Game game = begin_search(input, false);
     RevealVerifiedSearchResult result;
     result.attacker = attacker_;
     result.depth = depth_;
+    // Runs on every exit, including exceptions other than search limits.
+    struct ForgetRestrictedRefutations {
+      Impl &impl;
+      ~ForgetRestrictedRefutations() {
+        if (impl.restricted_attacker_actions())
+          impl.forget_exact_refutations();
+      }
+    } forget_restricted_refutations{*this};
     try {
       DepthPath path(path_reserve_capacity(depth_));
       const ForceStatus status = forced_win(game, path, depth_, true);
@@ -149,6 +161,19 @@ public:
   }
 
   void clear_exact_cache() { exact_memo_.clear(); }
+
+  // A search that drops attacker actions (no-take probe, top-k hints) proves
+  // soundly but refutes only its restricted game. Its refutations must not
+  // outlive the search in the cache shared with later exhaustive searches.
+  bool restricted_attacker_actions() const {
+    return no_take_probe_ || (order_hints_ && hint_restrict_top_k_ > 0);
+  }
+
+  void forget_exact_refutations() {
+    for (auto it = exact_memo_.begin(); it != exact_memo_.end();)
+      it = it->second.status() == ForceStatus::REFUTED ? exact_memo_.erase(it)
+                                                       : std::next(it);
+  }
 
   void trim_exact_cache(size_t max_cache_states) {
     if (!max_cache_states || exact_memo_.size() <= max_cache_states)
@@ -259,7 +284,6 @@ public:
         stats_.legal_moves += actions.size();
 
         const int current_player = game.current_player();
-        const bool waiting_noble_action = game.board.waiting_noble;
         const bool preserve_child_depth = can_resolve_final_round(game);
         for (const OrderedAction &ordered : actions) {
           const bool completed =
@@ -268,11 +292,9 @@ public:
                 if (edge_limit && result.edges.size() >= edge_limit)
                   throw ProofDagBuildAborted("root split edge limit exceeded");
                 const int next_depth =
-                    waiting_noble_action || preserve_child_depth
+                    preserve_child_depth
                         ? depth_
-                        : depth_ - static_cast<int>(
-                                       current_player == attacker_ &&
-                                       game.current_player() != current_player);
+                        : child_depth(depth_, current_player, game);
                 result.edges.push_back(RevealVerifiedFrontierEdge{
                     ordered.code, reveal_card, next_depth, game.clone_light()});
                 return true;
@@ -541,7 +563,7 @@ private:
   int depth_ = 0;
   uint64_t max_nodes_ = 0;
   size_t max_cache_states_ = 0;
-  size_t max_memo_states_ = 0;
+  size_t max_memo_states_ = DEFAULT_MAX_MEMO_STATES;
   SearchLimit limits_;
   RevealVerifiedSearchStats stats_;
   using Memo = std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash>;
@@ -750,9 +772,7 @@ private:
       int representative_reveal = -1;
       bool has_representative_reveal = false;
       const auto visit_outcome = [&](int reveal_card) {
-        const int next_depth =
-            depth - static_cast<int>(current_player == attacker_ &&
-                                     game.current_player() != current_player);
+        const int next_depth = child_depth(depth, current_player, game);
         const ForceStatus child = forced_win_with_memo(game, path, next_depth,
                                                        exact_refinement, memo);
         if (!has_representative_reveal) {
@@ -812,6 +832,14 @@ private:
     representative.set_status(status);
     store_entry(memo, key, representative);
     return status;
+  }
+
+  // The attacker's remaining depth drops when the attacker's turn ends
+  // (including VISIT_NOBLE); a purchase that waits for a noble or a return
+  // is still the same turn. Every depth label follows this one rule.
+  int child_depth(int depth, int mover, const Game &after) const {
+    return depth -
+           static_cast<int>(mover == attacker_ && after.current_player() != mover);
   }
 
   template <typename MemoType>
@@ -1993,9 +2021,7 @@ private:
         applied = apply_visible_refill_outcome(game, action, level, slot, outcome.card);
       if (!applied)
         throw std::logic_error("near-mate outcome failed to apply");
-      const int next_depth =
-          depth - static_cast<int>(current_player == attacker_ &&
-                                   game.current_player() != current_player);
+      const int next_depth = child_depth(depth, current_player, game);
       const double w = outcome.weight;
       // Window for this child so that the mean can still cross alpha/beta.
       const double child_alpha = clamp01((alpha * total - acc - (remaining - w)) / w);
@@ -2356,16 +2382,12 @@ private:
       bool preserve_child_depth, size_t edge_limit,
       std::vector<RevealVerifiedFrontierEdge> &action_edges) {
     const int current_player = game.current_player();
-    const bool waiting_noble_action = game.board.waiting_noble;
     bool all_children_proven = true;
     const bool completed =
         for_each_proof_outcome(game, ordered, [&](int reveal_card) {
           const int next_depth =
-              waiting_noble_action || preserve_child_depth
-                  ? depth
-                  : depth - static_cast<int>(current_player == attacker_ &&
-                                             game.current_player() !=
-                                                 current_player);
+              preserve_child_depth ? depth
+                                   : child_depth(depth, current_player, game);
           DepthPath child_path(path_reserve_capacity(next_depth));
           const ForceStatus child_status =
               forced_win(game, child_path, next_depth, false);
@@ -2550,7 +2572,6 @@ private:
     }
 
     const int current_player = game.current_player();
-    const bool previous_waiting_noble = game.board.waiting_noble;
     ScopedBranchRollback rollback(*this, game);
     rollback.mark_mutated();
     const Action action = Action::unpack(edge.action_code);
@@ -2580,11 +2601,9 @@ private:
       throw ProofDagBuildAborted(
           "proof DAG validation could not replay edge transition");
     }
-    const int next_depth =
-        previous_waiting_noble || preserve_child_depth
-            ? depth
-            : depth - static_cast<int>(current_player == attacker_ &&
-                                       game.current_player() != current_player);
+    const int next_depth = preserve_child_depth
+                               ? depth
+                               : child_depth(depth, current_player, game);
     validate_proof_dag_node(game, next_depth, edge.child, seen);
   }
 
@@ -2629,7 +2648,8 @@ private:
             "final round noble choice did not reach terminal state");
       }
       const bool child_proven = game.winner() == attacker_;
-      const size_t child = build_proof_node(game, depth);
+      const size_t child =
+          build_proof_node(game, child_depth(depth, current_player, game));
       if (current_player == attacker_) {
         if (!child_proven)
           continue;
@@ -2739,15 +2759,9 @@ private:
                     actions.end());
     }
     const int current_player = game.current_player();
-    const bool waiting_noble_action = game.board.waiting_noble;
     for (const OrderedAction &ordered : actions) {
       for_each_proof_outcome(game, ordered, [&](int reveal_card) {
-        const int next_depth =
-            waiting_noble_action
-                ? depth
-                : depth -
-                      static_cast<int>(current_player == attacker_ &&
-                                       game.current_player() != current_player);
+        const int next_depth = child_depth(depth, current_player, game);
         const size_t child = build_proof_node(game, next_depth);
         append_proof_edge(id, ordered, reveal_card, child);
         return true;
@@ -2829,8 +2843,7 @@ private:
         break;
       line.push_back(RevealVerifiedLineEntry{
           it->second.action_code(), reveal_card, it->second.action_count()});
-      depth -= static_cast<int>(current_player == attacker_ &&
-                                game.current_player() != current_player);
+      depth = child_depth(depth, current_player, game);
     }
     return line;
   }

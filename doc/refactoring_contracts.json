@@ -58,6 +58,7 @@
       "near_mate_search",
       "exact_mate_search",
       "ExactMateSearchConfig",
+      "DEFAULT_MAX_MEMO_STATES",
       "ExactMateSearchResult",
       "NearMateSearchConfig",
       "NearMateSearchResult",

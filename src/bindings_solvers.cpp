@@ -267,6 +267,7 @@ py::dict proof_dag_to_py_compact(const RevealVerifiedProofDag &dag) {
 namespace csplendor::python {
 
 void bind_solvers(py::module_ &m) {
+  m.attr("DEFAULT_MAX_MEMO_STATES") = DEFAULT_MAX_MEMO_STATES;
   using csplendor::RootMateProbeConfig;
   using csplendor::RootMateProbeResult;
   py::class_<RootMateProbeConfig>(m, "RootMateProbeConfig")
@@ -571,7 +572,7 @@ void bind_solvers(py::module_ &m) {
           py::arg("order_hints") = py::none(),
           py::arg("line_transplant") = true,
           py::arg("no_take_probe") = false,
-      py::arg("max_memo_states") = 0)
+      py::arg("max_memo_states") = DEFAULT_MAX_MEMO_STATES)
       .def("clear", &RevealVerifiedSolver::clear_exact_cache)
       .def("trim", &RevealVerifiedSolver::trim_exact_cache,
            py::arg("max_cache_states"))
@@ -784,7 +785,7 @@ void bind_solvers(py::module_ &m) {
       py::arg("game"), py::arg("attacker"), py::arg("depth"),
       py::arg("max_nodes") = 0, py::arg("time_limit_seconds") = 0.0,
       py::arg("root_exact") = true, py::arg("no_take_probe") = false,
-      py::arg("line_transplant") = true, py::arg("max_memo_states") = 0,
+      py::arg("line_transplant") = true, py::arg("max_memo_states") = DEFAULT_MAX_MEMO_STATES,
       py::arg("order_hints") = py::none(),
       py::arg("cancellation_token") = nullptr,
       py::arg("alpha") = 0.0, py::arg("beta") = 1.0,
@@ -885,7 +886,7 @@ void bind_solvers(py::module_ &m) {
       py::arg("order_hints") = py::none(),
       py::arg("line_transplant") = true,
       py::arg("no_take_probe") = false,
-      py::arg("max_memo_states") = 0);
+      py::arg("max_memo_states") = DEFAULT_MAX_MEMO_STATES);
 
   m.def(
       "solve_reveal_verified_mate_cpp",
@@ -1015,7 +1016,7 @@ void bind_solvers(py::module_ &m) {
       py::arg("order_hints") = py::none(),
       py::arg("line_transplant") = true,
       py::arg("no_take_probe") = false,
-      py::arg("max_memo_states") = 0);
+      py::arg("max_memo_states") = DEFAULT_MAX_MEMO_STATES);
 }
 
 } // namespace csplendor::python
