@@ -115,7 +115,15 @@ inline unsigned default_mate_jobs() noexcept {
 #if !CSPLENDOR_MATE_THREADS
   return 1;
 #else
-  if (const char *env = std::getenv("CSPLENDOR_MATE_JOBS")) {
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996) // getenv: read once, never stored
+#endif
+  const char *env = std::getenv("CSPLENDOR_MATE_JOBS");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+  if (env) {
     const long value = std::strtol(env, nullptr, 10);
     if (value > 0)
       return static_cast<unsigned>(value);
