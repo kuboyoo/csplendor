@@ -8,6 +8,7 @@ verdict must agree; lines and proof DAGs come from the shared decided tables.
 from __future__ import annotations
 
 import random
+from pathlib import Path
 
 import pytest
 
@@ -138,6 +139,12 @@ def test_dfpn_table_stays_within_its_byte_budget():
     assert _verdict(small) == _verdict(large) == "refuted"
     assert small["stats"]["dfpn_table_bytes"] == 768
     assert small["stats"]["dfpn_table_stores"] > 0
+
+
+def test_public_solver_header_does_not_expose_the_dfpn_search():
+    root = Path(__file__).resolve().parents[1]
+    header = (root / "src" / "reveal_verified_solver.h").read_text()
+    assert '"dfpn_mate_solver.h"' not in header
 
 
 def test_unknown_algorithm_is_rejected():

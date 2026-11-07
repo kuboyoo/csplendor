@@ -164,6 +164,17 @@ struct RevealVerifiedSearchResult {
   RevealVerifiedProofDag proof_dag;
 };
 
+// Search algorithm of the reveal-verified solver (doc/mate_dfpn_cpp_design.md):
+// the depth-first search or df-pn over the same AND/OR graph.
+enum class MateSearchAlgorithm : uint8_t { DFS, DFPN };
+
+struct DfpnSearchStats {
+  uint64_t expansions = 0;         // node expansions, re-expansions included
+  uint64_t table_stores = 0;       // undecided (pn, dn) stored
+  uint64_t table_replacements = 0; // stores that evicted another node
+  size_t table_bytes = 0;          // bytes allocated by the df-pn tables
+};
+
 namespace csplendor::solver_internal {
 
 class RevealSearchCancellationToken {

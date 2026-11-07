@@ -1,7 +1,6 @@
 #ifndef CSPLENDOR_REVEAL_VERIFIED_SOLVER_H
 #define CSPLENDOR_REVEAL_VERIFIED_SOLVER_H
 
-#include "dfpn_mate_solver.h"
 #include "game.h"
 #include "solver_types.h"
 #include <cstddef>

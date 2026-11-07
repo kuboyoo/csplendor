@@ -18,15 +18,6 @@
 #include <type_traits>
 #include <vector>
 
-enum class MateSearchAlgorithm : uint8_t { DFS, DFPN };
-
-struct DfpnSearchStats {
-  uint64_t expansions = 0;         // nodes whose moves were generated
-  uint64_t table_stores = 0;       // undecided (pn, dn) stored
-  uint64_t table_replacements = 0; // stores that evicted another node
-  size_t table_bytes = 0;          // bytes allocated by the df-pn tables
-};
-
 namespace csplendor::solver_internal {
 
 using DfpnNumber = uint32_t;
