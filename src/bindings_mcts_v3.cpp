@@ -48,6 +48,10 @@ void bind_mcts_v3(py::module_ &m) {
       .def_readwrite("c_puct", &Config::c_puct)
       .def_readwrite("fpu_reduction", &Config::fpu_reduction)
       .def_readwrite("virtual_loss", &Config::virtual_loss)
+      .def_readwrite("collision_retries", &Config::collision_retries,
+                     "Descents tried again after meeting a pending leaf (0: the game's collect ends)")
+      .def_readwrite("max_in_flight", &Config::max_in_flight,
+                     "Batches collected and not yet applied; apply takes the oldest")
       .def_readwrite("determinization", &Config::determinization)
       .def_readwrite("semantic_groups", &Config::semantic_groups)
       .def_readwrite("intra_group_cpuct", &Config::intra_group_cpuct)
@@ -155,7 +159,14 @@ void bind_mcts_v3(py::module_ &m) {
           py::arg("slot"))
       .def("done", &Session::done, py::arg("slot"))
       .def("all_done", &Session::all_done)
-      .def("pending", &Session::pending)
+      .def("pending", &Session::pending, "Leaves of every batch waiting for apply")
+      .def("in_flight", &Session::in_flight, "Batches waiting for apply")
+      .def(
+          "virtual_visit_total",
+          [](const Session &session, int slot) { return session.game(slot).virtual_visit_total(); },
+          py::arg("slot"), "Virtual visits held in the slot's tree (0 once every batch is applied)")
+      .def("set_budget", &Session::set_budget, py::arg("slot"), py::arg("simulations"),
+           "Replace the slot's budget of fresh simulations; the tree stays")
       .def(
           "collect",
           [](Session &session) {
