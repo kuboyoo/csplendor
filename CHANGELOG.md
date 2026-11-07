@@ -4,11 +4,12 @@
 
 - `V3SearchConfig.collision_retries`（既定 0）: 下降が評価待ちの葉（chance の列挙待ちを含む）に当たったとき、0 なら
   従来どおりその局の collect を打ち切る。n > 0 ならその道に仮想訪問を 1 つ足して別の下降を試す（連続 n 回まで）。
-  足した仮想訪問は collect の終わりに戻す。1 局 1 木（葉 64、3,200 探索）でも束がほぼ満杯になる（dlsplendor の
+  再試行した衝突は葉と同じく束の 1 枠に数える（主筋が塞がった木は小さい束で閉じる）。足した仮想訪問は collect の終わりに戻す。1 局 1 木（葉 64、3,200 探索）でも束がほぼ満杯になる（dlsplendor の
   ローカルエンジン用、`doc/local_engine_20261106.md`）。
 - `V3SearchConfig.max_in_flight`（既定 1）: 評価前の束を最大この数まで先行して collect できる。`apply` は古い束から
   適用する。`V3SearchSession.in_flight()`、`pending()` は全束の葉の数。`reset_game` は全束の葉を捨てる扱いにする。
 - `V3SearchSession.set_budget(slot, simulations)`: 木を残したまま予算を差し替える（bgasplendor の patch を本体へ）。
+- `V3SearchSession.set_leaf_batch_size(leaves)`: 以後の collect の 1 局あたりの葉の数（エンジンが木の大きさで決める）。
 - `virtual_visit_total(slot)`: 木に残る仮想訪問の合計（全束を適用した後は 0）。
 - 既定値では探索結果は従来とビット一致（1 スレッドと 4 スレッドの複数局で確認、`tests/test_mcts_v3_pipeline.py`）。
 
