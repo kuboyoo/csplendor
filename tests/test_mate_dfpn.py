@@ -143,7 +143,7 @@ def test_dfpn_table_stays_within_its_byte_budget():
 
 def test_public_solver_header_does_not_expose_the_dfpn_search():
     root = Path(__file__).resolve().parents[1]
-    header = (root / "src" / "reveal_verified_solver.h").read_text()
+    header = (root / "src" / "reveal_verified_solver.h").read_text(encoding="utf-8")
     assert '"dfpn_mate_solver.h"' not in header
 
 

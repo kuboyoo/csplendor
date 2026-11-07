@@ -135,6 +135,7 @@ def test_parallel_cancellation_from_another_thread():
         raw = _solve(game, attacker, 5, cancellation_token=token, max_memo_states=0, jobs=4)
     finally:
         timer.cancel()
+        timer.join()
     assert raw["unknown_reason"] == "search cancelled"
     assert not raw["proven"]
 
@@ -150,10 +151,18 @@ def test_no_thread_outlives_the_search():
     def threads():
         return len(os.listdir("/proc/self/task"))
 
+    def settled(limit):
+        # Threads other tests started may still be exiting; the search's own
+        # workers are joined before it returns, so the count must fall back.
+        deadline = time.monotonic() + 5.0
+        while threads() > limit and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return threads()
+
     game = load_game_from_usi_text(BENCH_POSITION)
-    before = threads()
+    before = settled(threads())
     _solve(game, int(game.current_player), 3, jobs=8, max_memo_states=0)
-    assert threads() == before
+    assert settled(before) <= before
 
 
 def test_depth_sweeps_pass_jobs_to_the_native_search():
