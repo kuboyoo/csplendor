@@ -599,6 +599,11 @@ private:
     csplendor::solver_internal::ConcurrentTableGrowth growth;
     SharedMemo blank;
     SharedExactMemo exact;
+    // The decided root and level-1 entries (written under the scheduler's
+    // lock), stored again after the search: a flush may have removed them,
+    // and the principal line starts there.
+    std::vector<std::pair<ExactDepthStateKey, PersistentEntry>> split_exact;
+    std::vector<std::pair<DepthStateKey, Entry>> split_blank;
     explicit SharedTables(size_t max_entries)
         : blank(max_entries, &growth), exact(max_entries, &growth) {}
   };
@@ -657,8 +662,6 @@ private:
     parallel_memoized_states_ = exact_reveal_search_
                                     ? shared_tables_->exact.size()
                                     : shared_tables_->blank.size();
-    if (shared_ != nullptr)
-      shared_->growth.detach();
     shared_ = nullptr;
     shared_tables_.reset();
   }
@@ -690,6 +693,7 @@ private:
     adapters.reserve(jobs);
     for (auto &worker : workers) {
       worker->shared_ = shared_tables_.get();
+      worker->split_worker_ = true;
       worker->stats_ = RevealVerifiedSearchStats();
       const size_t line_slots = std::min(memo_cap_, PARALLEL_LINE_TABLE_SLOTS);
       worker->line_proofs_.set_max_slots(line_slots);
@@ -721,9 +725,14 @@ private:
       add_search_stats(stats_, worker->stats_);
     stats_.memo_flushes +=
         shared_tables_->exact.flushes() + shared_tables_->blank.flushes();
-    // This thread reads the shared tables until solve() ends.
+    // This thread reads the shared tables until solve() ends, alone: it takes
+    // no safepoint (check_limits), so nothing grows or flushes them now, and
+    // the split layers' entries are put back beyond the entry limit.
     shared_ = shared_tables_.get();
-    shared_->growth.attach();
+    for (const auto &[key, entry] : shared_->split_exact)
+      shared_->exact.insert(key, entry, true);
+    for (const auto &[key, entry] : shared_->split_blank)
+      shared_->blank.insert(key, entry, true);
     if (!result.decided)
       throw SearchLimitExceeded(result.unknown_reason);
     return result.status;
@@ -868,15 +877,19 @@ private:
     const int reveal = chosen.outcomes[static_cast<size_t>(outcome)];
     const size_t count = expansion.branches.size();
     const bool replayable = is_replayable(chosen.move);
-    if (exact_reveal_search_)
-      store_entry(shared_->exact,
-                  ExactDepthStateKey{expansion.key.state, expansion.key.depth()},
-                  PersistentEntry{status, chosen.move.code, reveal, true, count,
-                                  replayable});
-    else
-      store_entry(shared_->blank, expansion.key,
-                  Entry{status, chosen.move.code, reveal, true, count,
-                        replayable});
+    // Beyond the entry limit: a full table awaiting its flush would drop it.
+    if (exact_reveal_search_) {
+      const ExactDepthStateKey key{expansion.key.state, expansion.key.depth()};
+      const PersistentEntry entry{status, chosen.move.code, reveal, true, count,
+                                  replayable};
+      shared_->exact.insert(key, entry, true);
+      shared_->split_exact.emplace_back(key, entry);
+    } else {
+      const Entry entry{status, chosen.move.code, reveal, true, count,
+                        replayable};
+      shared_->blank.insert(expansion.key, entry, true);
+      shared_->split_blank.emplace_back(expansion.key, entry);
+    }
   }
 
   int attacker_ = 0;
@@ -889,6 +902,8 @@ private:
   // the tables forced_win() and principal_line() use while set.
   std::shared_ptr<SharedTables> shared_tables_;
   SharedTables *shared_ = nullptr;
+  // A worker thread of a parallel search (takes safepoints).
+  bool split_worker_ = false;
   size_t max_cache_states_ = 0;
   size_t max_memo_states_ = 0; // 0 = from the memory budget
   size_t memo_cap_ = 0;        // resolved at begin_search()
@@ -3706,7 +3721,7 @@ private:
 
   void check_limits() {
     limits_.check(stats_.nodes);
-    if (shared_ != nullptr)
+    if (split_worker_)
       shared_->growth.safepoint(); // holds no pointer into the tables here
   }
 };

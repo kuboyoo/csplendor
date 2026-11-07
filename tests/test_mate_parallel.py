@@ -192,3 +192,28 @@ def test_exact_search_and_root_probe_take_jobs():
         probes.append(cs.root_mate_probe(game, config, previous_value=0.72, time_limit_seconds=0.0))
     assert probes[0].proven == probes[1].proven
     assert probes[0].depth == probes[1].depth
+
+
+def test_flushed_parallel_proofs_keep_their_line():
+    # A small table flushes many times during the search; the split layers'
+    # decided entries must survive so that the line starts at the root.
+    checked = 0
+    for seed in range(0, 60):
+        game = _endgame(seed)
+        if game is None:
+            continue
+        for attacker in (0, 1):
+            raw = _solve(game, attacker, 4, max_memo_states=1500, jobs=8,
+                         time_limit_seconds=20.0)
+            if not raw["proven"]:
+                continue
+            serial = _solve(game, attacker, 4, max_memo_states=1500, time_limit_seconds=20.0)
+            if not serial["line"]:
+                continue  # decided before the root's moves
+            assert raw["line"], (seed, attacker, raw["stats"]["memo_flushes"])
+            first = int(raw["line"][0]["action_code"])
+            recheck = _solve(game, attacker, 4, required_root_action=first,
+                             time_limit_seconds=20.0)
+            assert recheck["proven"], (seed, attacker)
+            checked += 1
+    assert checked >= 20

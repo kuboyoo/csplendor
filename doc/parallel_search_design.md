@@ -71,7 +71,8 @@ GPU の値は dlsplendor `doc/local_engine_20261106.md` の 11-06 の計測を�
 内訳の見積もり: GPU 推論 400 束 × 0.92 ms ≈ 0.37 s、木 ≈ 0.11 s、両者が重なって GPU 側で律速。
 3,200 探索は 0.049 s。bgasplendor（torch fp32、葉 8、束 1 つ）は 25,600 探索で 3.26 s（9,100 探索/秒）。
 
-**詰み探索**（BENCH 局面、攻め側 42 手、Python の root 分割 `search_reveal_verified_mate_depths(jobs=…)`）:
+**詰み探索**（BENCH 局面、攻め側 42 手、2026-11-08 の設計時点の Python の root 分割 `search_reveal_verified_mate_depths(jobs=…)`。
+この分割は第 2 段で C++ の並列探索に置き換えて削除した。置き換え後の値は [mate_usage.md「並列の詰み探索」](mate_usage.md)）:
 
 | | jobs=1 | 2 | 4 | 8 | 12 |
 |---|---|---|---|---|---|
@@ -79,7 +80,7 @@ GPU の値は dlsplendor `doc/local_engine_20261106.md` の 11-06 の計測を�
 | 深さ 4（148.5 万ノード） | **1.30 s** | 1.16 | 0.89 | 0.80 | **0.79（1.65 倍）** |
 
 `root_mate_probe`（既定、時間 150 ms）は同局面で 9〜10 ms（11,539 ノード、深さ 3 まで不詰み）。
-現行の root 分割は 12 スレッドで 1.65 倍にしか伸びない。原因は枝（root の手 × めくれ）の大きさの偏りで、
+当時の root 分割は 12 スレッドで 1.65 倍にしか伸びなかった。原因は枝（root の手 × めくれ）の大きさの偏りで、
 不詰みの反証は「攻め側の全手にそれぞれ 1 つの反証応手」を要し、最も重い枝が全体の時間を決める（第 2.2 節）。
 
 **まとめ**: 1 手 1 秒の設定で、GPU エンジンでは MCTS が 0.55〜0.7 s、詰み探索が終盤で 0.3 s（序盤は 10 ms）、木の操作は
@@ -131,10 +132,11 @@ C は Splendor の太い木（1 段 60〜130 倍）では重複した探索が�
 - **統計**: `nodes`・`memo_hits` は原子加算でなく、スレッドごとに持って終わりに足す。`stats_.legal_moves` などは同じ。
 - **メモリ**: 表は 1 組なので `solver_memory_budget_bytes(available)` を割らずに使い、スレッドごとの作業領域
   （移植の表 2 × 2^17 スロット = 4 MiB と経路・手の作業領域）だけを jobs 倍する。ブラウザは JS 側の予算をそのまま 1 表に渡す。
-- **入口**: `search_reveal_verified_mate_depths(jobs=N)` の `_solve_depth_parallel`（Python の `ThreadPoolExecutor`）を、
-  C++ の `solve_reveal_verified_mate_cpp(game, attacker, depth, ..., jobs=N)`（`RevealVerifiedSolver::set_jobs`）の 1 回呼び出しに置き換える。
-  `MateSearchSession` / `root_mate_probe` / `near_mate` も同じ関数を使う（`RootMateProbeConfig.jobs` を追加）。
-  Python の分割（`_solve_parallel_branch`・`_solve_positive_portfolio`）は C++ 版が第 6 節の検証を通ったら削除する（後方互換は持たない）。
+- **入口**（第 2 段で実装済み）: `search_reveal_verified_mate_depths(jobs=N)` の `_solve_depth_parallel`（Python の
+  `ThreadPoolExecutor`）は、C++ の `solve_reveal_verified_mate_cpp(game, attacker, depth, ..., jobs=N)`
+  （`RevealVerifiedSolver::set_jobs`）の 1 回呼び出しに置き換えた。`MateSearchSession`・`exact_mate_search`・`root_mate_probe` も
+  同じ探索を使う（`ExactMateSearchConfig.jobs`・`RootMateProbeConfig.jobs`、既定 1）。準詰みは 1 スレッドのまま。
+  Python の分割（`_solve_parallel_branch`・`_solve_positive_portfolio`・`parallel_min_branches`）は削除した（後方互換は持たない）。
 
 ### 2.3 健全性と決定性の扱い
 

@@ -184,6 +184,7 @@ template <typename Move, typename Key> struct SplitExpansion {
 //   ForceStatus search(const Node &, const Expansion &, size_t branch,
 //                      int outcome);            // may throw SearchLimitExceeded
 //   void store(const Expansion &, ForceStatus, size_t branch, int outcome);
+//                                                // under the scheduler's lock
 //   void set_cancellation_token(std::shared_ptr<RevealSearchCancellationToken>);
 //   void attach(); void detach(); // around any use of the shared tables
 //
@@ -400,7 +401,7 @@ private:
           continue;
       }
       std::unique_lock<std::mutex> lock(mutex_);
-      if (running_.load(std::memory_order_relaxed) == 0 &&
+      if (running_.load() == 0 &&
           generation_.load(std::memory_order_relaxed) == seen)
         return; // nothing runs and nothing is available: no work will appear
       // Bounded: the caller's token cancels without notifying.
@@ -464,22 +465,22 @@ private:
 
   // The next outcome of `action`: outcome 0 at once, the others once it is
   // resolved. A claim counts as running from before it is taken, so that no
-  // thread sees nothing running while another is taking work.
+  // thread sees nothing running while another is taking work (sequentially
+  // consistent: the counter and the claims are ordered on every target).
   bool claim_outcome(Item &action, size_t &outcome) {
-    size_t next = action.next_outcome.load(std::memory_order_relaxed);
+    size_t next = action.next_outcome.load();
     if (next >= action.outcome_count)
       return false;
-    running_.fetch_add(1, std::memory_order_relaxed);
+    running_.fetch_add(1);
     while (next < action.outcome_count) {
       if (next > 0 && !action.first_resolved.load(std::memory_order_acquire))
         break;
-      if (action.next_outcome.compare_exchange_weak(next, next + 1,
-                                                    std::memory_order_relaxed)) {
+      if (action.next_outcome.compare_exchange_weak(next, next + 1)) {
         outcome = next;
         return true;
       }
     }
-    running_.fetch_sub(1, std::memory_order_relaxed);
+    running_.fetch_sub(1);
     return false;
   }
 
@@ -488,18 +489,18 @@ private:
   bool claim_blank(Item &action) {
     if (!action.has_blank ||
         !action.first_survived.load(std::memory_order_acquire) ||
-        action.blank_claimed.load(std::memory_order_relaxed))
+        action.blank_claimed.load())
       return false;
-    running_.fetch_add(1, std::memory_order_relaxed);
-    if (!action.blank_claimed.exchange(true, std::memory_order_relaxed))
+    running_.fetch_add(1);
+    if (!action.blank_claimed.exchange(true))
       return true;
-    running_.fetch_sub(1, std::memory_order_relaxed);
+    running_.fetch_sub(1);
     return false;
   }
 
   // Under mutex_: one claimed work finished (its results are reported).
   void end_work() {
-    running_.fetch_sub(1, std::memory_order_relaxed);
+    running_.fetch_sub(1);
     generation_.fetch_add(1, std::memory_order_release);
     changed_.notify_all();
   }

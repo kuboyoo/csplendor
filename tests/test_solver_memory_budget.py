@@ -80,9 +80,10 @@ def test_depth_sweep_resolves_the_cap_once_per_call(monkeypatch):
     options = dict(attacker=0, min_depth=1, max_depth=3, time_limit_seconds=60.0)
     result = cs.search_reveal_verified_mate_depths(game, jobs=2, **options)
     assert calls == [(0, 0, "dfs")]  # one shared table: never split by jobs
-    # Every depth keeps to the cap (depths 1-2 are small; the parallel depth
-    # 3 drops entries beyond it, each thread passing it by one store at most).
-    assert all(attempt["memoized_states"] <= 50 + 2 for attempt in result["attempts"])
+    # The parallel depth 3 flushes its shared table at the cap too (only the
+    # root's and level 1's decided entries are kept beyond it).
+    assert result["attempts"][-1]["jobs"] == 2
+    assert result["attempts"][-1]["stats"]["memo_flushes"] > 0
 
     calls.clear()
     serial = cs.search_reveal_verified_mate_depths(game, **options)

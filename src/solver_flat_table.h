@@ -377,9 +377,12 @@ public:
   }
 
   // False when `key` is already READY or the table is full (dropped).
-  bool insert(const Key &key, const Entry &entry) noexcept {
-    if (size_.load(std::memory_order_relaxed) >=
-        limit_.load(std::memory_order_relaxed)) {
+  // `beyond_limit` stores past max_entries (a few entries that must stay
+  // until the next flush; the array keeps room: load 0.7 at the limit).
+  bool insert(const Key &key, const Entry &entry,
+              bool beyond_limit = false) noexcept {
+    if (!beyond_limit && size_.load(std::memory_order_relaxed) >=
+                             limit_.load(std::memory_order_relaxed)) {
       // Full: dropped until the threads flush the table at a safepoint.
       dropped_.fetch_add(1, std::memory_order_relaxed);
       if (growth_)
