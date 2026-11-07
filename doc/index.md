@@ -21,7 +21,7 @@
 | [AI向け仕様](ai_engine_spec.md) | 貴族選択・終局phase・Actionフィールド |
 | [行動空間V2](action_space_v2.md) / [V3](action_space_v3.md) / [V5](action_space_v5.md) | 4869 / 3133 / 3049枠の意味とエンコード。V5は予約後の返却（`RETURN_GEM`）を別の行動として持つ |
 | [詰み探索ガイド](mate_usage.md) | API、CLI、DAG、問題集生成 |
-| [C++ 版 df-pn の設計検討](mate_dfpn_cpp_design.md) | 証明数探索への移行の設計、見込み、代わりの案（2026-11-07） |
+| [C++ 版 df-pn の設計](mate_dfpn_cpp_design.md) | `algorithm="dfpn"` の設計、計測、深さ5 への代わりの案（2026-11-07） |
 | [ソルバー仕様](SOLVER.md) | 深さ・証明・Unknown・予算の契約 |
 | [並列MCTS](parallel_mcts_usage.md) | サンプルと実験的APIの制約 |
 | [V3多対局探索](mcts_v3.md) | V5の3,049行動上のPUCT。多対局の葉バッチ、決定化、サンプル型chance、対局単位のマルチスレッド |

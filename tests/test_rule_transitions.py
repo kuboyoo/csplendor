@@ -230,16 +230,21 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
 # of 29; the line's action_count stays 29 (resolved from the position), and
 # every other field of every payload is unchanged. Previous digest:
 # oracle_blank 1b6401ce...b3f25f.
+# 2026-11-07 (C++ 版 df-pn) adds the counters dfpn_expansions, dfpn_table_stores,
+# dfpn_table_replacements and dfpn_table_bytes (all 0 for the default DFS);
+# every other field is unchanged. Previous digests: seed0_d1 c8f7160a...0a20f8,
+# seed7_d2 b2bd1c91...1ba341, purchase_dag cb19043b...14434a, oracle_blank
+# 8ab6054a...d6a4b6.
 @pytest.mark.parametrize(
     ("fixture", "expected_digest"),
     [
         (
             "seed0_d1",
-            "c8f7160a7e0feff305a41c04648d7651442a07a3c02cc57757e739bb1e0a20f8",
+            "564e494a2b4d1a9ad09f97753e510433412ec0c009d3dc7bb20530a90dab2eac",
         ),
         (
             "seed7_d2",
-            "b2bd1c9125f71f85da0c94694509ffdeabb87a49ebed368c7cf65a10951ba341",
+            "46d3366bb36bbd7290504c2d42780baddb878c75c71c4d4b7509239fada569ea",
         ),
         (
             "purchase_dag",
@@ -248,11 +253,11 @@ def _solver_payload(game, attacker, depth, *, include_proof_dag=False):
             # 2026-11-07: VISIT_NOBLE ends the attacker's turn, so the terminal
             # children of the noble choice are labelled depth 0 (was 1, digest
             # df6b13364b59ba3826ad566c1530e0a86405498cb392511f1a94e00bd2f0b097).
-            "cb19043b8c1af37ba85e311a1f1ae28e9c062ad96930f972bfca53a1b914434a",
+            "7fe83f26f976d00491f172c5cb03b0c444c8ed1e1afcec1d2f11dc3e34d7dadf",
         ),
         (
             "oracle_blank",
-            "8ab6054ae4896316dd0963534de63dda1b9bbf34361aecc5eccf928130d6a4b6",
+            "8edcdb33e3e41c2484486e4cf56862f3899148fc11c789fc66ff410a1711622b",
         ),
     ],
 )
