@@ -23,6 +23,7 @@
 | [詰み探索ガイド](mate_usage.md) | API、CLI、DAG、問題集生成 |
 | [C++ 版 df-pn の設計](mate_dfpn_cpp_design.md) | `algorithm="dfpn"` の設計、計測、深さ5 への代わりの案（2026-11-07） |
 | [ソルバー仕様](SOLVER.md) | 深さ・証明・Unknown・予算の契約 |
+| [先読みの並列化の設計](parallel_search_design.md) | 対人戦の待ち時間短縮。1 手の時間の内訳、詰み探索の 2 段タスク列＋共有置換表、MCTS は pipeline に委ねる判断、端末（Ryzen・M4・iPhone ブラウザ）ごとの方針、段階の計画と担当（2026-11-08） |
 | [並列MCTS](parallel_mcts_usage.md) | サンプルと実験的APIの制約 |
 | [V3多対局探索](mcts_v3.md) | V5の3,049行動上のPUCT。多対局の葉バッチ、決定化、サンプル型chance、対局単位のマルチスレッド |
 | [並列探索の実装状況](parallel_search_plan/implementation_status.md) | 対応済み機能・残る検証 |
