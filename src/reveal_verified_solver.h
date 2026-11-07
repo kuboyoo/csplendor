@@ -9,8 +9,9 @@
 #include <string>
 #include <vector>
 
-// Default cap of every mate/near-mate transposition table (entries, ~90 bytes
-// each). The table is flushed and refilled at the cap; 0 means unbounded.
+// Default cap of every mate/near-mate transposition table (entries; 91 bytes
+// each in the reveal solver's flat tables). The table is flushed and refilled
+// at the cap; 0 means unbounded.
 inline constexpr size_t DEFAULT_MAX_MEMO_STATES = 2'000'000;
 
 struct RevealVerifiedFrontierEdge {

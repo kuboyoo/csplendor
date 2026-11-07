@@ -62,7 +62,10 @@ public:
         strict_preferred_attacker_actions_(strict_preferred_attacker_actions),
         strict_preferred_attacker_prefix_(strict_preferred_attacker_prefix),
         exhaustive_attacker_actions_(exhaustive_attacker_actions),
-        exact_reveal_search_(exact_reveal_search) {}
+        exact_reveal_search_(exact_reveal_search) {
+    memo_.set_entry_limit(max_memo_states_);
+    exact_memo_.set_entry_limit(max_memo_states_);
+  }
 
   RevealVerifiedSearchResult solve(const Game &input) {
     max_cache_states_ = 0;
@@ -160,7 +163,11 @@ public:
   }
 
   void set_line_transplant(bool enabled) { line_transplant_ = enabled; }
-  void set_max_memo_states(size_t limit) { max_memo_states_ = limit; }
+  void set_max_memo_states(size_t limit) {
+    max_memo_states_ = limit;
+    memo_.set_entry_limit(limit);
+    exact_memo_.set_entry_limit(limit);
+  }
   void set_no_take_probe(bool enabled) { no_take_probe_ = enabled; }
 
   void set_order_hints(std::shared_ptr<const PositionOrderHints> hints,
@@ -179,9 +186,10 @@ public:
   }
 
   void forget_exact_refutations() {
-    for (auto it = exact_memo_.begin(); it != exact_memo_.end();)
-      it = it->second.status() == ForceStatus::REFUTED ? exact_memo_.erase(it)
-                                                       : std::next(it);
+    exact_memo_.erase_if([](const ExactDepthStateKey &,
+                            const PersistentEntry &entry) {
+      return entry.status() == ForceStatus::REFUTED;
+    });
   }
 
   void trim_exact_cache(size_t max_cache_states) {
@@ -190,28 +198,28 @@ public:
 
     std::vector<uint64_t> touches;
     touches.reserve(exact_memo_.size());
-    for (const auto &item : exact_memo_)
-      touches.push_back(item.second.last_touched());
+    exact_memo_.for_each(
+        [&](const ExactDepthStateKey &, const PersistentEntry &entry) {
+          touches.push_back(entry.last_touched());
+        });
     const size_t remove_count = exact_memo_.size() - max_cache_states;
     std::nth_element(touches.begin(), touches.begin() + remove_count,
                      touches.end());
     const uint64_t keep_from = touches[remove_count];
-    for (auto it = exact_memo_.begin();
-         it != exact_memo_.end() && exact_memo_.size() > max_cache_states;) {
-      if (it->second.last_touched() < keep_from)
-        it = exact_memo_.erase(it);
-      else
-        ++it;
-    }
+    exact_memo_.erase_if(
+        [&](const ExactDepthStateKey &, const PersistentEntry &entry) {
+          return entry.last_touched() < keep_from;
+        });
     // last_touched is normally unique.  This also handles generation-zero
     // aggregate entries and counter wrap without exceeding the hard bound.
-    for (auto it = exact_memo_.begin();
-         it != exact_memo_.end() && exact_memo_.size() > max_cache_states;) {
-      if (it->second.last_touched() == keep_from)
-        it = exact_memo_.erase(it);
-      else
-        ++it;
-    }
+    size_t excess = exact_memo_.size() - max_cache_states;
+    exact_memo_.erase_if(
+        [&](const ExactDepthStateKey &, const PersistentEntry &entry) {
+          if (excess == 0 || entry.last_touched() != keep_from)
+            return false;
+          --excess;
+          return true;
+        });
   }
 
   size_t exact_cache_size() const noexcept { return exact_memo_.size(); }
@@ -345,7 +353,6 @@ private:
     line_hash_ = 0x9E3779B97F4A7C15ull;
     stats_ = RevealVerifiedSearchStats();
     limits_.reset();
-    reserve_active_memo();
     ++search_generation_;
     if (search_generation_ == 0) {
       // Generation zero is reserved for aggregate-initialized entries.
@@ -493,33 +500,6 @@ private:
 #endif
   }
 
-  template <typename MemoType>
-  static void reserve_memo(MemoType &memo, size_t target) {
-    const double capacity =
-        static_cast<double>(memo.bucket_count()) * memo.max_load_factor();
-    if (static_cast<double>(target) > capacity)
-      memo.reserve(target);
-  }
-
-  void reserve_active_memo() {
-    // Deep exact searches retain roughly one transposition for every several
-    // visited nodes.  Reserving a conservative fraction avoids repeated
-    // bucket-table growth without making the node limit a memory commitment.
-    if (max_nodes_ < 4096)
-      return;
-    constexpr uint64_t MAX_RESERVED_STATES = 2'000'000;
-    const uint64_t reserve_limit =
-        max_cache_states_
-            ? std::min<uint64_t>(MAX_RESERVED_STATES, max_cache_states_)
-            : MAX_RESERVED_STATES;
-    const size_t target =
-        static_cast<size_t>(std::min<uint64_t>(reserve_limit, max_nodes_ / 12));
-    if (exact_reveal_search_)
-      reserve_memo(exact_memo_, target);
-    else
-      reserve_memo(memo_, target);
-  }
-
   using StateKey = csplendor::solver_internal::RevealStateKey;
   using StateKeyHash = csplendor::solver_internal::RevealStateKeyHash;
   using DepthStateKey = csplendor::solver_internal::RevealDepthStateKey;
@@ -576,9 +556,11 @@ private:
   size_t max_memo_states_ = DEFAULT_MAX_MEMO_STATES;
   SearchLimit limits_;
   RevealVerifiedSearchStats stats_;
-  using Memo = std::unordered_map<DepthStateKey, Entry, DepthStateKeyHash>;
-  using ExactMemo = std::unordered_map<ExactDepthStateKey, PersistentEntry,
-                                       ExactDepthStateKeyHash>;
+  // Open-addressing tables (src/solver_flat_table.h): the blank table is
+  // discarded after every search, the exact table may outlive a session's
+  // searches. Both flush at max_memo_states_ (store_entry).
+  using Memo = csplendor::solver_internal::RevealMemoTable;
+  using ExactMemo = csplendor::solver_internal::RevealExactMemoTable;
   Memo memo_;
   ExactMemo exact_memo_;
   uint64_t search_generation_ = 0;
@@ -723,18 +705,18 @@ private:
     using MemoEntry = typename MemoType::mapped_type;
     const MemoKey key{state, depth};
     CSPLENDOR_PERF_TT_PROBE_SCOPE(tt_probe);
-    auto memo_it = memo.find(key);
+    MemoEntry *hit = memo.find(key);
     CSPLENDOR_PERF_TT_PROBE_FINISH(tt_probe);
-    if (memo_it != memo.end()) {
+    if (hit != nullptr) {
       CSPLENDOR_PERF_INC(SolverTtHits);
       ++stats_.memo_hits;
       if constexpr (MemoEntry::tracks_persistence) {
-        if (memo_it->second.generation() != search_generation_)
+        if (hit->generation() != search_generation_)
           ++stats_.persistent_memo_hits;
-        memo_it->second.set_generation(search_generation_);
-        memo_it->second.set_last_touched(++cache_touch_counter_);
+        hit->set_generation(search_generation_);
+        hit->set_last_touched(++cache_touch_counter_);
       }
-      return memo_it->second.status();
+      return hit->status();
     }
     if (path.contains(path_key)) {
       ++stats_.terminal_nodes;
@@ -955,19 +937,23 @@ private:
     // Memory governor: when the table reaches the cap it is flushed and
     // refilled (the search stays exact; recent states are re-searched once).
     // Flushing keeps the hit rate high between flushes, unlike refusing new
-    // entries, which starves the search of memoisation. ~90 bytes per entry.
-    if (max_memo_states_ > 0 && memo.size() >= max_memo_states_ &&
-        memo.find(key) == memo.end()) {
-      ++stats_.memo_flushes;
-      memo.clear();
-    }
+    // entries, which starves the search of memoisation. 64-byte slots at a
+    // load factor of at most 0.7: about 92 bytes per entry at the cap.
     CSPLENDOR_PERF_INC(SolverTtStores);
     using MemoEntry = typename MemoType::mapped_type;
     if constexpr (MemoEntry::tracks_persistence) {
       entry.set_generation(search_generation_);
       entry.set_last_touched(++cache_touch_counter_);
     }
-    memo[key] = std::move(entry);
+    if (MemoEntry *existing = memo.find(key)) {
+      *existing = entry;
+      return;
+    }
+    if (max_memo_states_ > 0 && memo.size() >= max_memo_states_) {
+      ++stats_.memo_flushes;
+      memo.clear();
+    }
+    memo.insert(key, entry);
   }
 
   void prefer_iterative_action(const StateKey &state, int depth,
@@ -977,21 +963,21 @@ private:
       return;
     for (int cached_depth = depth - 1; cached_depth >= 0; --cached_depth) {
       CSPLENDOR_PERF_TT_PROBE_SCOPE(iterative_memo_probe);
-      const auto cached =
+      const PersistentEntry *cached =
           exact_memo_.find(ExactDepthStateKey{state, cached_depth});
       CSPLENDOR_PERF_TT_PROBE_FINISH(iterative_memo_probe);
-      if (cached != exact_memo_.end())
+      if (cached != nullptr)
         CSPLENDOR_PERF_INC(SolverTtHits);
-      if (cached == exact_memo_.end() || !cached->second.has_action())
+      if (cached == nullptr || !cached->has_action())
         continue;
       const bool useful = current_player == attacker_
-                              ? cached->second.status() == ForceStatus::PROVEN
-                              : cached->second.status() == ForceStatus::REFUTED;
+                              ? cached->status() == ForceStatus::PROVEN
+                              : cached->status() == ForceStatus::REFUTED;
       if (!useful)
         continue;
       const auto action = std::find_if(
           actions.begin(), actions.end(), [&](const OrderedAction &candidate) {
-            return candidate.code == cached->second.action_code();
+            return candidate.code == cached->action_code();
           });
       if (action == actions.end())
         continue;
@@ -2573,14 +2559,13 @@ private:
       std::vector<RevealVerifiedFrontierEdge> &frontier_edges) {
     const DepthStateKey key{state_key(game), depth};
     CSPLENDOR_PERF_TT_PROBE_SCOPE(frontier_memo_probe);
-    const auto memo_it = memo_.find(key);
+    const Entry *found = memo_.find(key);
     CSPLENDOR_PERF_TT_PROBE_FINISH(frontier_memo_probe);
-    if (memo_it != memo_.end())
+    if (found != nullptr)
       CSPLENDOR_PERF_INC(SolverTtHits);
     const bool preserve_child_depth = can_resolve_final_round(game);
-    const Entry entry = memo_it == memo_.end() ? Entry{} : memo_it->second;
-    bool proven = memo_it != memo_.end() &&
-                  entry.status() == ForceStatus::PROVEN;
+    const Entry entry = found == nullptr ? Entry{} : *found;
+    bool proven = found != nullptr && entry.status() == ForceStatus::PROVEN;
     if (!proven && preserve_child_depth) {
       // Decided by the direct rule before the table: no entry to look up.
       ForceStatus direct = ForceStatus::UNKNOWN;
@@ -2903,27 +2888,25 @@ private:
       }
     }
     CSPLENDOR_PERF_TT_PROBE_SCOPE(proof_memo_probe);
-    auto memo_it = memo_.find(key);
+    const Entry *found = memo_.find(key);
     CSPLENDOR_PERF_TT_PROBE_FINISH(proof_memo_probe);
-    if (memo_it != memo_.end())
+    if (found != nullptr)
       CSPLENDOR_PERF_INC(SolverTtHits);
-    if (memo_it == memo_.end() ||
-        memo_it->second.status() != ForceStatus::PROVEN) {
+    if (found == nullptr || found->status() != ForceStatus::PROVEN) {
       DepthPath path(path_reserve_capacity(depth));
       const ForceStatus refined = forced_win(game, path, depth, false);
       if (refined != ForceStatus::PROVEN)
         throw ProofDagBuildAborted("proof DAG reveal refinement failed");
       CSPLENDOR_PERF_TT_PROBE_SCOPE(refined_proof_memo_probe);
-      memo_it = memo_.find(key);
+      found = memo_.find(key);
       CSPLENDOR_PERF_TT_PROBE_FINISH(refined_proof_memo_probe);
-      if (memo_it != memo_.end())
+      if (found != nullptr)
         CSPLENDOR_PERF_INC(SolverTtHits);
     }
-    if (memo_it == memo_.end() ||
-        memo_it->second.status() != ForceStatus::PROVEN) {
+    if (found == nullptr || found->status() != ForceStatus::PROVEN) {
       throw ProofDagBuildAborted("proof DAG references unmaterialized subtree");
     }
-    const Entry &entry = memo_it->second;
+    const Entry entry = *found;
     if (!entry.has_action() && can_resolve_final_round(game)) {
       expand_final_round_proof_summary(game, depth, id);
       return id;
@@ -3002,14 +2985,14 @@ private:
       seen.insert(seen_key);
       const typename MemoType::key_type key{state, depth};
       CSPLENDOR_PERF_TT_PROBE_SCOPE(line_memo_probe);
-      auto it = memo.find(key);
+      const auto *hit = memo.find(key);
       CSPLENDOR_PERF_TT_PROBE_FINISH(line_memo_probe);
-      if (it != memo.end())
+      if (hit != nullptr)
         CSPLENDOR_PERF_INC(SolverTtHits);
       typename MemoType::mapped_type entry;
-      bool found = it != memo.end();
+      bool found = hit != nullptr;
       if (found) {
-        entry = it->second;
+        entry = *hit;
       } else if (behind_cut) {
         // Search the skipped attacker node into a scratch table (a few
         // nodes), leaving the table, its recency order and the statistics as
@@ -3026,10 +3009,10 @@ private:
         stats_ = saved_stats;
         if (!searched)
           break;
-        const auto hit = scratch.find(key);
-        found = hit != scratch.end();
+        const auto *scratch_hit = scratch.find(key);
+        found = scratch_hit != nullptr;
         if (found)
-          entry = hit->second;
+          entry = *scratch_hit;
       }
       behind_cut = false;
       if (!found)

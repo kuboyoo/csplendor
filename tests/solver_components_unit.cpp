@@ -306,7 +306,6 @@ void test_solver_tt_layout_and_value_contracts() {
               RevealExactDepthStateKeyHash{}(exact_key) ==
                   RevealExactDepthStateKeyHash{}(exact_same),
           "exact reveal TT key equality/hash contract changed");
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
   require(RevealExactStateKey{} == RevealExactStateKey(constructed_default),
           "exact reveal TT default key differs from its logical default state");
   bool rejected_non_root_independent = false;
@@ -317,7 +316,24 @@ void test_solver_tt_layout_and_value_contracts() {
   }
   require(rejected_non_root_independent,
           "exact reveal TT key accepted acquired-hidden state");
-#endif
+  // The depth is part of the key: different depths are different keys, a
+  // default key has none (an empty table slot), and a depth of 255 does not
+  // fit the metadata word.
+  require(exact_key.depth() == 7 && !exact_key.empty() &&
+              RevealExactDepthStateKey{}.empty() &&
+              RevealDepthStateKey{}.empty() &&
+              !(exact_key == RevealExactDepthStateKey(exact_source, 8)) &&
+              !(RevealDepthStateKey(key, 3) == RevealDepthStateKey(key, 4)) &&
+              RevealDepthStateKey(key, 3).depth() == 3 &&
+              RevealDepthStateKey(key, 0).state.board_hash() == key.board_hash(),
+          "reveal TT depth key lost its depth or empty marker");
+  bool rejected_depth = false;
+  try {
+    (void)RevealDepthStateKey(key, 255);
+  } catch (const std::out_of_range &) {
+    rejected_depth = true;
+  }
+  require(rejected_depth, "reveal TT depth key accepted a depth of 255");
 
   RevealMemoEntry transient(ForceStatus::PROVEN, 42, 17, true, 70000, false);
   require(transient.status() == ForceStatus::PROVEN &&
@@ -376,6 +392,7 @@ void test_solver_tt_layout_and_value_contracts() {
   }
   require(rejected_visible_count,
           "compact visible TT accepted an overflowing action count");
+#endif
   if constexpr (sizeof(size_t) > sizeof(uint32_t)) {
     bool rejected_persistent_count = false;
     try {
@@ -388,31 +405,32 @@ void test_solver_tt_layout_and_value_contracts() {
     require(rejected_persistent_count,
             "compact persistent TT accepted an overflowing action count");
   }
-#endif
 
   const SolverTtLayoutMetrics layout = solver_tt_layout_metrics();
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
   require(layout.reveal_exact_state_key < layout.reveal_state_key &&
               layout.reveal_exact_depth_key < layout.reveal_depth_key &&
               layout.reveal_memo_entry < layout.reveal_persistent_entry &&
               layout.visible_force_entry < layout.reveal_persistent_entry &&
               layout.visible_force_bounds < 2 * layout.reveal_persistent_entry,
           "compact solver TT did not retain its portable size relationships");
+  // The depth travels inside the key, so the depth keys are as large as the
+  // state keys, and one table slot (key + entry) is one 64-byte cache line.
+  require(layout.reveal_state_key == 48 && layout.reveal_depth_key == 48 &&
+              layout.reveal_exact_state_key == 32 &&
+              layout.reveal_exact_depth_key == 32 &&
+              layout.reveal_memo_entry == 16 &&
+              layout.reveal_persistent_entry == 32 &&
+              layout.reveal_memo_value == 64 &&
+              layout.reveal_persistent_value == 64,
+          "reveal TT layout exceeded its one-cache-line slot budget");
 #if defined(__GLIBCXX__)
   if constexpr (sizeof(void *) == 8) {
-    require(layout.reveal_state_key == 48 && layout.reveal_depth_key == 56 &&
-                layout.reveal_exact_state_key == 32 &&
-                layout.reveal_exact_depth_key == 40 &&
-                layout.reveal_memo_entry == 24 &&
-                layout.reveal_persistent_entry == 32 &&
-                layout.reveal_memo_value == 80 &&
-                layout.reveal_persistent_value == 72 &&
-                layout.reveal_proof_node_value == 64 &&
+    require(layout.reveal_proof_node_value == 56 &&
                 layout.visible_force_entry == 16 &&
                 layout.visible_force_bounds == 40 &&
                 layout.visible_force_value == 40 &&
                 layout.visible_bounds_value == 56,
-            "compact reveal TT layout exceeded its 64-bit libstdc++ budget");
+            "compact solver TT layout exceeded its 64-bit libstdc++ budget");
 #ifdef CSPLENDOR_COMPACT_SOLVER_REASONS
     require(layout.visible_memo_entry == 16 && layout.visible_memo_value == 32,
             "compact visible minimax TT layout exceeded its 64-bit libstdc++ "
@@ -423,37 +441,6 @@ void test_solver_tt_layout_and_value_contracts() {
             "changed");
 #endif
   }
-#endif
-#else
-  require(layout.reveal_exact_state_key == layout.reveal_state_key &&
-              layout.reveal_exact_depth_key == layout.reveal_depth_key &&
-              layout.reveal_memo_entry == layout.reveal_persistent_entry,
-          "legacy solver TT aliases changed their portable layout contract");
-#if defined(__GLIBCXX__)
-  if constexpr (sizeof(void *) == 8) {
-    require(layout.reveal_state_key == 56 && layout.reveal_depth_key == 64 &&
-                layout.reveal_exact_state_key == 56 &&
-                layout.reveal_exact_depth_key == 64 &&
-                layout.reveal_memo_entry == 56 &&
-                layout.reveal_persistent_entry == 56 &&
-                layout.reveal_memo_value == 120 &&
-                layout.reveal_persistent_value == 120 &&
-                layout.reveal_proof_node_value == 72 &&
-                layout.visible_force_entry == 32 &&
-                layout.visible_force_bounds == 72 &&
-                layout.visible_force_value == 56 &&
-                layout.visible_bounds_value == 88,
-            "legacy reveal TT 64-bit libstdc++ baseline changed");
-#ifdef CSPLENDOR_COMPACT_SOLVER_REASONS
-    require(layout.visible_memo_entry == 32 && layout.visible_memo_value == 48,
-            "legacy visible minimax TT 64-bit libstdc++ baseline changed");
-#else
-    require(layout.visible_memo_entry == 64 && layout.visible_memo_value == 80,
-            "string-reason visible minimax TT 64-bit libstdc++ baseline "
-            "changed");
-#endif
-  }
-#endif
 #endif
 }
 
@@ -506,6 +493,118 @@ void test_solver_tt_full_key_collision_contract() {
   table[duplicate] = 999;
   require(table.size() == 128 && table.at(duplicate) == 999,
           "solver TT collision update duplicated an existing key");
+}
+
+// The open-addressing table (src/solver_flat_table.h): finds what it stores,
+// overwrites in place, grows past its first capacity, erases by predicate
+// with intact probe chains, respects the entry limit's capacity, and clears.
+void test_flat_memo_table_contract() {
+  using namespace csplendor::solver_internal;
+  struct ConstantHash {
+    size_t operator()(const RevealDepthStateKey &) const noexcept { return 7; }
+  };
+  using Table = FlatMemoTable<RevealDepthStateKey, RevealMemoEntry, ConstantHash>;
+  static_assert(sizeof(Table::Slot) == 64, "flat table slot must be 64 bytes");
+  const auto make_key = [](int index) {
+    const StateKeyCore core{static_cast<uint64_t>(1000 + index),
+                            static_cast<uint8_t>(index % 16),
+                            static_cast<uint8_t>((index + 1) % 16),
+                            static_cast<uint8_t>(index % 32),
+                            static_cast<uint8_t>((index + 3) % 32),
+                            (index & 1) != 0,
+                            static_cast<int8_t>((index % 3) - 1)};
+    const RevealStateKey state(
+        core, static_cast<uint64_t>(index), static_cast<uint64_t>(index) << 1,
+        static_cast<uint64_t>(index) << 2, static_cast<uint64_t>(index) << 3,
+        static_cast<uint8_t>(index % 4), static_cast<uint8_t>((index + 1) % 4));
+    return RevealDepthStateKey{state, index % 9};
+  };
+
+  Table table;
+  require(table.empty() && table.capacity() == 0 &&
+              table.find(make_key(0)) == nullptr,
+          "flat table did not start empty without allocating");
+  // Every key hashes to the same home: a worst-case probe chain, over more
+  // entries than MIN_CAPACITY so the table rehashes while probing.
+  const int count = 1500;
+  for (int index = 0; index < count; ++index)
+    table.insert(make_key(index),
+                 RevealMemoEntry(ForceStatus::PROVEN, index, -1, true, index));
+  require(table.size() == static_cast<size_t>(count) &&
+              table.capacity() * Table::LOAD_NUM >= table.size() * Table::LOAD_DEN,
+          "flat table lost entries or exceeded its load factor while growing");
+  for (int index = 0; index < count; ++index) {
+    const RevealMemoEntry *entry = table.find(make_key(index));
+    require(entry != nullptr && entry->action_code() == static_cast<uint64_t>(index),
+            "flat table failed a lookup under hash collision");
+  }
+  require(table.find(make_key(count)) == nullptr,
+          "flat table found a key that was never inserted");
+
+  *table.find(make_key(5)) = RevealMemoEntry(ForceStatus::REFUTED, 999, -1, true, 1);
+  require(table.size() == static_cast<size_t>(count) &&
+              table.find(make_key(5))->action_code() == 999,
+          "flat table overwrite changed the size or the entry");
+
+  // Erase the odd codes: the even ones stay reachable through the shifted
+  // chains, and a predicate that erases a bounded number stops at the bound.
+  table.erase_if([](const RevealDepthStateKey &, const RevealMemoEntry &entry) {
+    return entry.action_code() % 2 == 1;
+  });
+  require(table.size() == static_cast<size_t>(count / 2),
+          "flat table erase_if removed the wrong number of entries");
+  for (int index = 0; index < count; ++index) {
+    const RevealMemoEntry *entry = table.find(make_key(index));
+    const bool expected_present = index % 2 == 0 && index != 5;
+    require((entry != nullptr) == expected_present,
+            "flat table lookup after erase_if disagrees with the predicate");
+  }
+  size_t budget = 3;
+  table.erase_if([&](const RevealDepthStateKey &, const RevealMemoEntry &) {
+    if (budget == 0)
+      return false;
+    --budget;
+    return true;
+  });
+  require(table.size() == static_cast<size_t>(count / 2 - 3),
+          "flat table erase_if ignored a stateful predicate");
+  size_t visited = 0;
+  table.for_each([&](const RevealDepthStateKey &key, const RevealMemoEntry &) {
+    visited += !key.empty();
+  });
+  require(visited == table.size(), "flat table for_each skipped live entries");
+
+  const size_t capacity_before = table.capacity();
+  table.clear();
+  require(table.empty() && table.capacity() == capacity_before &&
+              table.find(make_key(0)) == nullptr,
+          "flat table clear did not empty the table in place");
+
+  // With an entry limit the capacity grows along C >> k (k >= 3) and then
+  // jumps to C = capacity_for(limit), never beyond: the limit's entries fit
+  // without a rehash, the memory is bounded by limit * 64 / 0.7 bytes, and the
+  // rehash that copies a large table starts from at most C / 8.
+  Table limited;
+  limited.set_entry_limit(20000);
+  require(Table::capacity_for(20000) == 28572,
+          "flat table capacity_for(20000) is not ceil(20000 / 0.7)");
+  std::vector<size_t> capacities;
+  for (int index = 0; index < 20000; ++index) {
+    const StateKeyCore core{static_cast<uint64_t>(index), 0, 0, 0, 0, false, 0};
+    limited.insert(RevealDepthStateKey{RevealStateKey(core, 0, 0, 0, 0, 0, 0), 1},
+                   RevealMemoEntry());
+    if (capacities.empty() || limited.capacity() != capacities.back())
+      capacities.push_back(limited.capacity());
+  }
+  require(limited.size() == 20000 && limited.capacity() == 28572 &&
+              capacities == std::vector<size_t>{1785, 3571, 28572} &&
+              limited.memory_bytes() == 28572 * 64,
+          "flat table did not grow 1785 -> 3571 -> 28572 for a limit of 20000");
+  Table unlimited;
+  for (int index = 0; index < 1500; ++index)
+    unlimited.insert(make_key(index), RevealMemoEntry());
+  require(unlimited.capacity() == 4096,
+          "unlimited flat table did not double from MIN_CAPACITY");
 }
 
 void test_recursive_path_lifo_guard() {
@@ -1076,6 +1175,7 @@ int main() {
     test_defender_reserve_order_depends_on_return_colour();
     test_solver_tt_layout_and_value_contracts();
     test_solver_tt_full_key_collision_contract();
+    test_flat_memo_table_contract();
     test_recursive_path_lifo_guard();
     test_card_equivalence_classes_match_tuple_oracle();
     test_compact_forced_action_filter_order_and_caps();

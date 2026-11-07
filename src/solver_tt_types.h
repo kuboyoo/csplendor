@@ -3,6 +3,7 @@
 
 #include "card_data.h"
 #include "perf_counters.h"
+#include "solver_flat_table.h"
 #include "solver_types.h"
 #include <cassert>
 #include <cstddef>
@@ -59,6 +60,34 @@ inline int8_t checked_visible_score(int value) noexcept {
 static_assert(CARD_COUNT <= std::numeric_limits<int8_t>::max(),
               "card IDs must fit the compact reveal-card field");
 
+namespace solver_tt_detail {
+
+// The remaining attacker depth travels in the key's metadata word: bits 56-63
+// hold depth + 1, so 0 marks a key without depth (an empty table slot).
+constexpr int DEPTH_SHIFT = 56;
+constexpr uint64_t DEPTH_MASK = (uint64_t{1} << DEPTH_SHIFT) - 1;
+
+inline uint64_t metadata_with_depth(uint64_t metadata, int depth) {
+  if (depth < 0 || depth > 254)
+    throw std::out_of_range("solver TT depth is out of range");
+  return (metadata & DEPTH_MASK) |
+         (static_cast<uint64_t>(depth + 1) << DEPTH_SHIFT);
+}
+
+constexpr int depth_of_metadata(uint64_t metadata) noexcept {
+  return static_cast<int>(metadata >> DEPTH_SHIFT) - 1;
+}
+
+inline uint32_t checked_action_count(size_t value) {
+  if (value > std::numeric_limits<uint32_t>::max())
+    throw std::overflow_error("solver TT action count exceeds uint32_t");
+  return static_cast<uint32_t>(value);
+}
+
+} // namespace solver_tt_detail
+
+// The blank search's node key: rule hash, the hidden cards still unseen, the
+// hidden cards acquired since the root, and the packed metadata. Six words.
 class RevealStateKey {
 public:
   RevealStateKey() = default;
@@ -67,89 +96,57 @@ public:
                  uint64_t unseen_high, uint64_t acquired_hidden_low,
                  uint64_t acquired_hidden_high, uint8_t reserved0,
                  uint8_t reserved1) noexcept
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
       : board_hash_(core.board_hash), unseen_low_(unseen_low),
         unseen_high_(unseen_high), acquired_hidden_low_(acquired_hidden_low),
         acquired_hidden_high_(acquired_hidden_high),
         metadata_(
             solver_tt_detail::reveal_metadata(core, reserved0, reserved1)) {}
-#else
-      : core_(core), unseen_low_(unseen_low), unseen_high_(unseen_high),
-        acquired_hidden_low_(acquired_hidden_low),
-        acquired_hidden_high_(acquired_hidden_high), reserved0_(reserved0),
-        reserved1_(reserved1) {
-  }
-#endif
 
   bool operator==(const RevealStateKey &other) const noexcept {
     CSPLENDOR_PERF_TT_KEY_COMPARISON();
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
     return board_hash_ == other.board_hash_ &&
            unseen_low_ == other.unseen_low_ &&
            unseen_high_ == other.unseen_high_ &&
            acquired_hidden_low_ == other.acquired_hidden_low_ &&
            acquired_hidden_high_ == other.acquired_hidden_high_ &&
            metadata_ == other.metadata_;
-#else
-    return core_ == other.core_ && unseen_low_ == other.unseen_low_ &&
-           unseen_high_ == other.unseen_high_ &&
-           acquired_hidden_low_ == other.acquired_hidden_low_ &&
-           acquired_hidden_high_ == other.acquired_hidden_high_ &&
-           reserved0_ == other.reserved0_ && reserved1_ == other.reserved1_;
-#endif
   }
 
   bool operator!=(const RevealStateKey &other) const noexcept {
     return !(*this == other);
   }
 
-  uint64_t board_hash() const noexcept {
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
-    return board_hash_;
-#else
-    return core_.board_hash;
-#endif
-  }
-
+  uint64_t board_hash() const noexcept { return board_hash_; }
   uint64_t unseen_low() const noexcept { return unseen_low_; }
   uint64_t unseen_high() const noexcept { return unseen_high_; }
   uint64_t acquired_hidden_low() const noexcept { return acquired_hidden_low_; }
   uint64_t acquired_hidden_high() const noexcept {
     return acquired_hidden_high_;
   }
+  uint64_t metadata_bits() const noexcept { return metadata_; }
 
-  uint64_t metadata_bits() const noexcept {
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
-    return metadata_;
-#else
-    return solver_tt_detail::reveal_metadata(core_, reserved0_, reserved1_);
-#endif
+  // The same state with `depth` in the metadata word (see solver_tt_detail).
+  RevealStateKey with_depth(int depth) const {
+    RevealStateKey key = *this;
+    key.metadata_ = solver_tt_detail::metadata_with_depth(metadata_, depth);
+    return key;
   }
+  int depth() const noexcept {
+    return solver_tt_detail::depth_of_metadata(metadata_);
+  }
+  bool empty() const noexcept { return depth() < 0; }
 
 private:
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
   uint64_t board_hash_ = 0;
-#else
-  StateKeyCore core_;
-#endif
   uint64_t unseen_low_ = 0;
   uint64_t unseen_high_ = 0;
   uint64_t acquired_hidden_low_ = 0;
   uint64_t acquired_hidden_high_ = 0;
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
   uint64_t metadata_ = solver_tt_detail::reveal_metadata(StateKeyCore{}, 0, 0);
-#else
-  uint8_t reserved0_ = 0;
-  uint8_t reserved1_ = 0;
-#endif
 };
 
 struct RevealStateKeyHash {
-  size_t operator()(const RevealStateKey &key) const
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
-      noexcept
-#endif
-  {
+  size_t operator()(const RevealStateKey &key) const noexcept {
     const uint64_t mixed =
         key.board_hash() ^ (key.unseen_low() * 0x9e3779b97f4a7c15ULL) ^
         (key.unseen_high() * 0xc2b2ae3d27d4eb4fULL) ^
@@ -160,31 +157,29 @@ struct RevealStateKeyHash {
   }
 };
 
+// A blank-search node and its remaining attacker depth (in the metadata).
 struct RevealDepthStateKey {
   RevealStateKey state;
-  int depth = 0;
 
   RevealDepthStateKey() = default;
-  RevealDepthStateKey(const RevealStateKey &key_state, int key_depth) noexcept
-      : state(key_state), depth(key_depth) {}
+  RevealDepthStateKey(const RevealStateKey &key_state, int key_depth)
+      : state(key_state.with_depth(key_depth)) {}
 
+  int depth() const noexcept { return state.depth(); }
+  bool empty() const noexcept { return state.empty(); }
   bool operator==(const RevealDepthStateKey &other) const noexcept {
-    return state == other.state && depth == other.depth;
+    return state == other.state;
   }
 };
 
 struct RevealDepthStateKeyHash {
-  size_t operator()(const RevealDepthStateKey &key) const
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
-      noexcept
-#endif
-  {
-    return RevealStateKeyHash{}(key.state) ^
-           (std::hash<int>{}(key.depth) * 0x9e3779b9U);
+  size_t operator()(const RevealDepthStateKey &key) const noexcept {
+    return RevealStateKeyHash{}(key.state);
   }
 };
 
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
+// The exact search's node key: root-independent, so without the cards
+// acquired since the root. Four words.
 class RevealExactStateKey {
 public:
   RevealExactStateKey() = default;
@@ -212,6 +207,16 @@ public:
   uint64_t unseen_high() const noexcept { return unseen_high_; }
   uint64_t metadata_bits() const noexcept { return metadata_; }
 
+  RevealExactStateKey with_depth(int depth) const {
+    RevealExactStateKey key = *this;
+    key.metadata_ = solver_tt_detail::metadata_with_depth(metadata_, depth);
+    return key;
+  }
+  int depth() const noexcept {
+    return solver_tt_detail::depth_of_metadata(metadata_);
+  }
+  bool empty() const noexcept { return depth() < 0; }
+
 private:
   uint64_t board_hash_ = 0;
   uint64_t unseen_low_ = 0;
@@ -231,116 +236,65 @@ struct RevealExactStateKeyHash {
 
 struct RevealExactDepthStateKey {
   RevealExactStateKey state;
-  int depth = 0;
 
   RevealExactDepthStateKey() = default;
   RevealExactDepthStateKey(const RevealStateKey &full_state, int key_depth)
-      : state(full_state), depth(key_depth) {}
+      : state(RevealExactStateKey(full_state).with_depth(key_depth)) {}
 
+  int depth() const noexcept { return state.depth(); }
+  bool empty() const noexcept { return state.empty(); }
   bool operator==(const RevealExactDepthStateKey &other) const noexcept {
-    return state == other.state && depth == other.depth;
+    return state == other.state;
   }
 };
 
 struct RevealExactDepthStateKeyHash {
   size_t operator()(const RevealExactDepthStateKey &key) const noexcept {
-    return RevealExactStateKeyHash{}(key.state) ^
-           (std::hash<int>{}(key.depth) * 0x9e3779b9U);
+    return RevealExactStateKeyHash{}(key.state);
   }
 };
-#else
-using RevealExactStateKey = RevealStateKey;
-using RevealExactStateKeyHash = RevealStateKeyHash;
-using RevealExactDepthStateKey = RevealDepthStateKey;
-using RevealExactDepthStateKeyHash = RevealDepthStateKeyHash;
-#endif
 
+// The blank table's entry (16 bytes; discarded after every search).
 class RevealMemoEntry {
 public:
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
   static constexpr bool tracks_persistence = false;
-#else
-  static constexpr bool tracks_persistence = true;
-#endif
 
   RevealMemoEntry() = default;
   RevealMemoEntry(ForceStatus status, uint64_t action_code, int reveal_card,
                   bool has_action, size_t action_count, bool replayable = true)
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
-      : action_code_(action_code), action_count_(action_count),
+      : action_code_(action_code),
+        action_count_(solver_tt_detail::checked_action_count(action_count)),
         reveal_card_(solver_tt_detail::checked_reveal_card(reveal_card)),
         flags_(solver_tt_detail::entry_flags(status, has_action, replayable)) {}
-#else
-      : status_(status), action_code_(action_code), reveal_card_(reveal_card),
-        has_action_(has_action), action_count_(action_count),
-        replayable_(replayable) {
-  }
-#endif
 
   ForceStatus status() const noexcept {
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
     return static_cast<ForceStatus>(flags_ & 0x3U);
-#else
-    return status_;
-#endif
   }
-
   void set_status(ForceStatus value) noexcept {
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
     flags_ = static_cast<uint8_t>((flags_ & ~uint8_t{0x3U}) |
                                   static_cast<uint8_t>(value));
-#else
-    status_ = value;
-#endif
   }
-
   uint64_t action_code() const noexcept { return action_code_; }
   int reveal_card() const noexcept { return reveal_card_; }
-  bool has_action() const noexcept {
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
-    return (flags_ & (1U << 2)) != 0;
-#else
-    return has_action_;
-#endif
-  }
+  bool has_action() const noexcept { return (flags_ & (1U << 2)) != 0; }
   size_t action_count() const noexcept {
     return static_cast<size_t>(action_count_);
   }
-  void set_action_count(size_t value) noexcept { action_count_ = value; }
-  bool replayable() const noexcept {
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
-    return (flags_ & (1U << 3)) != 0;
-#else
-    return replayable_;
-#endif
+  void set_action_count(size_t value) {
+    action_count_ = solver_tt_detail::checked_action_count(value);
   }
-
-#ifndef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
-  uint64_t generation() const noexcept { return generation_; }
-  uint64_t last_touched() const noexcept { return last_touched_; }
-  void set_generation(uint64_t value) noexcept { generation_ = value; }
-  void set_last_touched(uint64_t value) noexcept { last_touched_ = value; }
-#endif
+  bool replayable() const noexcept { return (flags_ & (1U << 3)) != 0; }
 
 private:
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
   uint64_t action_code_ = 0;
-  size_t action_count_ = 0;
+  uint32_t action_count_ = 0;
   int8_t reveal_card_ = -1;
   uint8_t flags_ =
       solver_tt_detail::entry_flags(ForceStatus::UNKNOWN, false, true);
-#else
-  ForceStatus status_ = ForceStatus::UNKNOWN;
-  uint64_t action_code_ = 0;
-  int reveal_card_ = -1;
-  bool has_action_ = false;
-  size_t action_count_ = 0;
-  bool replayable_ = true;
-  uint64_t generation_ = 0;
-  uint64_t last_touched_ = 0;
-#endif
 };
 
+// The exact table's entry (32 bytes; carried across the searches of a
+// session, with the search generation and the recency counter).
 class RevealPersistentEntry {
 public:
   static constexpr bool tracks_persistence = true;
@@ -349,59 +303,28 @@ public:
   RevealPersistentEntry(ForceStatus status, uint64_t action_code,
                         int reveal_card, bool has_action, size_t action_count,
                         bool replayable = true)
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
       : action_code_(action_code),
-        action_count_(checked_action_count(action_count)),
+        action_count_(solver_tt_detail::checked_action_count(action_count)),
         reveal_card_(solver_tt_detail::checked_reveal_card(reveal_card)),
         flags_(solver_tt_detail::entry_flags(status, has_action, replayable)) {}
-#else
-      : status_(status), action_code_(action_code), reveal_card_(reveal_card),
-        has_action_(has_action), action_count_(action_count),
-        replayable_(replayable) {
-  }
-#endif
 
   ForceStatus status() const noexcept {
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
     return static_cast<ForceStatus>(flags_ & 0x3U);
-#else
-    return status_;
-#endif
   }
   void set_status(ForceStatus value) noexcept {
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
     flags_ = static_cast<uint8_t>((flags_ & ~uint8_t{0x3U}) |
                                   static_cast<uint8_t>(value));
-#else
-    status_ = value;
-#endif
   }
   uint64_t action_code() const noexcept { return action_code_; }
   int reveal_card() const noexcept { return reveal_card_; }
-  bool has_action() const noexcept {
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
-    return (flags_ & (1U << 2)) != 0;
-#else
-    return has_action_;
-#endif
-  }
+  bool has_action() const noexcept { return (flags_ & (1U << 2)) != 0; }
   size_t action_count() const noexcept {
     return static_cast<size_t>(action_count_);
   }
   void set_action_count(size_t value) {
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
-    action_count_ = checked_action_count(value);
-#else
-    action_count_ = value;
-#endif
+    action_count_ = solver_tt_detail::checked_action_count(value);
   }
-  bool replayable() const noexcept {
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
-    return (flags_ & (1U << 3)) != 0;
-#else
-    return replayable_;
-#endif
-  }
+  bool replayable() const noexcept { return (flags_ & (1U << 3)) != 0; }
 
   uint64_t generation() const noexcept { return generation_; }
   uint64_t last_touched() const noexcept { return last_touched_; }
@@ -409,14 +332,6 @@ public:
   void set_last_touched(uint64_t value) noexcept { last_touched_ = value; }
 
 private:
-#ifdef CSPLENDOR_COMPACT_SOLVER_TT_ENTRIES
-  static uint32_t checked_action_count(size_t value) {
-    if (value > std::numeric_limits<uint32_t>::max())
-      throw std::overflow_error(
-          "persistent solver TT action count exceeds uint32_t");
-    return static_cast<uint32_t>(value);
-  }
-
   uint64_t action_code_ = 0;
   uint64_t generation_ = 0;
   uint64_t last_touched_ = 0;
@@ -424,17 +339,16 @@ private:
   int8_t reveal_card_ = -1;
   uint8_t flags_ =
       solver_tt_detail::entry_flags(ForceStatus::UNKNOWN, false, true);
-#else
-  ForceStatus status_ = ForceStatus::UNKNOWN;
-  uint64_t action_code_ = 0;
-  int reveal_card_ = -1;
-  bool has_action_ = false;
-  size_t action_count_ = 0;
-  bool replayable_ = true;
-  uint64_t generation_ = 0;
-  uint64_t last_touched_ = 0;
-#endif
 };
+
+using RevealMemoTable =
+    FlatMemoTable<RevealDepthStateKey, RevealMemoEntry, RevealDepthStateKeyHash>;
+using RevealExactMemoTable =
+    FlatMemoTable<RevealExactDepthStateKey, RevealPersistentEntry,
+                  RevealExactDepthStateKeyHash>;
+static_assert(sizeof(RevealMemoTable::Slot) == 64 &&
+                  sizeof(RevealExactMemoTable::Slot) == 64,
+              "reveal TT slots must stay one cache line");
 
 struct VisibleStateKey {
   StateKeyCore core;
@@ -623,8 +537,8 @@ inline SolverTtLayoutMetrics solver_tt_layout_metrics() noexcept {
       sizeof(RevealExactDepthStateKey),
       sizeof(RevealMemoEntry),
       sizeof(RevealPersistentEntry),
-      sizeof(std::pair<const RevealDepthStateKey, RevealMemoEntry>),
-      sizeof(std::pair<const RevealExactDepthStateKey, RevealPersistentEntry>),
+      sizeof(RevealMemoTable::Slot),
+      sizeof(RevealExactMemoTable::Slot),
       sizeof(std::pair<const RevealDepthStateKey, size_t>),
       sizeof(VisibleStateKey),
       sizeof(VisibleDepthStateKey),
