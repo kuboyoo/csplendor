@@ -221,14 +221,20 @@ private:
   static constexpr Value PROVEN_VALUE{0, DFPN_INF};
   static constexpr Value REFUTED_VALUE{DFPN_INF, 0};
 
-  static Value value_of(ForceStatus status) {
+  // df-pn has no undecided value: an UNKNOWN (a transition that could not
+  // be applied, doc 第 3 節) stops the whole search, named by `reason`.
+  static Value value_of(ForceStatus status, const char *reason) {
     if (status == ForceStatus::PROVEN)
       return PROVEN_VALUE;
     if (status == ForceStatus::REFUTED)
       return REFUTED_VALUE;
-    // Only a final-round node whose last move leaves the game running.
-    throw SearchLimitExceeded("dfpn: undecided final-round node");
+    throw SearchLimitExceeded(reason);
   }
+  static constexpr const char *FINAL_ROUND_UNKNOWN =
+      "dfpn: undecided final-round node";
+  static constexpr const char *LEAF_UNKNOWN = "dfpn: undecided depth-first leaf";
+  static constexpr const char *APPLY_FAILED =
+      "dfpn: a reveal could not be applied";
 
   // A reveal of a move (doc/mate_dfpn_cpp_design.md 第 2.1 節): CONCRETE
   // counts, BLANK (the blank dominance child) counts until refuted, DORMANT
@@ -324,7 +330,7 @@ private:
       if (host_.resolve_final_round_direct(game, direct, Exact)) {
         ++host_.stats_.final_round_direct_resolutions;
         host_.stats_.final_round_score_prunes += direct == ForceStatus::PROVEN;
-        return value_of(direct);
+        return value_of(direct, FINAL_ROUND_UNKNOWN);
       }
     }
 
@@ -342,14 +348,14 @@ private:
         hit->set_generation(host_.search_generation_);
         hit->set_last_touched(++host_.cache_touch_counter_);
       }
-      return value_of(hit->status());
+      return value_of(hit->status(), LEAF_UNKNOWN);
     }
     if (ply > 0 && depth <= LEAF_DEPTH) {
       // Near the horizon the subtrees are small: the depth-first search
       // decides them outright (and stores them in the shared table).
       const ForceStatus status = host_.forced_win_with_memo(
           game, leaf_path_, depth, Exact, decided);
-      return value_of(status);
+      return value_of(status, LEAF_UNKNOWN);
     }
     auto &undecided = table<Exact>();
     if (const auto *slot = undecided.find(key)) {
@@ -357,11 +363,13 @@ private:
         return Value{slot->pn, slot->dn};
     }
 
+    // Only decided values reach the decided table.
     const auto decide = [&](ForceStatus status, MemoEntry entry) {
+      const Value value = value_of(status, FINAL_ROUND_UNKNOWN);
       entry.set_status(status);
       host_.store_entry(decided, key, entry);
       undecided.erase(key);
-      return value_of(status);
+      return value;
     };
     const MemoEntry no_action{ForceStatus::UNKNOWN, 0, -1, false, 0};
     if (Host::can_resolve_final_round(game)) {
@@ -582,7 +590,7 @@ private:
         Rollback rollback(host_, game);
         rollback.mark_mutated();
         if (!apply_outcome<Exact>(game, move.action, outcome))
-          throw SearchLimitExceeded("dfpn: a reveal could not be applied");
+          throw SearchLimitExceeded(APPLY_FAILED);
         const int next_depth = host_.child_depth(depth, mover, game);
         // The blank child is decided outright by the depth-first blank
         // search, as in the depth-first solver: it only matters when proven,
@@ -650,7 +658,7 @@ private:
     }
     move.count = outcomes.size() - move.first;
     if (move.count == 0)
-      throw SearchLimitExceeded("dfpn: a move has no reveal");
+      throw SearchLimitExceeded(APPLY_FAILED);
     move.expanded = true;
   }
 
