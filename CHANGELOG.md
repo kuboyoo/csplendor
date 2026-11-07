@@ -1,5 +1,21 @@
 # 変更履歴 / Changelog
 
+## 未出荷：詰み探索の最終ラウンドの直接判定を置換表の前に行う（2026-11-07）
+
+- 攻め側の最終手のあとの守り側の節点（最終ラウンド、P1 の手番、保留の決定なし）を守り側の全手の到達点から直接決める
+  `resolve_final_round_direct` を、局面のハッシュ・置換表の参照・経路の確認より前に行い、決まった節点は置換表に保存しない
+  （`doc/mate_usage.md` の「最終ラウンドの直接判定の前置き」）。判定は盤面だけから数十回の比較で済み、項の挿入と表の占有の
+  方が高い。証明 DAG と frontier は、表に項のない最終ラウンドの節点を直接判定で確かめてから従来どおり全応手を展開する。
+  判定・主手順・証明 DAG・ノード数は変わらず、`memoized_states` と `memo_hits` が減る（golden digest の 4 fixture は
+  最終ラウンドの節点を持たないので不変）。
+- 計測（1 スレッド、置換表 200万件、直接生成 7a58614 との比較）: BENCH の厳密探索は深さ4 が 1.73 → 1.66 秒（150.9万ノード、
+  保存 73.4万 → 69.8万件）、深さ5 の 60 秒で訪問できたノードは 5,597万 → 6,388万（+14%。47791b9 からは 4,453万 → 6,388万、
+  +43%）。ランダム終盤 360 + 1,164 ケースで判定・ノード数・主手順が全て一致。
+
+English: final-round nodes decided by the direct rule are resolved before the
+hash and the transposition table and are no longer stored; the proof DAG and
+the frontier re-check such nodes directly. Results are unchanged.
+
 ## 未出荷：詰み探索の最終手の直接生成（2026-11-07）
 
 - 最終手カットの節点（最終ラウンドでない局面で攻め側の手番、残り1手）で、全合法手を作ってから 15 点に届く手に絞るのを

@@ -703,6 +703,17 @@ private:
     }
     if (game.current_player() == attacker_ && depth <= 0)
       return ForceStatus::REFUTED;
+    // Final-round nodes decided by the direct rule skip the hash and the
+    // table (doc/mate_usage.md「最終ラウンドの直接判定の前置き」): the rule
+    // costs a few comparisons, an entry costs more than deciding again.
+    if (can_resolve_final_round(game)) {
+      ForceStatus direct = ForceStatus::UNKNOWN;
+      if (resolve_final_round_direct(game, direct, exact_refinement)) {
+        ++stats_.final_round_direct_resolutions;
+        stats_.final_round_score_prunes += direct == ForceStatus::PROVEN;
+        return direct;
+      }
+    }
 
     const StateKey state = state_key(game, exact_refinement);
     const DepthStateKey path_key{state, depth};
@@ -1411,15 +1422,9 @@ private:
            !game.board.waiting_return && game.current_player() == 1;
   }
 
+  // A final-round node the direct rule did not decide: every move expanded.
   template <typename EntryType>
   EntryType resolve_final_round(Game &game, bool exact_refinement) {
-    ForceStatus direct_status = ForceStatus::UNKNOWN;
-    if (resolve_final_round_direct(game, direct_status, exact_refinement)) {
-      ++stats_.final_round_direct_resolutions;
-      if (direct_status == ForceStatus::PROVEN)
-        ++stats_.final_round_score_prunes;
-      return EntryType{direct_status, 0, -1, false, 0};
-    }
     if (max_final_round_score(game) < game.board.players[0].points) {
       ++stats_.final_round_score_prunes;
       return EntryType{attacker_ == 0 ? ForceStatus::PROVEN
@@ -2554,14 +2559,20 @@ private:
     CSPLENDOR_PERF_TT_PROBE_FINISH(frontier_memo_probe);
     if (memo_it != memo_.end())
       CSPLENDOR_PERF_INC(SolverTtHits);
-    if (memo_it == memo_.end() ||
-        memo_it->second.status() != ForceStatus::PROVEN) {
+    const bool preserve_child_depth = can_resolve_final_round(game);
+    const Entry entry = memo_it == memo_.end() ? Entry{} : memo_it->second;
+    bool proven = memo_it != memo_.end() &&
+                  entry.status() == ForceStatus::PROVEN;
+    if (!proven && preserve_child_depth) {
+      // Decided by the direct rule before the table: no entry to look up.
+      ForceStatus direct = ForceStatus::UNKNOWN;
+      proven = resolve_final_round_direct(game, direct, false) &&
+               direct == ForceStatus::PROVEN;
+    }
+    if (!proven)
       throw ProofDagBuildAborted(
           "frontier references an unmaterialized proof state");
-    }
-    const Entry entry = memo_it->second;
     const int current_player = game.current_player();
-    const bool preserve_child_depth = can_resolve_final_round(game);
     std::vector<OrderedAction> actions = proof_ordered_actions(game);
 
     if (current_player == attacker_ && entry.has_action()) {
@@ -2863,6 +2874,16 @@ private:
     const size_t id = proof_builder_.node_count();
     proof_node_ids_[key] = id;
     proof_builder_.append_node(make_proof_node(id, game, depth));
+    if (can_resolve_final_round(game)) {
+      // Decided by the direct rule before the table: no entry to look up.
+      ForceStatus direct = ForceStatus::UNKNOWN;
+      if (resolve_final_round_direct(game, direct, false)) {
+        if (direct != ForceStatus::PROVEN)
+          throw ProofDagBuildAborted("proof DAG reveal refinement failed");
+        expand_final_round_proof_summary(game, depth, id);
+        return id;
+      }
+    }
     CSPLENDOR_PERF_TT_PROBE_SCOPE(proof_memo_probe);
     auto memo_it = memo_.find(key);
     CSPLENDOR_PERF_TT_PROBE_FINISH(proof_memo_probe);
