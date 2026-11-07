@@ -2,6 +2,7 @@
 #include "reveal_verified_solver.h"
 #include "solver_action_filter.h"
 #include "solver_card_equivalence.h"
+#include "solver_line_table.h"
 #include "solver_path.h"
 #include "solver_reveal_order.h"
 #include "solver_search_scratch.h"
@@ -618,6 +619,44 @@ void test_flat_memo_table_contract() {
           "unlimited flat table did not double from MIN_CAPACITY");
 }
 
+void test_line_table_is_bounded() {
+  using csplendor::solver_internal::LineTable;
+  LineTable table;
+  table.set_max_slots(LineTable::MIN_SLOTS * 2);
+  require(table.find(1) == nullptr && table.capacity() == 0,
+          "line table did not start empty without allocating");
+  // Below the cap the table holds every entry (doubling at load 0.5).
+  const uint64_t below = LineTable::MIN_SLOTS / 2 + 10;
+  for (uint64_t key = 1; key <= below; ++key)
+    table.put(key * 0x9E3779B97F4A7C15ull, key);
+  require(table.capacity() == LineTable::MIN_SLOTS * 2 && table.size() == below,
+          "line table did not double below its cap");
+  for (uint64_t key = 1; key <= below; ++key) {
+    const auto *slot = table.find(key * 0x9E3779B97F4A7C15ull);
+    require(slot != nullptr && slot->code == key, "line table lost an entry below its cap");
+  }
+  table.put(0x9E3779B97F4A7C15ull, 777);
+  require(table.size() == below && table.find(0x9E3779B97F4A7C15ull)->code == 777,
+          "line table put did not update an existing key");
+  // At the cap it never grows: new keys overwrite, the newest is found.
+  for (uint64_t key = 1; key <= LineTable::MIN_SLOTS * 4; ++key) {
+    const uint64_t hashed = (key + 1'000'000) * 0xD6E8FEB86659FD93ull;
+    table.put(hashed, key);
+    const auto *slot = table.find(hashed);
+    require(slot != nullptr && slot->code == key, "line table lost the newest entry at its cap");
+  }
+  require(table.capacity() == LineTable::MIN_SLOTS * 2 &&
+              table.size() <= table.capacity(),
+          "line table grew past its cap");
+  table.clear();
+  require(table.size() == 0 && table.find(0x9E3779B97F4A7C15ull) == nullptr,
+          "line table clear left entries");
+  // Key 0 marks a free slot; it is stored as key 1.
+  table.put(0, 5);
+  require(table.find(1) != nullptr && table.find(1)->code == 5,
+          "line table did not map key 0 to key 1");
+}
+
 void test_recursive_path_lifo_guard() {
   using Path = RecursionPath<int, std::hash<int>>;
   Path path(4);
@@ -1187,6 +1226,7 @@ int main() {
     test_solver_tt_layout_and_value_contracts();
     test_solver_tt_full_key_collision_contract();
     test_flat_memo_table_contract();
+    test_line_table_is_bounded();
     test_recursive_path_lifo_guard();
     test_card_equivalence_classes_match_tuple_oracle();
     test_compact_forced_action_filter_order_and_caps();

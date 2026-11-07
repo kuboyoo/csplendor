@@ -6,6 +6,7 @@
 #include "rule_transition.h"
 #include "solver_action_filter.h"
 #include "solver_card_equivalence.h"
+#include "solver_line_table.h"
 #include "solver_path.h"
 #include "solver_reveal_order.h"
 #include "solver_search_scratch.h"
@@ -65,8 +66,7 @@ public:
         strict_preferred_attacker_prefix_(strict_preferred_attacker_prefix),
         exhaustive_attacker_actions_(exhaustive_attacker_actions),
         exact_reveal_search_(exact_reveal_search) {
-    memo_.set_entry_limit(max_memo_states_);
-    exact_memo_.set_entry_limit(max_memo_states_);
+    set_max_memo_states(max_memo_states_);
   }
 
   RevealVerifiedSearchResult solve(const Game &input) {
@@ -169,6 +169,9 @@ public:
     max_memo_states_ = limit;
     memo_.set_entry_limit(limit);
     exact_memo_.set_entry_limit(limit);
+    const size_t line_slots = limit ? limit : SIZE_MAX;
+    line_proofs_.set_max_slots(line_slots);
+    line_refutations_.set_max_slots(line_slots);
   }
   void set_no_take_probe(bool enabled) { no_take_probe_ = enabled; }
 
@@ -593,60 +596,8 @@ private:
   // as available to the defender as gold would be). Proofs found this way are
   // sound; a failure proves nothing.
   bool no_take_probe_ = false;
-  // Open-addressing tables (linear probing, power-of-two capacity): the
-  // lookup runs at every expanded node, so it must cost a few cache lines.
-  struct LineTable {
-    struct Slot { uint64_t key = 0; uint64_t code = 0; };
-    std::vector<Slot> slots;
-    size_t count = 0;
-    void clear() { slots.clear(); count = 0; }
-    static size_t index_of(uint64_t key, size_t mask) noexcept {
-      return static_cast<size_t>(key * 0x9E3779B97F4A7C15ull >> 20) & mask;
-    }
-    const Slot *find(uint64_t key) const noexcept {
-      if (slots.empty())
-        return nullptr;
-      const size_t mask = slots.size() - 1;
-      for (size_t i = index_of(key, mask);; i = (i + 1) & mask) {
-        const Slot &slot = slots[i];
-        if (slot.key == key)
-          return &slot;
-        if (slot.key == 0)
-          return nullptr;
-      }
-    }
-    void put(uint64_t key, uint64_t code) {
-      if (key == 0)
-        key = 1; // zero marks an empty slot
-      if (slots.empty())
-        slots.assign(1u << 16, Slot{});
-      else if ((count + 1) * 2 > slots.size())
-        grow();
-      const size_t mask = slots.size() - 1;
-      for (size_t i = index_of(key, mask);; i = (i + 1) & mask) {
-        Slot &slot = slots[i];
-        if (slot.key == key) {
-          slot.code = code;
-          return;
-        }
-        if (slot.key == 0) {
-          slot.key = key;
-          slot.code = code;
-          ++count;
-          return;
-        }
-      }
-    }
-    void grow() {
-      std::vector<Slot> old;
-      old.swap(slots);
-      slots.assign(old.size() * 2, Slot{});
-      count = 0;
-      for (const Slot &slot : old)
-        if (slot.key != 0)
-          put(slot.key, slot.code);
-    }
-  };
+  // Bounded (src/solver_line_table.h); the cap follows max_memo_states_.
+  using LineTable = csplendor::solver_internal::LineTable;
   LineTable line_proofs_;
   LineTable line_refutations_;
   struct ProbBounds { float lo = 0.0f; float hi = 1.0f; };
@@ -1142,7 +1093,7 @@ private:
     const OrderedAction *line = nullptr;
     if (line_transplant_) {
       const auto *slot =
-          line_refutations_.find(line_hash_ == 0 ? 1 : line_hash_);
+          line_refutations_.find(line_hash_);
       if (slot != nullptr)
         line = replies.find(slot->code);
       const bool already_first = iterative != nullptr
@@ -2293,7 +2244,7 @@ private:
     if (!line_transplant_ || actions.size() < 2)
       return;
     const auto &table = attacker_node ? line_proofs_ : line_refutations_;
-    const auto *slot = table.find(line_hash_ == 0 ? 1 : line_hash_);
+    const auto *slot = table.find(line_hash_);
     if (slot == nullptr)
       return;
     const uint64_t code = slot->code;

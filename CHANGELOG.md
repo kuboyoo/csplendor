@@ -1,5 +1,17 @@
 # 変更履歴 / Changelog
 
+## 未出荷：証明の移植の表に上限を付ける（2026-11-07）
+
+- 証明の移植の表（`line_proofs_` / `line_refutations_`）を `src/solver_line_table.h` の `LineTable` にし、上限を付けた。
+  容量は 65,536 スロットから倍々に伸び、`max(65536, bit_floor(max_memo_states))` スロット（200万件で 16 MB）で止まる。
+  探査は家から 8 スロットの窓に限り、上限では家のスロットを新しい項で上書きする（`doc/mate_usage.md` の「移植の表の上限」）。
+  順序付けだけなので判定・証明は変わらず、上限に届くまではノード数も同じ。
+- 計測: BENCH 深さ5 の 2,500万ノード（置換表 200万件）で RSS のピークの増分が 583 MB → 395 MB（69bd2fb は 527 MB）。
+
+English: bounds the proof-transplant tables (16-byte slots, capacity capped at
+bit_floor(max_memo_states), overwrite at the cap). Verdicts are unchanged; the
+BENCH depth-5 peak RSS increase drops from 583 MB to 395 MB.
+
 ## 未出荷：詰み探索に攻め側の2手の到達上界による反証（reach cut）を入れる（2026-11-07）
 
 - 最終ラウンドでない局面で攻め側の手番、残り2手、保留の決定なしの節点で、攻め側が自分の2手番で到達できる点の上界 U を
