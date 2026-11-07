@@ -1,59 +1,36 @@
 # ソルバー実行方法
 
-## DFPN詰みソルバー
+## 詰みソルバーの CLI
 
-改良版のDFPN詰みソルバーは `scripts/dfpn_mate_solver.py` で実行します。盤面入力は `scripts/mate_solver.py` と同じUSI準拠の指定を使います。
-
-```bash
-python scripts/dfpn_mate_solver.py --position "position startpos 2" --attacker 0 --max-depth 2 --pretty
-```
-
-SPNを直接渡す場合も `position` コマンドとして指定できます。
+`scripts/dfpn_mate_solver.py` は、任意局面から攻め側（`--attacker`）の強制勝利を、全ての守り側の応手・場の補充の
+めくれ・山札予約の全カードについて検証して探します（めくれ検証、`solve_reveal_verified_mate`）。探索本体は C++ の
+`solve_reveal_verified_mate_cpp` です（[詰み探索ガイド](mate_usage.md)）。公開カードだけで最短の候補手順を探し、その
+prefix を固定して厳密に検証し、証明できなければ固定を緩めます。探索上限に達した場合は `Mate` / `NoMate` と誤確定
+せず `Unknown` を返します。盤面入力は `scripts/mate_solver.py` と同じ USI 準拠の指定を使います。
 
 ```bash
 python scripts/dfpn_mate_solver.py \
-  --position "position bank:W4U4G4R4K4D5 | visible:L1[0,1,2,3]L2[40,41,42,43]L3[70,71,72,73] | decks:36,26,16 | nobles:[0,1,2] | P0:gems:W0U0G0R0K0D0;bonuses:W0U0G0R0K0;points:0;reserved:[];bought:[] | P1:gems:W0U0G0R0K0D0;bonuses:W0U0G0R0K0;points:0;reserved:[];bought:[] | 0" \
+  --position-file position.txt \
   --attacker 0 \
-  --max-depth 2 \
+  --node-limit 700000 \
+  --time-limit 10 \
   --pretty
 ```
 
-USIの `moves` 付き入力も受け付けます。
-
-```bash
-python scripts/dfpn_mate_solver.py \
-  --position "position startpos 2 moves take:WUG reserve:C12" \
-  --attacker 0 \
-  --max-depth 3
-```
-
-局面をファイルから読む場合は `--position-file` を使います。ファイルには `position ...` 形式、またはSPN本文を記述します。
-
-```bash
-python scripts/dfpn_mate_solver.py --position-file position.txt --attacker 0 --max-depth 3 --pretty
-```
-
-追加のUSI着手をコマンドラインで適用する場合は `--moves` を使います。カンマ区切り、または複数回指定できます。
-
-```bash
-python scripts/dfpn_mate_solver.py \
-  --position "position startpos 2" \
-  --moves "take:WUG,reserve:C12" \
-  --moves "buy:C12/pay:W0U0G0R0K0D0" \
-  --attacker 0 \
-  --max-depth 3
-```
+SPN を直接渡す場合も `--position` に `position ...` 形式で指定でき、`position ... moves ...` や `--moves`
+（カンマ区切り、または複数回指定）で USI 着手を適用してから探索します。
 
 主なオプションは次の通りです。
 
 - `--attacker 0|1`: 詰みを証明する側のプレイヤー。
-- `--max-depth N`: 攻撃側手番を何手先まで読むか。
-- `--node-limit N`: 探索ノード上限。
-- `--time-limit SEC`: 探索時間上限。
-- `--allow-deck-reserve`: 山札予約手も合法手候補に含める。
-- `--no-memo`: 置換表を使わない。
-- `--no-proof`: 証明木・反証木を出力しない。
-- `--pretty`: JSONを整形して出力する。
+- `--node-limit N` / `--time-limit SEC`: 探索ノード・時間の上限（0 は上限なし）。
+- `--visible-only-winner`: めくれを無視した公開カードだけのゲームを解く（詰みの証明ではない）。
+- `--reveal-proof-dag`: 証明 DAG を出力する（`--proof-dag-format compact|v1|both`、`--proof-dag-node-limit`、`--proof-dag-edge-limit`）。
+- `--kifu-output mate.kifu`: 検証済みの主手順を Splendor KIFU（めくれは `reveal:C<id>` 注釈）で保存する。
+- `--simple-payment`: 購入の支払いを金温存の 1 通りに限る（完全な検証では指定しない）。
+- `--allow-deck-reserve`、`--no-memo`: 公開カードだけの候補探索の設定。
+- `--no-proof`: 主手順・証明を出力しない。
+- `--pretty`: JSON を整形して出力する。
 
 予約（場札・山札）で11枚になった場合のトークン返却（`RETURN_GEM`）は予約手の一部として扱い、
 詰み深さを消費しません。ネイティブのreveal-verified・visible-only solver、
@@ -63,30 +40,11 @@ python scripts/dfpn_mate_solver.py \
 `reserve:L2/return:W`・`reserve:C10/return:U` も2手（例: `reserve:L2`、`return:W`）に展開して受け付けます。
 
 終了コードは、`Mate` / `NoMate` の確定時が `0`、入力エラーが `1`、上限到達などで `Unknown` の場合が `2` です。
+出力はJSONです。`status` には `Mate`、`NoMate`、`Unknown`、`InvalidInput` のいずれかが入ります。
 
-出力はJSONです。`status` には `Mate`、`NoMate`、`Unknown`、`InvalidInput` のいずれかが入ります。`stats.root_proof_number` と `stats.root_disproof_number` でルート局面の証明数・反証数を確認できます。
-
-## 5手以上の検証
-
-山札のめくれを含む5手以上の詰みは、候補探索と全めくれ検証を分ける
-`--reveal-verified` を推奨します。候補手順を得た後、全防御手、場の補充、
-山札予約の全カードを検証し、探索上限に達した場合は `Mate` / `NoMate` と
-誤確定せず `Unknown` を返します。
-
-```bash
-python scripts/dfpn_mate_solver.py \
-  --position-file position.txt \
-  --attacker 0 \
-  --reveal-verified \
-  --node-limit 700000 \
-  --time-limit 10 \
-  --pretty
-```
-
-通常のPython DFPNでも、枝刈り候補は未展開子として保持されます。ANDノードの
-証明とORノードの反証では、未展開の合法手・めくれをすべて具体化してからのみ
-確定します。脅威評価、依存関係、返却パターンは探索順序と遅延生成にだけ使われ、
-異なる次局面を同一視しません。
+証明数・反証数で展開先を選ぶ探索（df-pn）は C++ の `solve_reveal_verified_mate_cpp(algorithm="dfpn")` と
+`search_reveal_verified_mate_depths(algorithm="dfpn")` で選べます（[設計](mate_dfpn_cpp_design.md)）。Python 版の
+df-pn（`DFPNMateSolver`、`--max-depth` で動く旧来の既定モード、`--kifu-dfpn`）は 2026-11-07 に削除しました。
 
 ## 証明応手の遅延展開
 
@@ -112,7 +70,6 @@ SPNだけでは `waiting_noble`、`final_round`、`winner` を保持できない
 python scripts/dfpn_mate_solver.py \
   --position-file position.txt \
   --attacker 1 \
-  --reveal-verified \
   --reveal-depth-range 5 8 \
   --required-root-action take:WUG \
   --node-limit 10000000 \
@@ -131,7 +88,7 @@ python scripts/dfpn_mate_solver.py \
 
 ## CPU並列と実戦AIモード
 
-`--jobs N` は通常DFPNに加えて、山札込み探索のルート着手、具体的めくれ、必要に
+`--jobs N` は、山札込み探索のルート着手、具体的めくれ、必要に
 応じて次の応手層をCPU並列化します。正証明モードでは従来のblank/oracle探索も
 1ワーカーで併走し、最初に詰みを証明した探索を採用して残りを協調停止します。
 
@@ -139,7 +96,6 @@ python scripts/dfpn_mate_solver.py \
 python scripts/dfpn_mate_solver.py \
   --position-file position.txt \
   --attacker 1 \
-  --reveal-verified \
   --reveal-depth-range 3 8 \
   --reveal-anytime \
   --jobs 16 \

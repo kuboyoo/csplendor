@@ -1,4 +1,4 @@
-"""Pure strategy-DAG codecs and KIFU serialization for the DFPN solver."""
+"""Pure strategy-DAG codecs and principal-line KIFU serialization of the mate solver."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from csplendor.api.usi_kifu import (
     game_to_spn,
     now_iso,
 )
-
 
 MATE_KIFU_REVEAL_COMMENT_PREFIX = "reveal:C"
 _CARD_MASK_BYTES = 12
@@ -417,56 +416,6 @@ def strategy_dag_max_children(
     )
 
 
-def _default_card_level(card_id: int) -> int:
-    return int(cs.get_card(int(card_id)).level)
-
-
-def proof_tree_to_kifu_text(
-    game: cs.Game,
-    proof_tree: Dict[str, Any],
-    *,
-    attacker: int,
-    _now_iso: Optional[Callable[[], str]] = None,
-    _card_level: Optional[Callable[[int], int]] = None,
-) -> str:
-    """Serialize one replayable principal line from a DFPN proof tree."""
-    moves: List[Dict[str, object]] = []
-
-    def walk(node: Any) -> None:
-        if not isinstance(node, dict):
-            return
-
-        if node.get("kind") in {"action", "noble"}:
-            action = node.get("action")
-            usi = action.get("usi") if isinstance(action, dict) else None
-            if usi:
-                moves.append(
-                    {
-                        "player": int(node.get("current_player", 0)),
-                        "usi": str(usi),
-                    }
-                )
-
-        reveal_card = node.get("reveal_card")
-        if reveal_card is not None and moves:
-            moves[-1]["comment"] = (
-                f"{MATE_KIFU_REVEAL_COMMENT_PREFIX}{int(reveal_card)}"
-            )
-
-        children = node.get("children")
-        if isinstance(children, list) and children:
-            walk(children[0])
-
-    walk(proof_tree)
-    return _build_mate_kifu_text(
-        game,
-        moves,
-        attacker=attacker,
-        _now_iso=_now_iso,
-        _card_level=_card_level,
-    )
-
-
 def principal_line_to_kifu_text(
     game: cs.Game,
     line: Sequence[Dict[str, Any]],
@@ -474,7 +423,6 @@ def principal_line_to_kifu_text(
     attacker: int,
     reveal_hidden_reserved_ids: bool = False,
     _now_iso: Optional[Callable[[], str]] = None,
-    _card_level: Optional[Callable[[int], int]] = None,
 ) -> str:
     """Serialize a solver principal-line array as replayable KIFU."""
     moves = []
@@ -498,7 +446,6 @@ def principal_line_to_kifu_text(
         attacker=attacker,
         reveal_hidden_reserved_ids=reveal_hidden_reserved_ids,
         _now_iso=_now_iso,
-        _card_level=_card_level,
     )
 
 
@@ -509,13 +456,8 @@ def _build_mate_kifu_text(
     attacker: int,
     reveal_hidden_reserved_ids: bool = False,
     _now_iso: Optional[Callable[[], str]] = None,
-    _card_level: Optional[Callable[[int], int]] = None,
 ) -> str:
-    replay_moves = _with_implicit_noble_visits(
-        game,
-        moves,
-        _card_level=_card_level,
-    )
+    replay_moves = _with_implicit_noble_visits(game, moves)
     timestamp = (_now_iso or now_iso)()
     return build_kifu_text(
         headers={
@@ -541,8 +483,6 @@ def _build_mate_kifu_text(
 def _with_implicit_noble_visits(
     root_game: cs.Game,
     moves: Sequence[Dict[str, object]],
-    *,
-    _card_level: Optional[Callable[[int], int]] = None,
 ) -> List[Dict[str, object]]:
     """Add KIFU rows for noble visits that the engine applies automatically."""
     game = root_game.clone()
@@ -560,12 +500,7 @@ def _with_implicit_noble_visits(
         if action_index < 0:
             raise ValueError(f"no legal action matches KIFU move: {usi}")
         action = game.legal_actions[action_index]
-        _set_reveal_card_for_kifu_move(
-            game,
-            action,
-            replay_move.get("comment"),
-            _card_level=_card_level,
-        )
+        _set_reveal_card_for_kifu_move(game, action, replay_move.get("comment"))
 
         before_nobles = {
             int(noble_id)
@@ -598,8 +533,6 @@ def _set_reveal_card_for_kifu_move(
     game: cs.Game,
     action: cs.Action,
     comment: object,
-    *,
-    _card_level: Optional[Callable[[int], int]] = None,
 ) -> None:
     if not isinstance(comment, str) or not comment.startswith(
         MATE_KIFU_REVEAL_COMMENT_PREFIX
@@ -612,8 +545,7 @@ def _set_reveal_card_for_kifu_move(
         int(cs.ActionType.PURCHASE),
         int(cs.ActionType.RESERVE_VISIBLE),
     ):
-        card_level = _card_level or _default_card_level
-        level = int(card_level(int(action.card_id))) - 1
+        level = int(cs.get_card(int(action.card_id)).level) - 1
     else:
         return
     decks = [
@@ -627,27 +559,6 @@ def _set_reveal_card_for_kifu_move(
     game.board.decks = decks
 
 
-def write_mate_kifu(
-    path: str,
-    game: cs.Game,
-    proof_tree: Dict[str, Any],
-    *,
-    attacker: int,
-    _now_iso: Optional[Callable[[], str]] = None,
-    _card_level: Optional[Callable[[int], int]] = None,
-) -> None:
-    Path(path).write_text(
-        proof_tree_to_kifu_text(
-            game,
-            proof_tree,
-            attacker=attacker,
-            _now_iso=_now_iso,
-            _card_level=_card_level,
-        ),
-        encoding="utf-8",
-    )
-
-
 def write_principal_line_kifu(
     path: str,
     game: cs.Game,
@@ -655,7 +566,6 @@ def write_principal_line_kifu(
     *,
     attacker: int,
     _now_iso: Optional[Callable[[], str]] = None,
-    _card_level: Optional[Callable[[int], int]] = None,
 ) -> None:
     Path(path).write_text(
         principal_line_to_kifu_text(
@@ -663,7 +573,6 @@ def write_principal_line_kifu(
             line,
             attacker=attacker,
             _now_iso=_now_iso,
-            _card_level=_card_level,
         ),
         encoding="utf-8",
     )

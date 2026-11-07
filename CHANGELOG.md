@@ -1,5 +1,29 @@
 # 変更履歴 / Changelog
 
+## 未出荷：C++ 版 df-pn 詰み探索を併設し、Python 版 df-pn を削除する（2026-11-07）
+
+- `solve_reveal_verified_mate_cpp(algorithm="dfpn", dfpn_table_bytes=...)` と
+  `search_reveal_verified_mate_depths(algorithm="dfpn")` で、DFS と同じ AND/OR グラフ（手の生成・順序、めくれ、深さ、
+  各カット）を証明数・反証数で展開する df-pn を選べる（`src/dfpn_mate_solver.h`、`doc/mate_dfpn_cpp_design.md`）。
+  既定は `"dfs"` のまま。決着した節点は DFS と同じ表と項に入るので、主手順・証明 DAG は DFS のコードで作られる。
+  未決着の値は容量固定の df-pn 表（バイト数の予算、既定 128 MiB、work 最小を置換）に置く。統計に
+  `dfpn_expansions`・`dfpn_table_stores`・`dfpn_table_replacements`・`dfpn_table_bytes` を足した（DFS では 0）。
+- 計測（1 スレッド）: ランダム終盤 4,016 ケース（3 系統の seeds × 攻め側 2 × exact/blank × 深さ 1〜4）で DFS と判定の
+  食い違い 0・未決 0。速さは DFS の 0.7〜0.9 倍（詰みのある局面の深さ4 で exact 0.87、blank 0.72）で、既定は変えない。
+- Python 版 df-pn（`scripts/dfpn_mate_solver.py` の `DFPNMateSolver`、並列 root worker、`solve_game_dfpn`、
+  `scripts/dfpn_table.py`・`scripts/dfpn_proof.py`、`DFPNStats`、DFPN 証明木の KIFU 化 `proof_tree_to_kifu_text` /
+  `write_mate_kifu`）と、CLI の DFPN モード（`--max-depth` と枝刈りオプション、`--kifu-dfpn`、`--progress`）を削除した。
+  CLI は常にめくれ検証（旧 `--reveal-verified`、フラグは削除）か `--visible-only-winner` で動く。
+  `dfpn_mate_solver.py --kifu-output mate.kifu` の KIFU と `generate_mate_puzzles.py` の `strategy.json` は削除前と
+  同一の出力（日時を除く）。重複していた古いルートの `SOLVER.md` を削除し、`doc/SOLVER.md` を現行の CLI に合わせた。
+  `scripts/benchmark_solvers.py` の Python DFPN の負荷は C++ の df-pn（`native_dfpn`）に置き換えた。
+
+English: adds a C++ df-pn mode (`algorithm="dfpn"`) to the reveal-verified
+mate search; verdicts match the depth-first search on 4,016 random endgame
+cases, but it is 10-30% slower, so the default stays `"dfs"`. The Python
+DFPN solver and the CLI's DFPN mode are removed; `--kifu-output` and puzzle
+`strategy.json` outputs are unchanged.
+
 ## 未出荷：探索の表の上限を端末の空きメモリから決める（2026-11-07）
 
 - 詰み探索・準詰み・visible-only の表の上限 `max_memo_states` の既定を 0（自動）にした。探索の開始時に1回だけ、空きメモリ

@@ -7,9 +7,7 @@ import json
 
 import csplendor as cs
 from scripts import dfpn_mate_solver
-from scripts.dfpn_proof import extract_tree, selected_children
-from scripts.dfpn_table import DFPNTranspositionTable
-from scripts.dfpn_types import DFPNStats, RevealVerifiedStats, _DFPNNode
+from scripts.dfpn_types import RevealVerifiedStats
 from scripts.generate_mate_puzzles import (
     PuzzlePlayer,
     generate_candidate_position,
@@ -108,8 +106,10 @@ def test_reveal_solver_proof_dag_and_action_order_golden():
     # 472f243c...7fe50f.
     # 2026-11-07 (攻め側の2手の到達上界による反証) added reach_cut_refutations
     # (0 here); otherwise unchanged from cc1273eb...0936e54c.
+    # 2026-11-07 (C++ 版 df-pn) added the dfpn_* counters (0 for the default
+    # DFS); otherwise unchanged from e3a9874a...006d4a3b.
     assert _digest_without_elapsed(result) == (
-        "e3a9874ae59794cee36f87adf0430f634520610d2c52d576dd8588b4006d4a3b"
+        "88ecb241f04cc4de14ae47ba27c115ffac900ee1ca020fd5ecffcd8d497ba52e"
     )
 
 
@@ -135,26 +135,8 @@ def test_solver_node_and_time_limit_boundaries_remain_distinct():
     )
 
 
-def test_dfpn_types_table_and_proof_components_keep_legacy_surface():
-    assert dfpn_mate_solver.DFPNStats is DFPNStats
+def test_reveal_verified_types_are_shared_with_the_driver():
     assert dfpn_mate_solver.RevealVerifiedStats is RevealVerifiedStats
-
-    leaf = _DFPNNode("leaf", "OR", 0, proof=0, disproof=10)
-    other = _DFPNNode("other", "OR", 0, proof=2, disproof=0)
-    root = _DFPNNode("root", "OR", 1, children=[leaf, other])
-    assert selected_children(root, want_proof=True) == [leaf]
-    assert extract_tree(
-        root,
-        want_proof=True,
-        summarize=lambda node: {"kind": node.kind},
-    ) == {"kind": "root", "children": [{"kind": "leaf"}]}
-
-    table: DFPNTranspositionTable[_DFPNNode] = DFPNTranspositionTable()
-    table[("state", 1)] = root
-    assert len(table) == 1
-    assert table[("state", 1)] is root
-    table.clear()
-    assert len(table) == 0
 
 
 def test_puzzle_legacy_paths_forward_to_split_components():

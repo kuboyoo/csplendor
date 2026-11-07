@@ -1,4 +1,4 @@
-"""DFPN output and CLI module compatibility contracts."""
+"""Mate solver output and CLI module contracts."""
 
 from __future__ import annotations
 
@@ -126,69 +126,44 @@ def test_legacy_kifu_export_and_now_iso_monkeypatch_keep_digest(monkeypatch):
     assert direct_text == text
 
 
-def test_legacy_cli_keeps_stdout_stderr_and_exit_code(capsys):
-    code = legacy.main(["--reveal-proof-dag"])
+_INVALID_ARGS = ["--visible-only-winner", "--reveal-proof-dag"]
+
+
+def test_cli_reports_invalid_input_as_json(capsys):
+    code = legacy.main(_INVALID_ARGS)
     captured = capsys.readouterr()
 
     assert code == 1
     assert captured.err == ""
-    assert len(captured.out.encode("utf-8")) == 303
-    assert _sha256(captured.out) == (
-        "0f010951541edf05e0deb1f13b31c2388429de4b038734eb9aa834c7155e9c98"
-    )
+    payload = json.loads(captured.out)
+    assert payload["status"] == "InvalidInput"
+    assert "--visible-only-winner" in payload["refutation"]["error"]
 
-    direct_code = dfpn_cli.main(["--reveal-proof-dag"], api=legacy)
+    direct_code = dfpn_cli.main(_INVALID_ARGS, api=legacy)
     direct = capsys.readouterr()
     assert direct_code == code
     assert direct == captured
 
 
-def test_legacy_script_entry_point_keeps_cli_contract():
+def test_script_entry_points_share_the_cli():
     completed = subprocess.run(
-        [
-            sys.executable,
-            str(REPO_ROOT / "scripts" / "dfpn_mate_solver.py"),
-            "--reveal-proof-dag",
-        ],
+        [sys.executable, str(REPO_ROOT / "scripts" / "dfpn_mate_solver.py"),
+         *_INVALID_ARGS],
         cwd=REPO_ROOT,
         text=True,
         capture_output=True,
         check=False,
     )
-
     assert completed.returncode == 1
     assert completed.stderr == ""
-    assert _sha256(completed.stdout) == (
-        "0f010951541edf05e0deb1f13b31c2388429de4b038734eb9aa834c7155e9c98"
-    )
 
-    module_entry = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "scripts.dfpn_cli",
-            "--reveal-proof-dag",
-        ],
-        cwd=REPO_ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert module_entry.returncode == completed.returncode
-    assert module_entry.stdout == completed.stdout
-    assert module_entry.stderr == completed.stderr
-
-    direct_entry = subprocess.run(
-        [
-            sys.executable,
-            str(REPO_ROOT / "scripts" / "dfpn_cli.py"),
-            "--reveal-proof-dag",
-        ],
-        cwd=REPO_ROOT.parent,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert direct_entry.returncode == completed.returncode
-    assert direct_entry.stdout == completed.stdout
-    assert direct_entry.stderr == completed.stderr
+    for command, cwd in (
+        ([sys.executable, "-m", "scripts.dfpn_cli", *_INVALID_ARGS], REPO_ROOT),
+        ([sys.executable, str(REPO_ROOT / "scripts" / "dfpn_cli.py"),
+          *_INVALID_ARGS], REPO_ROOT.parent),
+    ):
+        entry = subprocess.run(
+            command, cwd=cwd, text=True, capture_output=True, check=False)
+        assert entry.returncode == completed.returncode
+        assert entry.stdout == completed.stdout
+        assert entry.stderr == completed.stderr

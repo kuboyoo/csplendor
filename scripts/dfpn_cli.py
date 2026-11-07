@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Command-line orchestration for ``scripts.dfpn_mate_solver``."""
+"""Command line of ``scripts.dfpn_mate_solver`` (reveal-verified mate search)."""
 
 from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Any, Optional, Sequence
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -20,7 +19,7 @@ def main(
     *,
     api: Optional[Any] = None,
 ) -> int:
-    """Run the DFPN CLI against an injected legacy API namespace."""
+    """Run the CLI against an injected API namespace (scripts.dfpn_mate_solver)."""
     if api is None:
         from scripts import dfpn_mate_solver as api
 
@@ -33,20 +32,19 @@ def main(
     SolverOptions = api.SolverOptions
     solve_visible_only_winner = api.solve_visible_only_winner
     solve_reveal_verified_mate = api.solve_reveal_verified_mate
-    solve_game_dfpn = api.solve_game_dfpn
     write_principal_line_kifu = api.write_principal_line_kifu
-    write_mate_kifu = api.write_mate_kifu
     SearchResult = api.SearchResult
     SearchStats = api.SearchStats
-    _DFPN_DEFAULT_PRUNING = api._DFPN_DEFAULT_PRUNING
     INVALID_INPUT = api.INVALID_INPUT
     MATE = api.MATE
-    NO_MATE = api.NO_MATE
     PLAYER0_WIN = api.PLAYER0_WIN
     PLAYER1_WIN = api.PLAYER1_WIN
     DRAW = api.DRAW
     parser = argparse.ArgumentParser(
-        description="Search guaranteed Splendor mate with depth-first proof-number search."
+        description=(
+            "Search a guaranteed Splendor mate verified over every defender reply "
+            "and hidden reveal (native solver; doc/mate_usage.md)."
+        )
     )
     state_group = parser.add_mutually_exclusive_group()
     state_group.add_argument("--state-json", help="JSON file describing an arbitrary state")
@@ -55,7 +53,6 @@ def main(
     parser.add_argument("--seed", type=int, default=0, help="initial game seed when state-json is omitted")
     parser.add_argument("--moves", action="append", default=[], help="USI move list, comma-separated or repeated")
     parser.add_argument("--attacker", type=int, default=0, choices=(0, 1))
-    parser.add_argument("--max-depth", type=int, default=4, help="attacker turn depth for DFPN; ignored by --visible-only-winner and --reveal-verified")
     parser.add_argument("--node-limit", type=int)
     parser.add_argument("--time-limit", type=float, default=10.0)
     parser.add_argument(
@@ -71,17 +68,12 @@ def main(
         help="ignore hidden deck reveals and solve the visible-card game with full-response minimax; not a mate proof",
     )
     parser.add_argument(
-        "--reveal-verified",
-        action="store_true",
-        help="find a visible-only candidate mate, then verify all defender responses and hidden reveal shapes",
-    )
-    parser.add_argument(
         "--reveal-depth-range",
         nargs=2,
         type=int,
         metavar=("MIN", "MAX"),
         help=(
-            "with --reveal-verified, test every attacker depth from MIN through MAX; "
+            "test every attacker depth from MIN through MAX; "
             "stop on mate, unknown, or MAX"
         ),
     )
@@ -100,7 +92,7 @@ def main(
     parser.add_argument(
         "--reveal-proof-dag",
         action="store_true",
-        help="with --reveal-verified, emit the proven strategy DAG after search",
+        help="emit the proven strategy DAG after search",
     )
     parser.add_argument(
         "--proof-dag-node-limit",
@@ -125,101 +117,27 @@ def main(
         type=int,
         default=1,
         help=(
-            "parallel workers for DFPN or exact reveal root branches; "
+            "parallel workers for exact reveal root branches; "
             "0 uses CPU count"
         ),
     )
     parser.add_argument("--allow-deck-reserve", action="store_true")
-    parser.add_argument(
-        "--no-threat-reveal-pruning",
-        action="store_true",
-        help="disable counterexample-first reveal ordering",
-    )
-    parser.add_argument(
-        "--no-lazy-reveal-pruning",
-        action="store_true",
-        help="disable one-at-a-time concrete reveal generation",
-    )
-    parser.add_argument(
-        "--no-attacker-dependency-pruning",
-        action="store_true",
-        help="disable lazy deferral of attacker moves outside the score dependency cone",
-    )
-    parser.add_argument(
-        "--no-defender-relevance-pruning",
-        action="store_true",
-        help="disable lazy deferral of defender moves that do not affect the attacker's race plan",
-    )
-    parser.add_argument(
-        "--no-equivalence-hash",
-        action="store_true",
-        help="disable slot-order-independent exact canonicalization",
-    )
-    parser.add_argument(
-        "--no-return-pattern-pruning",
-        action="store_true",
-        help="disable exact merging of take actions with identical net token deltas",
-    )
-    parser.add_argument(
-        "--no-upper-bound-pruning",
-        action="store_true",
-        help="Disable pruning by the attacker's optimistic score upper bound.",
-    )
-    parser.add_argument(
-        "--no-immediate-terminal-pruning",
-        action="store_true",
-        help="Disable immediate win/defense terminal checks before expanding children.",
-    )
-    parser.add_argument(
-        "--defender-threat-filter",
-        action="store_true",
-        help="expand immediate-threat replies first and defer other defender replies",
-    )
-    parser.add_argument(
-        "--max-actions-per-node",
-        type=int,
-        default=0,
-        help="initial eager action batch size; remaining legal moves are deferred; 0 means all",
-    )
-    parser.add_argument(
-        "--target-candidate-limit",
-        type=int,
-        default=int(_DFPN_DEFAULT_PRUNING["target_candidate_limit"]),
-        help="limit scored target cards used for ordering and dependency deferral; 0 means all",
-    )
-    parser.add_argument(
-        "--parallel-tt-limit",
-        type=int,
-        default=10000,
-        help="max transposition-table entries per parallel worker; 0 disables worker memo",
-    )
-    parser.add_argument(
-        "--parallel-start-method",
-        choices=("spawn", "fork", "forkserver"),
-        default="spawn",
-        help="multiprocessing start method for parallel DFPN workers",
-    )
-    parser.add_argument("--progress", action="store_true", help="print periodic progress to stderr")
-    parser.add_argument("--progress-interval", type=float, default=1.0, help="progress output interval in seconds")
     parser.add_argument("--no-memo", action="store_true")
     parser.add_argument("--no-proof", action="store_true")
     parser.add_argument(
         "--kifu-output",
         help="write one replayable principal line from a mate proof as Splendor KIFU",
     )
-    parser.add_argument(
-        "--kifu-dfpn",
-        action="store_true",
-        help="with --kifu-output, use the regular depth-limited DFPN proof instead of reveal-verified mate",
-    )
     parser.add_argument("--pretty", action="store_true")
     args = parser.parse_args(argv)
 
     try:
-        if args.reveal_proof_dag and not args.reveal_verified:
-            raise ValueError("--reveal-proof-dag requires --reveal-verified")
-        if args.reveal_depth_range and not args.reveal_verified:
-            raise ValueError("--reveal-depth-range requires --reveal-verified")
+        if args.visible_only_winner and (
+            args.reveal_proof_dag or args.reveal_depth_range or args.kifu_output
+        ):
+            raise ValueError(
+                "--visible-only-winner cannot be combined with mate proof options"
+            )
         if args.required_root_action and not args.reveal_depth_range:
             raise ValueError("--required-root-action requires --reveal-depth-range")
         if args.reveal_anytime and not args.reveal_depth_range:
@@ -232,12 +150,6 @@ def main(
             raise ValueError("--reveal-proof-dag cannot be combined with --no-proof")
         if args.kifu_output and args.no_proof:
             raise ValueError("--kifu-output cannot be combined with --no-proof")
-        if args.kifu_dfpn and not args.kifu_output:
-            raise ValueError("--kifu-dfpn requires --kifu-output")
-        if args.kifu_dfpn and args.reveal_verified:
-            raise ValueError("--kifu-dfpn cannot be combined with --reveal-verified")
-        if args.kifu_output and not args.kifu_dfpn:
-            args.reveal_verified = True
         if args.state_json:
             game = load_game_from_json(args.state_json)
         elif args.position:
@@ -249,9 +161,8 @@ def main(
         if args.simple_payment:
             game.simple_payment_mode = True
         apply_usi_moves(game, _parse_moves(args.moves))
-        default_node_limit = 0 if args.visible_only_winner or args.reveal_verified else 200000
         options = SolverOptions(
-            max_nodes=default_node_limit if args.node_limit is None else args.node_limit,
+            max_nodes=0 if args.node_limit is None else args.node_limit,
             time_limit=args.time_limit,
             include_proof=not args.no_proof,
             allow_deck_reserve=args.allow_deck_reserve,
@@ -262,103 +173,75 @@ def main(
             result = solve_visible_only_winner(game, options=options)
             print(json.dumps(result.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
             return 0 if result.status in (PLAYER0_WIN, PLAYER1_WIN, DRAW) else 2
-        if args.reveal_verified:
-            if args.reveal_depth_range:
-                from csplendor.api.usi_kifu import find_legal_action_index_by_usi
+        if args.reveal_depth_range:
+            from csplendor.api.usi_kifu import find_legal_action_index_by_usi
 
-                min_depth, max_depth = (int(value) for value in args.reveal_depth_range)
-                required_action = None
-                if args.required_root_action:
-                    action_index = find_legal_action_index_by_usi(
-                        game, args.required_root_action
-                    )
-                    required_action = int(game.legal_actions[action_index].pack())
-                search_function = (
-                    cs.search_reveal_verified_mate_anytime
-                    if args.reveal_anytime
-                    else cs.search_reveal_verified_mate_depths
+            min_depth, max_depth = (int(value) for value in args.reveal_depth_range)
+            required_action = None
+            if args.required_root_action:
+                action_index = find_legal_action_index_by_usi(
+                    game, args.required_root_action
                 )
-                depth_search = search_function(
-                    game,
-                    attacker=args.attacker,
-                    min_depth=min_depth,
-                    max_depth=max_depth,
-                    max_nodes=options.max_nodes,
-                    time_limit_seconds=options.time_limit,
-                    required_root_action=required_action,
-                    jobs=args.jobs,
-                    **(
-                        {}
-                        if args.reveal_anytime
-                        else {
-                            "include_proof_dag": args.reveal_proof_dag,
-                            "proof_dag_node_limit": args.proof_dag_node_limit,
-                            "proof_dag_edge_limit": args.proof_dag_edge_limit,
-                            "proof_dag_format": (
-                                "compact"
-                                if args.proof_dag_format == "both"
-                                else args.proof_dag_format
-                            ),
-                        }
-                    ),
-                )
-                print(
-                    json.dumps(
-                        depth_search,
-                        indent=2 if args.pretty else None,
-                        sort_keys=True,
-                    )
-                )
-                return 0 if depth_search["status"] in {
-                    "mate",
-                    "no_mate_within_max_depth",
-                    "permanent_no_mate",
-                } else 2
-            result = solve_reveal_verified_mate(
+                required_action = int(game.legal_actions[action_index].pack())
+            search_function = (
+                cs.search_reveal_verified_mate_anytime
+                if args.reveal_anytime
+                else cs.search_reveal_verified_mate_depths
+            )
+            depth_search = search_function(
                 game,
                 attacker=args.attacker,
-                options=options,
-                include_proof_dag=args.reveal_proof_dag,
-                proof_dag_node_limit=args.proof_dag_node_limit,
-                proof_dag_edge_limit=args.proof_dag_edge_limit,
-                proof_dag_format=args.proof_dag_format,
+                min_depth=min_depth,
+                max_depth=max_depth,
+                max_nodes=options.max_nodes,
+                time_limit_seconds=options.time_limit,
+                required_root_action=required_action,
+                jobs=args.jobs,
+                **(
+                    {}
+                    if args.reveal_anytime
+                    else {
+                        "include_proof_dag": args.reveal_proof_dag,
+                        "proof_dag_node_limit": args.proof_dag_node_limit,
+                        "proof_dag_edge_limit": args.proof_dag_edge_limit,
+                        "proof_dag_format": (
+                            "compact"
+                            if args.proof_dag_format == "both"
+                            else args.proof_dag_format
+                        ),
+                    }
+                ),
             )
-            if args.kifu_output:
-                if result.status != MATE or result.proof_tree is None:
-                    raise ValueError("--kifu-output requires a mate proof")
-                line = result.proof_tree.get("line")
-                if not isinstance(line, list):
-                    raise ValueError("--kifu-output is not supported for this reveal-verified proof")
-                write_principal_line_kifu(args.kifu_output, game, line, attacker=args.attacker)
-            print(json.dumps(result.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
-            return 0 if result.status == MATE else 2
-        result = solve_game_dfpn(
+            print(
+                json.dumps(
+                    depth_search,
+                    indent=2 if args.pretty else None,
+                    sort_keys=True,
+                )
+            )
+            return 0 if depth_search["status"] in {
+                "mate",
+                "no_mate_within_max_depth",
+                "permanent_no_mate",
+            } else 2
+        result = solve_reveal_verified_mate(
             game,
             attacker=args.attacker,
-            max_depth=args.max_depth,
             options=options,
-            use_lazy_reveal_pruning=not args.no_lazy_reveal_pruning,
-            use_attacker_dependency_pruning=not args.no_attacker_dependency_pruning,
-            use_defender_relevance_pruning=not args.no_defender_relevance_pruning,
-            use_threat_reveal_pruning=not args.no_threat_reveal_pruning,
-            use_equivalence_hash=not args.no_equivalence_hash,
-            use_return_pattern_pruning=not args.no_return_pattern_pruning,
-            use_upper_bound_pruning=not args.no_upper_bound_pruning,
-            use_immediate_terminal_pruning=not args.no_immediate_terminal_pruning,
-            use_defender_threat_filter=args.defender_threat_filter,
-            max_actions_per_node=max(0, int(args.max_actions_per_node)),
-            target_candidate_limit=max(0, int(args.target_candidate_limit)),
-            parallel_tt_limit=args.parallel_tt_limit,
-            show_progress=args.progress,
-            progress_interval=args.progress_interval,
-            parallel_start_method=args.parallel_start_method,
+            include_proof_dag=args.reveal_proof_dag,
+            proof_dag_node_limit=args.proof_dag_node_limit,
+            proof_dag_edge_limit=args.proof_dag_edge_limit,
+            proof_dag_format=args.proof_dag_format,
         )
         if args.kifu_output:
             if result.status != MATE or result.proof_tree is None:
                 raise ValueError("--kifu-output requires a mate proof")
-            write_mate_kifu(args.kifu_output, game, result.proof_tree, attacker=args.attacker)
+            line = result.proof_tree.get("line")
+            if not isinstance(line, list):
+                raise ValueError("--kifu-output is not supported for this reveal-verified proof")
+            write_principal_line_kifu(args.kifu_output, game, line, attacker=args.attacker)
         print(json.dumps(result.to_dict(), indent=2 if args.pretty else None, sort_keys=True))
-        return 0 if result.status in (MATE, NO_MATE) else 2
+        return 0 if result.status == MATE else 2
     except Exception as exc:
         error = SearchResult(
             status=INVALID_INPUT,

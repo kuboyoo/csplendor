@@ -1,15 +1,10 @@
 # Splendor 2人戦用「めくれ全称分岐つきDFPN詰み証明探索」設計仕様書
 
-> **実装状況（2026-11-07）**: 証明数・反証数を持つDFPNは Python 版 `scripts/dfpn_mate_solver.py` の
-> `DFPNSolver`（`--reveal-verified` なしの経路）だけである。実戦・解析で使う C++ の解決器
-> （`RevealVerifiedSolver`・visible-only ソルバー・`exact_mate_search`・`MateSearchSession`）は、
-> 本仕様の深さの数え方・めくれの全称分岐・終局判定に従うが、探索は **深さ制限つきの深さ優先 AND/OR 探索**
-> （局面と残り攻め手数をキーとする置換表、手の順序付け、証明の移植つき）であり、証明数・反証数は持たない。
-> 最終手カット、めくれ節点の blank 支配カット、blank 探索の oracle 予約の重複除去は入れた
-> （[mate_usage.md](mate_usage.md) の「C++ 解決器の探索方式」。BENCH 局面の exact 深さ4 が 240 秒未決 → 3.3 秒で確定、
-> ランダム終盤 360 ケースの合計ノードが 23% に、blank 探索の生成する手が 55% 減）。exact 深さ5 は 240 秒で未決のまま
-> （約2億ノード）で、残る費用は守り側の応手の分岐と blank 部分探索の置換表の溢れであり、C++ 版を DFPN にするかは
-> その計測で決める。Python 版は C++ 版 DFPN が安定してから削除する。
+> **実装状況（2026-11-07）**: 本仕様を実装した Python 版 `DFPNMateSolver`（`scripts/dfpn_mate_solver.py`）は削除した。
+> 証明数・反証数の探索は C++ の `solve_reveal_verified_mate_cpp(algorithm="dfpn")` にあり、既定の深さ優先 AND/OR 探索と
+> 同じ AND/OR グラフ（本仕様の深さの数え方・めくれの全称分岐・終局判定、最終手カット・blank 支配カットなど）を探索する
+> （[C++ 版 df-pn の設計](mate_dfpn_cpp_design.md)、[mate_usage.md](mate_usage.md) の「C++ 解決器の探索方式」）。本書は
+> 設計の経緯として残す。
 
 ## 1. 目的
 

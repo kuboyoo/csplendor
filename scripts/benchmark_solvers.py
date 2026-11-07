@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repeatable R6 benchmark for native solvers and Python DFPN."""
+"""Repeatable R6 benchmark for the native solvers (DFS and df-pn mate search)."""
 
 from __future__ import annotations
 
@@ -23,11 +23,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import csplendor as cs  # noqa: E402
-from scripts.dfpn_mate_solver import solve_game_dfpn  # noqa: E402
-from scripts.mate_solver import (  # noqa: E402
-    SolverOptions,
-    load_game_from_usi_text,
-)
+from scripts.mate_solver import load_game_from_usi_text  # noqa: E402
 
 BENCH_POSITION = (
     "position bank:W1U3G3R3K0D4 | "
@@ -131,19 +127,17 @@ def run_benchmarks(args: argparse.Namespace) -> Dict[str, object]:
         game = load_game_from_usi_text(BENCH_POSITION)
 
         def dfpn(game: cs.Game = game) -> int:
-            result = solve_game_dfpn(
+            result = cs.solve_reveal_verified_mate_cpp(
                 game,
                 attacker=0,
-                max_depth=5,
-                options=SolverOptions(
-                    max_nodes=args.dfpn_node_limit,
-                    time_limit=0.0,
-                    include_proof=False,
-                ),
+                depth=args.dfpn_depth,
+                exhaustive_attacker_actions=True,
+                exact_reveal_search=True,
+                algorithm="dfpn",
             )
-            return int(result.stats.nodes)
+            return int(result["stats"]["nodes"])
 
-        workloads["python_dfpn"] = (dfpn, 1)
+        workloads["native_dfpn"] = (dfpn, 1)
 
     results = {
         name: _sample(
@@ -170,7 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repetitions", type=int, default=3)
     parser.add_argument("--visible-calls", type=int, default=200)
     parser.add_argument("--reveal-calls", type=int, default=20)
-    parser.add_argument("--dfpn-node-limit", type=int, default=1000)
+    parser.add_argument("--dfpn-depth", type=int, default=3)
     return parser
 
 

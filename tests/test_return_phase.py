@@ -349,20 +349,17 @@ def _mate_fixture(kind="deck"):
 
 
 @pytest.mark.parametrize("kind", ["deck", "visible"])
-@pytest.mark.parametrize("solver_name", ["exhaustive", "dfpn"])
-def test_python_solvers_do_not_count_the_return_as_a_move(solver_name, kind):
-    from scripts.dfpn_mate_solver import solve_game_dfpn
+def test_python_solver_does_not_count_the_return_as_a_move(kind):
     from scripts.mate_solver import MATE, SolverOptions, solve_game
 
-    solve = solve_game if solver_name == "exhaustive" else solve_game_dfpn
     options = SolverOptions(
         allow_deck_reserve=True,
         max_nodes=100000,
         time_limit=30.0,
         include_proof=False,
     )
-    assert solve(_mate_fixture(kind), 0, 1, options).status != MATE
-    result = solve(_mate_fixture(kind), 0, 2, options)
+    assert solve_game(_mate_fixture(kind), 0, 1, options).status != MATE
+    result = solve_game(_mate_fixture(kind), 0, 2, options)
     assert result.status == MATE
     assert result.depth == 2
 

@@ -5,10 +5,11 @@
 ### C++ 解決器の探索方式
 
 C++ の解決器（`solve_reveal_verified_mate_cpp`、`exact_mate_search`、`MateSearchSession`、
-`solve_visible_only_winner_cpp`、準詰み）は、深さ制限つきの深さ優先 AND/OR 探索です。攻め側の節点は
+`solve_visible_only_winner_cpp`、準詰み）は、既定では深さ制限つきの深さ優先 AND/OR 探索（DFS）です。攻め側の節点は
 1手でも証明できれば証明、守り側の節点とめくれは1つでも反例があれば反証です。置換表のキーは
 「局面と残り攻め手数」で、未決着（予算切れ）は保存しません。反復深化は呼び出し側（深さ掃引）が行います。
-証明数・反証数を持つ DFPN は Python 版 `scripts/dfpn_mate_solver.py`（`--reveal-verified` なし）だけです。
+`solve_reveal_verified_mate_cpp` と `search_reveal_verified_mate_depths` は `algorithm="dfpn"` で、同じ AND/OR グラフを
+証明数・反証数で展開する df-pn を選べます（下の「df-pn（`algorithm="dfpn"`）」）。Python 版の df-pn は削除しました。
 
 深さ（残り攻め手数）は、**攻め側の手番が終わる手**で1減ります。購入して貴族選択待ちや返却待ちに
 入る手は手番の途中なので減らさず、その後の `VISIT_NOBLE` や返却で手番が終わったときに減らします。
@@ -280,16 +281,43 @@ visible-only は従来どおり全手を作る。
 ランダム終盤（seeds 0〜59・2000〜2099・3000〜3099、exact/blank × 攻め側 2 × 深さ 1〜3、3,024 ケース）で判定・主手順・
 ノード数・`memo_hits` は 69bd2fb と同一で、違うのは `legal_moves` だけ（1,168 ケースで減少）。
 
+**df-pn（`algorithm="dfpn"`）**: `solve_reveal_verified_mate_cpp(..., algorithm="dfpn", dfpn_table_bytes=...)` と
+`search_reveal_verified_mate_depths(..., algorithm="dfpn")` は、上の DFS と同じ AND/OR グラフ（手の生成・絞り込み・
+順序、めくれ、深さ、各カット）を証明数・反証数で展開する（`src/dfpn_mate_solver.h`、[設計](mate_dfpn_cpp_design.md)）。
+既定は `"dfs"` のままで、結果の形・判定・主手順と証明 DAG の意味は同じ。
+
+- **めくれ**: 補充の起こる手は「最初の具体めくれ c0、blank の子 B、休眠の残り」を子にする。B は c0 が証明されてから
+  blank の DFS で決着まで探索し、証明されれば残りを省き（blank 支配カット）、そうでなければ残りを起こして具体的に探索する。
+  山札予約は候補札の AND。blank 探索では oracle 手を守り側の手に加える。
+- **深さ**: 鍵は DFS と同じ「局面と残り攻め手数」で、(局面, 残り) のグラフは DAG なので経路の繰り返しの確認は要らない。
+  残り攻め手数 1 以下の節点（攻め側の最終手と、その前の守り側の手）は DFS（`forced_win_with_memo`）で決める。
+- **置換表とメモリ**: 決着した節点は DFS と同じ exact/blank の表（`max_memo_states`、flush）に DFS と同じ項で入れるので、
+  主手順・証明 DAG・session の持ち越しは DFS のコードがそのまま扱う。未決着の (pn, dn, work) は容量固定の df-pn 表
+  （`dfpn_table_bytes`、既定 128 MiB。4 スロットの組で、満杯なら work 最小を置換）にだけ置き、予算を超えて割り当てない。
+- **カット**: 終局・最終ラウンドの直接判定・最終ラウンドの展開・最終手カット（直接生成）・reach cut・最終応手カット・
+  blank 支配カット・証明の移植と反復深化の順序は DFS の関数をそのまま呼ぶ。未訪問の兄弟は、探索した兄弟（未決着）の
+  pn・dn の最大値で見積もる。
+- 統計に `dfpn_expansions`、`dfpn_table_stores`、`dfpn_table_replacements`、`dfpn_table_bytes` が加わる（DFS では 0）。
+
+計測（2026-11-07、1 スレッド、置換表 200万件、DFS との比較。時間比 = DFS / df-pn で、1 より大きいと df-pn が速い）:
+ランダム終盤（seeds 0〜59・2000〜2099・3000〜3099 を点数 7〜13 まで乱数で進めた局面 × 攻め側 2 × exact/blank × 深さ 1〜4、
+深さ4 は 20 秒上限、4,016 ケース）で判定の食い違い 0、未決 0（両方）。詰みのある局面の合計時間は exact 深さ3 が 0.91 → 1.16 秒
+（0.79）、深さ4 が 10.86 → 12.47 秒（0.87）、blank 深さ3 が 0.65、深さ4 が 0.72。その深さで初めて詰む局面（深さ4 で 22 局面）は
+exact 0.84、blank 0.73、不詰みは exact 深さ4 で 0.81、blank 0.64。10 ms 以上かかった深さ4 の詰み 60 局面（exact）のうち
+df-pn が速いのは 5 局面。BENCH の exact は深さ3 が 0.009 → 0.011 秒、深さ4 が 1.14 → 1.57 秒（ともに不詰み）、深さ5 は
+240 秒で両方とも未決（2.95億 / 2.84億ノード）。BENCH の blank 深さ5 は両方とも詰みを証明し、60.2 → 102.8 秒。
+df-pn は DFS の順序（購入優先、証明の移植、反復深化）に近い順で読み、1 節点の費用（守り側の全手の生成、再訪のたびの
+手の生成し直し）の分だけ遅い。したがって既定は DFS のままとする。
+
 
 `scripts/dfpn_mate_solver.py` は、任意局面から player0 または player1 の強制勝利を探索します。
 
-実用上は、公開カードだけで候補手順を高速探索し、その後に未公開カードのめくれ、相手の全応手、全支払いパターン、局面入力後の山札予約結果を検証する `--reveal-verified` モードを推奨します。めくれ検証では visible-only の最短主手順 prefix を固定して先に厳密検証し、証明できなかった場合は固定範囲を緩め、最後に通常の幅広い検証へ戻ります。
+公開カードだけで候補手順を高速探索し、その後に未公開カードのめくれ、相手の全応手、全支払いパターン、局面入力後の山札予約結果を C++ の解決器で検証します（めくれ検証）。めくれ検証では visible-only の最短主手順 prefix を固定して先に厳密検証し、証明できなかった場合は固定範囲を緩め、最後に通常の幅広い検証へ戻ります。
 
 ```bash
 python scripts/dfpn_mate_solver.py \
   --position 'bank:... | visible:... | decks:... | nobles:... | P0:... | P1:... | 0' \
   --attacker 0 \
-  --reveal-verified \
   --time-limit 30 \
   --pretty
 ```
@@ -300,7 +328,6 @@ python scripts/dfpn_mate_solver.py \
 python scripts/dfpn_mate_solver.py \
   --position '...' \
   --attacker 0 \
-  --reveal-verified \
   --reveal-proof-dag \
   --proof-dag-format compact \
   --proof-dag-node-limit 100000 \
@@ -601,7 +628,7 @@ Python に依存しないので、WASM（embind）からも同じ結果で呼べ
 （閾値 1.0/0.9/0.75、制限時間の 4 割）を自動で追加し、「準詰み: 2手以内の強制勝ち確率 90%以上（手）/
 外れめくれ: C5, C14」または「準詰みなし: 2手以内の強制勝ち確率は 75%未満」と表示します。
 
-確認用の主手順を `splendorgui` で再生する場合は、`--kifu-output mate.kifu` を追加します。`--kifu-output` は既定で `--reveal-verified` を有効化し、検証済み候補主手順を Splendor KIFU として保存します。通常の DFPN 証明木から主手順を保存する場合は `--kifu-dfpn` も指定します。具体的なめくれカードを持つ DFPN 証明木では、棋譜コメントに `reveal:C<id>` 注釈を出力します。
+確認用の主手順を `splendorgui` で再生する場合は、`--kifu-output mate.kifu` を追加します。検証済みの主手順（C++ の `line`）を Splendor KIFU として保存し、具体的なめくれは棋譜コメントの `reveal:C<id>` 注釈で残します。`splendorgui` が読む `strategy.json` は `scripts/generate_mate_puzzles.py` が問題ごとに保存します（下の「詰め問題集の生成」）。
 
 `--simple-payment` を指定すると、購入時の支払いをゴールド温存パターンに限定できます。完全検証が必要な場合は指定しないでください。
 
