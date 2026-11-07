@@ -4,6 +4,7 @@
 #include "reveal_verified_solver.h"
 #include "exact_mate_search.h"
 #include "near_mate_probe.h"
+#include "parallel_mate_solver.h"
 #include "root_mate_probe.h"
 #include "solver_memory_budget.h"
 #include "visible_only_solver.h"
@@ -278,6 +279,9 @@ namespace csplendor::python {
 void bind_solvers(py::module_ &m) {
   // doc/mate_usage.md「探索のメモリ予算」.
   m.def("available_memory_bytes", &csplendor::available_memory_bytes);
+  // doc/mate_usage.md「並列の詰み探索」.
+  m.def("physical_core_count", &csplendor::physical_core_count);
+  m.def("default_mate_jobs", &csplendor::default_mate_jobs);
   m.def(
       "solver_memory_budget_bytes",
       [](std::optional<uint64_t> available_bytes, unsigned jobs) {
@@ -962,7 +966,8 @@ void bind_solvers(py::module_ &m) {
              &cancellation_token,
          const std::optional<MateOrderHintsHandle> &order_hints,
          bool line_transplant, bool no_take_probe, size_t max_memo_states,
-         const std::string &algorithm, size_t dfpn_table_bytes) {
+         const std::string &algorithm, size_t dfpn_table_bytes,
+         unsigned jobs) {
         const MateSearchAlgorithm search_algorithm =
             parse_mate_search_algorithm(algorithm);
         if (proof_dag_format != "v1" && proof_dag_format != "compact") {
@@ -1005,6 +1010,7 @@ void bind_solvers(py::module_ &m) {
           solver.set_max_memo_states(max_memo_states);
           solver.set_algorithm(search_algorithm);
           solver.set_dfpn_table_bytes(dfpn_table_bytes);
+          solver.set_jobs(jobs);
           if (order_hints)
             solver.set_order_hints(order_hints->table,
                                    order_hints->attacker_restrict_top_k);
@@ -1067,6 +1073,7 @@ void bind_solvers(py::module_ &m) {
             result.unknown_reason.empty() ? py::none()
                                           : py::cast(result.unknown_reason);
         payload["memoized_states"] = result.memoized_states;
+        payload["jobs"] = result.jobs;
         payload["stats"] = stats;
         payload["line"] = line;
         payload["proof_dag"] =
@@ -1093,7 +1100,8 @@ void bind_solvers(py::module_ &m) {
       py::arg("no_take_probe") = false,
       py::arg("max_memo_states") = 0,
       py::arg("algorithm") = "dfs",
-      py::arg("dfpn_table_bytes") = 0);
+      py::arg("dfpn_table_bytes") = 0,
+      py::arg("jobs") = 1);
 }
 
 } // namespace csplendor::python

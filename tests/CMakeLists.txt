@@ -153,3 +153,5 @@ csplendor_add_native_test(solver_components_unit solver_components_unit.cpp
                           "unit;solver;ownership;limits;proof;standalone-header" 30)
 csplendor_add_native_test(dfpn_table_unit dfpn_table_unit.cpp
                           "unit;solver;dfpn" 30)
+csplendor_add_native_test(parallel_mate_unit parallel_mate_unit.cpp
+                          "unit;solver;parallel" 120)

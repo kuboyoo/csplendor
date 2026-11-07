@@ -108,8 +108,10 @@ def test_reveal_solver_proof_dag_and_action_order_golden():
     # (0 here); otherwise unchanged from cc1273eb...0936e54c.
     # 2026-11-07 (C++ 版 df-pn) added the dfpn_* counters (0 for the default
     # DFS); otherwise unchanged from e3a9874a...006d4a3b.
+    # 2026-11-08 (並列の詰み探索) added the payload's "jobs" (1 here);
+    # otherwise unchanged from 88ecb241...8d497ba52e.
     assert _digest_without_elapsed(result) == (
-        "88ecb241f04cc4de14ae47ba27c115ffac900ee1ca020fd5ecffcd8d497ba52e"
+        "b1f31a5854141ce8ddc416658a97aa5c24898f428644cefa6a37aadf0d61beec"
     )
 
 

@@ -1,5 +1,22 @@
 # 変更履歴 / Changelog
 
+## 未出荷：詰み探索を C++ の中で並列にする（2026-11-08）
+
+- `solve_reveal_verified_mate_cpp(jobs=N)`（C++ は `RevealVerifiedSolver::set_jobs`）で、深さ 3 以上の DFS を N スレッドで
+  解く（`doc/parallel_search_design.md` 第 2 節、`doc/mate_usage.md`「並列の詰み探索」）。root の手 × めくれと、その下の
+  手 × めくれを仕事にして訪問順に配り（節点と手の 2 番目以降の子は最初の子が返ってから）、OR の証明・AND の反証で
+  兄弟の仕事を階層化した取り消し token で止める。置換表は全スレッドで 1 組（`ConcurrentFlatMemoTable`。状態バイトの
+  CAS で書き、完成後は不変、6 割で 2 倍に伸長）。`jobs=1`（既定）は従来とビット単位で同じ、`jobs=0` は
+  `default_mate_jobs()`（`CSPLENDOR_MATE_JOBS`、なければ clamp(物理コア − 2, 1, 8)）。返り値に使ったスレッド数 `jobs`、
+  関数 `physical_core_count()`・`default_mate_jobs()` を足した。WASM（pthreads なし）は常に 1 スレッド。
+- 計測（BENCH 厳密探索の深さ4、1.34 秒）: 2 スレッド 0.78 秒、4 スレッド 0.47 秒、8 スレッド 0.32〜0.35 秒。ランダム終盤
+  3,012 ケースで `jobs=2/4/8/12` の判定が 1 スレッドと全件一致。
+
+English: `solve_reveal_verified_mate_cpp(jobs=N)` runs depth-first searches of
+depth 3 or more on N threads over one shared transposition table (same
+verdicts; `jobs=1` is the serial search bit for bit, `jobs=0` picks
+`default_mate_jobs()`).
+
 ## 未出荷：C++ 版 df-pn 詰み探索を併設し、Python 版 df-pn を削除する（2026-11-07）
 
 - `solve_reveal_verified_mate_cpp(algorithm="dfpn", dfpn_table_bytes=...)` と

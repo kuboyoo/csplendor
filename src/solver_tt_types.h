@@ -364,6 +364,13 @@ using RevealMemoTable =
 using RevealExactMemoTable =
     FlatMemoTable<RevealExactDepthStateKey, RevealPersistentEntry,
                   RevealExactDepthStateKeyHash>;
+// The tables shared by the threads of a parallel search (same slots).
+using RevealSharedMemoTable =
+    ConcurrentFlatMemoTable<RevealDepthStateKey, RevealMemoEntry,
+                            RevealDepthStateKeyHash>;
+using RevealSharedExactMemoTable =
+    ConcurrentFlatMemoTable<RevealExactDepthStateKey, RevealPersistentEntry,
+                            RevealExactDepthStateKeyHash>;
 static_assert(sizeof(RevealMemoTable::Slot) == 64 &&
                   sizeof(RevealExactMemoTable::Slot) == 64,
               "reveal TT slots must stay one cache line");

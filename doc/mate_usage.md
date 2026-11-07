@@ -576,7 +576,7 @@ result = cs.search_reveal_verified_mate_depths(game, attacker=1, min_depth=1, ma
 | `search_reveal_verified_mate_depths` / `search_reveal_verified_mate_anytime` | 関数の開始時（全深さ・全枝で同じ N と df-pn 表のバイト数） | 引数 `jobs` |
 | `MateSearchSession.search` / `search_anytime` | 呼び出しの開始時 | `MateSearchSession(jobs=...)` |
 | `near_mate_search` / `search_near_mate`、`exact_mate_search`、`root_mate_probe` | 関数の開始時（設定の `memory_budget_bytes`） | 1 |
-| `solve_reveal_verified_mate_cpp` などの1回の探索、`NativeMateSearchSession.search`、`solve_visible_only_winner_cpp` | 探索の開始時 | 1 |
+| `solve_reveal_verified_mate_cpp` などの1回の探索、`NativeMateSearchSession.search`、`solve_visible_only_winner_cpp` | 探索の開始時 | 1（`jobs>1` の C++ 並列探索も 1 つの共有表なので 1。次の「並列の詰み探索」） |
 
 WASM では、JS 側が `navigator.deviceMemory`（GB、丸めた値）などから予算を決め、`RootMateProbeConfig`・
 `NearMateSearchConfig`・`ExactMateSearchConfig` の `memory_budget_bytes` に渡します（0 は上の WASM の既定）。
@@ -595,6 +595,72 @@ WASM では、JS 側が `navigator.deviceMemory`（GB、丸めた値）などか
 1,989 万 → 424 万（4.7 分の 1）、時間を 4.8 秒 → 2.8 秒にした。実対局の終盤 81 局面（深さ 1〜4 の掃引、
 20 秒）では合計ノード 22.7 億 → 18.9 億（−17%）、詰み発見 36 → 37 局面。no-take 探りの追加効果はわずか
 （守り側の分岐の大半はトークンの取り・返却で、支払い方の統合では減らない）。
+
+### 並列の詰み探索（`jobs`、2026-11-08 追加）
+
+設計は [先読みの並列化の設計](parallel_search_design.md) 第 2 節（2 段のタスク列＋共有置換表）。対人戦の待ち時間を
+縮めるためのもので、判定（詰み／不詰み）は 1 スレッドと同じ。実装は `src/parallel_mate_solver.h`（スケジューラと
+スレッド数の決め方、ヘッダだけ）、`src/solver_flat_table.h`（共有表 `ConcurrentFlatMemoTable` と伸長
+`ConcurrentTableGrowth`）、`src/reveal_verified_solver.cpp`（`search_root_parallel` と `split_*`）。
+
+- **入口**: `solve_reveal_verified_mate_cpp(..., jobs=N)`（C++ は `RevealVerifiedSolver::set_jobs`）。`jobs=1`（既定）は
+  これまでの 1 スレッドの探索そのもので、判定・主手順・ノード数・統計・`memoized_states` がビット単位で同じ。
+  `jobs=0` は `default_mate_jobs()`: 環境変数 `CSPLENDOR_MATE_JOBS` が正の数ならその値、なければ
+  clamp(物理コア − 2, 1, 8)（`physical_core_count()`。SMT の論理コアは数えない。Linux は CPU affinity の中の
+  (package, core) の組、Windows は `RelationProcessorCore`、macOS は性能コア数で、macOS だけは 2 を引かない）。
+  並列になるのは DFS（`algorithm="dfs"`）で深さ 3 以上の `solve()` だけで、深さ 1・2、df-pn、`MateSearchSession` の
+  表の持ち越し（`solve_reusing_exact_cache`）、準詰み、root 分割・frontier は常に 1 スレッド。返り値の `jobs` は
+  実際に使ったスレッド数（1 スレッドで走ったら 1）。スレッドは呼び出しの中で作って終わる前に必ず join する。
+  WASM（`__EMSCRIPTEN__` で pthreads なし）は `std::thread` を使わずにコンパイルされ、`jobs` は常に 1 になる。
+- **仕事の単位**: root の手 × めくれ（1 段目の子）と、1 段目の子の手 × めくれ（2 段目の子）。root と 1 段目の子は
+  `split_expand` が 1 スレッドの探索と同じ前置き（終局・深さ・最終ラウンド・表・経路・各カット）と同じ順序の手の
+  生成（eager。守り側の遅延生成と同じ順序）で開き、手ごとに 1 スレッドの探索が訪れるめくれを列挙する（探索はしない）。
+  2 段目の子は葉で、局面・めくれ状態・移植の line hash・経路（root と 1 段目の子の鍵）を戻して、1 スレッドの探索
+  （`forced_win`）をそのまま呼ぶ。1 段目の子の展開も 1 つの仕事で、最初に取ったスレッドが行う。
+- **結果の合成**: 手は めくれの AND、攻め側の節点は 手の OR、守り側の節点は 手の AND（1 スレッドと同じ。未決
+  （経路の繰り返し）を含めた 3 値）。OR の最初の証明・AND の最初の反証でその節点が決まり、その節点の取り消し token
+  （`RevealSearchCancellationToken` の親子。呼び出し側の token → root → root の手 → 1 段目の子 → その手）を立てて、
+  下の仕事を止める。決まった root と 1 段目の子は、1 スレッドの探索と同じ項（決めた手。守り側の反証は反証した
+  めくれ、それ以外は最初のめくれ。手の数）を共有表に書くので、主手順は共有表を root からたどって作る。
+- **配る順序**（young brothers wait）: 1 スレッドの探索の訪問順に並べ、節点と手の 2 番目以降の子は最初の子が
+  返るまで配らない。OR の最初の手はたいてい証明し、AND の最初の応手はたいてい反証するので、兄弟を同時に探すと
+  ほとんどが無駄になるため（全部を同時に配った版は BENCH 深さ4・8 スレッドで 520 万ノード、この規則で 220 万
+  ノード。1 スレッドは 148.5 万）。blank 支配カット（上の「blank 支配カット」）は、1 スレッドと同じく最初の具体的な
+  めくれが証明されてから、手の 1 つの子（`SPLIT_BLANK`）として配り、証明されればその手を証明する。
+- **共有表**（`ConcurrentFlatMemoTable`、厳密と blank の 2 表）: 鍵・項・スロット（64 バイト）・探査は
+  `FlatMemoTable` と同じで、スロットごとの状態バイト（別配列）を「空 → CAS で書き込み中 → 鍵と項を書く → release で
+  完成」と進める。読み手は完成したスロットだけ鍵を比べ（acquire）、書き込み中は飛ばす（見逃しは再探索になるだけ）。
+  項は完成後に変わらない。書くのは決着した項だけで（1 スレッドと同じ）、同じ鍵を 2 スレッドが同時に書くと 2 つの
+  スロットに入り得るが、どちらも同じ真偽。flush・削除はしない。上限 N 件（`max_memo_states`、0 は予算から）に
+  達した後の保存は捨てる（その節点を再探索するだけで健全）。移植の表（`line_proofs_` / `line_refutations_`）は
+  手の順序だけに効くので共有せず、スレッドごとに 2^17 スロット（2 表で 4 MiB）を上限にする。
+- **表の伸長**: 表は 2^15 スロットから始め、6 割を超えると 2 倍にする（上限 `ceil(N / 0.7)` スロット）。配列は
+  calloc で取り、書いたページだけが実メモリになる。最初から上限の配列を取ると、まばらに書いたページの確保と
+  解放が BENCH 深さ4 で約 0.6 秒（CPU）と 0.1 秒（解放）かかった。伸長は `ConcurrentTableGrowth` が調停する:
+  表を使うスレッドは attach し（仕事の間。待つ間は detach）、ノードごと（`check_limits`）に safepoint を呼ぶ。
+  伸長の要求があると、attach 中の全スレッドが safepoint に来た（表を指すポインタを持たない）時点で、全員で旧配列を
+  分担して新配列へ移し、旧配列を解放する。
+- **予算**: ノード上限は全スレッドで共有し、各スレッドは 64 ノードずつ先取りする（`SearchLimit::share_node_budget`。
+  上限からの超過はスレッドあたり 64 ノード以下）。時間上限は 1 つの開始時刻から測る。呼び出し側の token の取り消し・
+  時間・ノードのどれかで止まると全スレッドを止め、root が決まっていなければ `unknown_reason` にその理由を返す
+  （時間上限の前に root が決まればその判定を返す）。兄弟の決着で止まった仕事は結果を返さない。
+- **メモリ**: 共有表は 1 組なので予算は jobs で割らない（`resolve_max_memo_states(..., jobs=1)` の N）。スレッドごとの
+  作業領域は移植の表 4 MiB と経路・手の作業領域で、1 スレッド 8 MiB 以下。
+- **証明 DAG**: `include_proof_dag=True` の並列の詰みは、1 スレッドの探索が自分の空の表で証明し直して DAG を作り
+  検証する（`build_proof_dag`。並列の分だけは速くならない）。
+- **`jobs>1` で変わり得る出力**: ノード数と統計（スレッドの合計）、`memoized_states`（共有表の件数）、主手順（別の
+  証明手・反証手を選び得る。詰みの主手順の初手は `required_root_action` で 1 スレッドでも証明できる）、予算内に
+  決着するかどうか。判定（詰み／不詰み）と最短の詰みの深さは変わらない。決定性が要る用途（テスト、問題集の
+  一意性検証、再現）は `jobs=1` を使う。
+- **健全性**: 共有表に載るのは完全に探索して決着した（局面、残り深さ）だけで、どのスレッドの葉の探索も 1 スレッドの
+  探索の部分木そのもの（同じ root・めくれ状態・経路）なので、共有表のある並列探索は「表に当たった部分木を省いた
+  1 スレッドの探索」と同じ判定になる。1 項の書き込みは状態バイトで公開されるので、読み手が書きかけの項を使うことは
+  ない。予算切れの仕事は合成にも表にも入らない。
+- **計測**（2026-11-08、Ryzen 9 7900X、BENCH 厳密探索、共有マシン）: 深さ3（11,535 ノード）は 1 スレッド 11 ms、
+  8 スレッド 7〜10 ms。深さ4（148.5 万ノード）は 1 スレッド 1.34 秒、2 スレッド 0.78 秒、4 スレッド 0.46〜0.48 秒、
+  8 スレッド 0.32〜0.35 秒（4 倍前後、220 万ノード）。ランダム終盤 3,012 ケース（深さ 1〜3、時間・ノード上限なし）は
+  `jobs=1` が既存とビット単位で一致、`jobs=2/4/8/12` が判定で全件一致。
+  Python の深さ掃引（`search_reveal_verified_mate_depths(jobs=...)`）はまだ旧来の Python の root 分割を使う。
 
 ### 準詰み（確率的な詰み判定、2026-10-02 追加）
 

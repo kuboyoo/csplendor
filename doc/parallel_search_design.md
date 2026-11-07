@@ -106,25 +106,33 @@ C は Splendor の太い木（1 段 60〜130 倍）では重複した探索が�
 
 ### 2.2 B の設計
 
-- **仕事の単位**: `solve_reveal_verified_root_split_cpp` が返す辺（`RevealVerifiedFrontierEdge{action, reveal, depth, child}`）を
-  1 段目とし、守り側の局面（1 段目の子）でもう一度同じ分割を行った辺を 2 段目とする。2 段目の子（攻め側の局面、残り深さ d−1）
-  が 1 つの仕事で、既存の `RevealVerifiedSolver` をそのまま呼ぶ。深さ ≤ 2 なら分割しない（現行 `parallel_min_branches`）。
+- **仕事の単位**: root の手 × めくれを 1 段目とし、1 段目の子（守り側の局面）の手 × めくれを 2 段目とする。2 段目の子
+  （攻め側の局面、残り深さ d−1）が 1 つの仕事で、1 スレッドの探索の再帰（`forced_win`）を、その子の局面・めくれ状態・
+  経路（root と 1 段目の子の鍵）・移植の line hash を戻してそのまま呼ぶ（root からの部分木そのものなので、blank 探索の
+  鍵も root に対して同じ）。1 段目の子の展開も仕事で、最初に取ったスレッドが行う。深さ ≤ 2 なら分割しない。
 - **順序**: 1 段目は現行の順序（`proof_ordered_actions`、証明の移植、`preferred_attacker_actions`）、各 1 段目の中で 2 段目も
   現行の守り側の順序（反証しやすい応手を先に）。スレッドは「最初の 1 段目の、最初の 2 段目」から取る（LIFO ではなく順序どおり）。
-  これで 1 スレッドのときの訪問順が現行の DFS と同じになり、`jobs=1` はビット一致の既存経路に落とす。
+  節点と手の 2 番目以降の子は、最初の子が返るまで配らない（young brothers wait。OR の最初の手はたいてい証明し、AND の
+  最初の応手はたいてい反証するので、兄弟を同時に探すとほとんどが無駄になる。BENCH 深さ4・8 スレッドで、全部を同時に
+  配ると 520 万ノード、この規則で 220 万ノード）。blank 支配カットは、最初の具体的なめくれが証明されてから手の子の 1 つ
+  として配る。`jobs=1` はビット一致の既存経路に落とす。
 - **打ち切り**: 1 段目の手 m の下で 2 段目の 1 つが REFUTED になったら、m の残りの仕事を取り消す（AND の反証）。1 段目のどれかが
   PROVEN になったら root は PROVEN で全部を取り消す（OR の証明）。取り消しは既存の `RevealSearchCancellationToken` を仕事ごとに
   階層化する（root token → 手 m の token → 仕事の token）。
-- **共有置換表**: `FlatMemoTable`（64 バイト・1 スロット、開番地法）を並行版にする。読みは鍵の比較、書きは「空スロットへの
-  CAS で鍵を確保 → 項を書く → 鍵の『完成』ビットを立てる」の 3 段。読み手は完成ビットの立った項だけを採る。書くのは決着した
-  項だけ（現行の DFS も未決は保存しない）。同じ鍵に 2 スレッドが同時に書く場合、どちらも同じ真偽なので後の書き手は捨てる。
-  容量は探索の開始時に固定し（`memo_cap_` と同じ）、満杯では書かない（現行の flush と同じ意味で、健全性に影響しない）。
-  移植の表（`solver_line_table.h`）は手の順序のヒントなので、スレッドごとに持つ（共有しない。結果の真偽に関わらない）。
+- **共有置換表**: `FlatMemoTable`（64 バイト・1 スロット、開番地法）の並行版 `ConcurrentFlatMemoTable`（厳密と blank の
+  2 表）。スロットごとの状態バイト（別配列）を「空 → CAS で書き込み中 → 鍵と項を書く → release で完成」と進め、読み手は
+  完成したスロットだけ鍵を比べる（書き込み中は飛ばす。見逃しは再探索になるだけ）。書くのは決着した項だけ（現行の DFS も
+  未決は保存しない）。同じ鍵に 2 スレッドが同時に書くと 2 つのスロットに入り得るが、どちらも同じ真偽。上限 N 件
+  （`memo_cap_` と同じ）の後は書かない（現行の flush と同じく健全性に影響しない）。配列は 2^15 スロットから始めて 6 割で
+  2 倍にする（上限の配列を最初から取ると、まばらに書いたページの確保と解放で BENCH 深さ4 に 0.6 秒（CPU）と 0.1 秒かかった）。
+  伸長は、表を使う全スレッドがノードごとの safepoint（表へのポインタを持たない点）に来たところで、全員で旧配列を分担して
+  移す。移植の表（`solver_line_table.h`）は手の順序のヒントなので、スレッドごとに持つ（共有しない。結果の真偽に関わらない。
+  共有版も試したが、ノード数・時間とも差がなかった）。
 - **統計**: `nodes`・`memo_hits` は原子加算でなく、スレッドごとに持って終わりに足す。`stats_.legal_moves` などは同じ。
-- **メモリ**: 表は 1 つなので `solver_memory_budget_bytes(available, jobs=1)` を使い、スレッドごとの作業領域
-  （`RecursionPath`・`legal_` など数 MB）だけを jobs 倍する。ブラウザは JS 側の予算をそのまま 1 表に渡す。
+- **メモリ**: 表は 1 組なので `solver_memory_budget_bytes(available, jobs=1)` を使い、スレッドごとの作業領域
+  （移植の表 2 × 2^17 スロット = 4 MiB と経路・手の作業領域）だけを jobs 倍する。ブラウザは JS 側の予算をそのまま 1 表に渡す。
 - **入口**: `search_reveal_verified_mate_depths(jobs=N)` の `_solve_depth_parallel`（Python の `ThreadPoolExecutor`）を、
-  C++ の `solve_reveal_verified_mate_parallel_cpp(game, attacker, depth, jobs, …)` の 1 回呼び出しに置き換える。
+  C++ の `solve_reveal_verified_mate_cpp(game, attacker, depth, ..., jobs=N)`（`RevealVerifiedSolver::set_jobs`）の 1 回呼び出しに置き換える。
   `MateSearchSession` / `root_mate_probe` / `near_mate` も同じ関数を使う（`RootMateProbeConfig.jobs` を追加）。
   Python の分割（`_solve_parallel_branch`・`_solve_positive_portfolio`）は C++ 版が第 6 節の検証を通ったら削除する（後方互換は持たない）。
 
@@ -242,7 +250,7 @@ C は Splendor の太い木（1 段 60〜130 倍）では重複した探索が�
 | 段 | 内容 | 変更する場所 | テスト | 期待する短縮（根拠） |
 |---|---|---|---|---|
 | **1. 詰み探索を MCTS と同時に** | `Thinker.think` で probe・near_mate を別スレッド化。bgasplendor ホストも同じ。splendorgui は詰み用の 2 つ目の Worker | dlsplendor `engine/thinker.py`、bgasplendor `host/thinker.py`、splendorgui `controller.ts`・`engine.worker.ts` | 既存の対局テスト、probe の結果が直列版と同じ（時間上限なし） | 終盤の 1 手（1 s）で最大 0.3 s（probe 150 ms＋near_mate 150 ms が重なる）。序盤は 10 ms 以下。MCTS に時間を回すなら探索数 +30〜40%（≈ +10 Elo、2 倍で +24 Elo の換算） |
-| **2. C++ の 2 段タスク列＋共有置換表** | `solve_reveal_verified_mate_parallel_cpp`、並行 `FlatMemoTable`、階層化 token、`RootMateProbeConfig.jobs`。Python の `_solve_depth_parallel` を置き換えて削除 | csplendor `src/reveal_verified_solver.cpp`、新規 `src/parallel_mate_solver.h`、`src/solver_flat_table.h`、`src/bindings_solvers.cpp`、`csplendor/mate_depth.py`、`doc/mate_usage.md`・`SOLVER.md` | 第 4 節の判定一致 3,012 ケース、TSAN、`jobs=1` のビット一致、BENCH 深さ 4 の時間 | BENCH 深さ 4: 1.30 s → 0.3 s 前後（8 スレッドで 4〜5 倍。1 段目 42 手 × めくれ、2 段目で数千の仕事になり偏りが消える。共有表で枝をまたぐ重複も消える）。深さ 3 の厳密探索（1 万ノード級、10 ms）は既に 150 ms に収まる。深さ 4（BENCH で 0.3 s）は probe の 150 ms には入らないが、第 1 段で詰み探索が MCTS と並走するなら 1 手全体（1 s）を詰み側にも使えるので `endgame_exact_depth` を 2 → 3〜4 に上げられる → 詰み発見の増加（棋力は上がる方向） |
+| **2. C++ の 2 段タスク列＋共有置換表** | `solve_reveal_verified_mate_cpp(jobs=N)`、並行 `FlatMemoTable`（`ConcurrentFlatMemoTable`）、階層化 token、`RootMateProbeConfig.jobs`。Python の `_solve_depth_parallel` を置き換えて削除 | csplendor `src/reveal_verified_solver.cpp`、新規 `src/parallel_mate_solver.h`、`src/solver_flat_table.h`、`src/bindings_solvers.cpp`、`csplendor/mate_depth.py`、`doc/mate_usage.md`・`SOLVER.md` | 第 4 節の判定一致 3,012 ケース、TSAN、`jobs=1` のビット一致、BENCH 深さ 4 の時間 | BENCH 深さ 4: 1.30 s → 0.3 s 前後（8 スレッドで 4〜5 倍。1 段目 42 手 × めくれ、2 段目で数千の仕事になり偏りが消える。共有表で枝をまたぐ重複も消える）。深さ 3 の厳密探索（1 万ノード級、10 ms）は既に 150 ms に収まる。深さ 4（BENCH で 0.3 s）は probe の 150 ms には入らないが、第 1 段で詰み探索が MCTS と並走するなら 1 手全体（1 s）を詰み側にも使えるので `endgame_exact_depth` を 2 → 3〜4 に上げられる → 詰み発見の増加（棋力は上がる方向） |
 | **3. ブラウザの推論の実測選択** | ORT スレッド数の実測、Apple モバイルの WebGPU 禁止の見直し、宝神の葉 16〜32 | splendorgui `backend.ts`、`lowMemory.ts`、`levels.ts` | 同訪問数の手の一致、M4・iPhone の 20 手連続の時間 | iPhone: ORT 1 → 2〜4 スレッドで NN が 1.5〜2.5 倍（本計測の CPU 1 → 4 スレッドが 2.1 倍）。WebGPU が使えれば宝凰でさらに 2〜5 倍（要実測） |
 | **4.（任意）root 並列 K 本** | CPU 推論の端末で `add_game` × K・`num_threads=K` | dlsplendor / splendorgui の呼び出し側のみ | 同訪問数の手の一致、同時間の勝率 | CPU 推論で束 8 → 64 行の行あたり 1.15〜1.4 倍。GPU では 0 |
 | **5.（任意）pthreads 版 wasm** | `csplendor_mt.wasm`、第 5.2 節の切り替え | splendorgui `engine/build.sh`、`backend.ts` | 分離あり／なし、Safari の入れ子 Worker | 2 の効果をブラウザへ（詰み探索の 4 倍）。宝神以外に詰み判定を広げる前提 |

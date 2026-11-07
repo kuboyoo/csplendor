@@ -2,6 +2,7 @@
 #include "action.h"
 #include "dfpn_mate_solver.h"
 #include "move_generator.h"
+#include "parallel_mate_solver.h"
 #include "perf_counters.h"
 #include "reveal_solver_components.h"
 #include "rule_transition.h"
@@ -80,14 +81,21 @@ public:
     RevealVerifiedSearchResult result;
     result.attacker = attacker_;
     result.depth = depth_;
+    parallel_jobs_ = 1;
     try {
       const ForceStatus status = search_root(game, exact_reveal_search_);
       result.proven = status == ForceStatus::PROVEN;
       result.reason = result.proven ? "all_reveals_verified"
                                     : "candidate_mate_not_verified";
       result.line = principal_line(exact_reveal_search_);
-      if (result.proven && include_proof_dag_)
+      if (result.proven && include_proof_dag_) {
+        // After a parallel search the DAG is built by the serial search over
+        // this solver's own (empty) tables, which re-proves it.
+        SharedTables *shared = shared_;
+        shared_ = nullptr;
         result.proof_dag = build_proof_dag();
+        shared_ = shared;
+      }
     } catch (const SearchLimitExceeded &exc) {
       result.reason = exc.what();
       result.unknown_reason = exc.what();
@@ -95,8 +103,18 @@ public:
     verify_reveal_state(game);
 
     stats_.elapsed_ms = limits_.elapsed_ms();
-    result.memoized_states =
-        exact_reveal_search_ ? exact_memo_.size() : memo_.size();
+    if (shared_tables_)
+      result.memoized_states = exact_reveal_search_
+                                   ? shared_tables_->exact.size()
+                                   : shared_tables_->blank.size();
+    else
+      result.memoized_states =
+          exact_reveal_search_ ? exact_memo_.size() : memo_.size();
+    if (shared_tables_)
+      shared_tables_->growth.detach();
+    shared_ = nullptr;
+    shared_tables_.reset();
+    result.jobs = parallel_jobs_;
     result.stats = stats_;
     return result;
   }
@@ -165,6 +183,7 @@ public:
   }
 
   void set_line_transplant(bool enabled) { line_transplant_ = enabled; }
+  void set_jobs(unsigned jobs) { jobs_ = jobs; }
   void set_max_memo_states(size_t limit) {
     max_memo_states_ = limit;
   }
@@ -351,6 +370,10 @@ private:
       return csplendor::solver_internal::DfpnSearch<Impl>(
                  *this, dfpn_table_cap_, exact, dfpn_stats_)
           .solve(game, depth_, exact);
+    const unsigned jobs = csplendor::resolve_mate_jobs(jobs_);
+    if (jobs > 1 &&
+        depth_ >= csplendor::solver_internal::PARALLEL_MATE_MIN_DEPTH)
+      return search_root_parallel(game, exact, jobs);
     DepthPath path(path_reserve_capacity(depth_));
     return forced_win(game, path, depth_, exact);
   }
@@ -576,9 +599,281 @@ private:
   SearchScratch scratch_;
 #endif
 
+  // ---- Parallel search (doc/mate_usage.md「並列の詰み探索」) ----
+
+  using SharedMemo = csplendor::solver_internal::RevealSharedMemoTable;
+  using SharedExactMemo = csplendor::solver_internal::RevealSharedExactMemoTable;
+  struct SharedTables {
+    csplendor::solver_internal::ConcurrentTableGrowth growth;
+    SharedMemo blank;
+    SharedExactMemo exact;
+    explicit SharedTables(size_t max_entries)
+        : blank(max_entries, &growth), exact(max_entries, &growth) {}
+  };
+  // A node of the split, enough to resume the serial search there: the
+  // position, the reveal state, the line hash and the ancestors on the path.
+  struct SplitNode {
+    Game game{0};
+    RevealSearchState reveal_state;
+    uint64_t line_hash = 0;
+    DepthPath path;
+    int depth = 0;
+    bool exact = false;
+  };
+  using SplitNodeExpansion =
+      csplendor::solver_internal::SplitExpansion<OrderedAction, DepthStateKey>;
+  // Each line table of a worker thread: 2^17 16-byte slots (2 MiB).
+  static constexpr size_t PARALLEL_LINE_TABLE_SLOTS = size_t{1} << 17;
+
+  class SplitWorker {
+  public:
+    using Node = SplitNode;
+    using Move = OrderedAction;
+    using Key = DepthStateKey;
+    explicit SplitWorker(Impl &impl) : impl_(&impl) {}
+    void expand(const Node &node, SplitNodeExpansion &out) {
+      impl_->split_expand(node, out);
+    }
+    Node child(const Node &node, const SplitNodeExpansion &expansion,
+               size_t branch, int outcome) {
+      return impl_->split_child(node, expansion, branch, outcome);
+    }
+    ForceStatus search(const Node &node, const SplitNodeExpansion &expansion,
+                       size_t branch, int outcome) {
+      return impl_->split_search(node, expansion, branch, outcome);
+    }
+    void store(const SplitNodeExpansion &expansion, ForceStatus status,
+               size_t branch, int outcome) {
+      impl_->split_store(expansion, status, branch, outcome);
+    }
+    void set_cancellation_token(
+        std::shared_ptr<RevealSearchCancellationToken> token) {
+      impl_->limits_.set_cancellation_token(std::move(token));
+    }
+    void attach() { impl_->shared_->growth.attach(); }
+    void detach() { impl_->shared_->growth.detach(); }
+
+  private:
+    Impl *impl_;
+  };
+
+  // The workers are copies of this search after begin_search() (same root,
+  // hidden catalog, limits and clock) without its tables, each with its own
+  // line tables and statistics, over one pair of shared tables.
+  ForceStatus search_root_parallel(Game &game, bool exact, unsigned jobs) {
+    parallel_jobs_ = jobs;
+    shared_ = nullptr;
+    shared_tables_ = std::make_shared<SharedTables>(memo_cap_);
+    std::vector<std::unique_ptr<Impl>> workers;
+    {
+      // The tables this solver may carry (session cache, near-mate bounds)
+      // stay here.
+      Memo memo = std::move(memo_);
+      ExactMemo exact_memo = std::move(exact_memo_);
+      auto prob_memo = std::move(prob_memo_);
+      prob_memo_.clear();
+      for (unsigned k = 0; k < jobs; ++k)
+        workers.push_back(std::make_unique<Impl>(*this));
+      memo_ = std::move(memo);
+      exact_memo_ = std::move(exact_memo);
+      prob_memo_ = std::move(prob_memo);
+    }
+    std::atomic<uint64_t> spent_nodes{0};
+    std::vector<SplitWorker> adapters;
+    std::vector<SplitWorker *> handles;
+    adapters.reserve(jobs);
+    for (auto &worker : workers) {
+      worker->shared_ = shared_tables_.get();
+      worker->stats_ = RevealVerifiedSearchStats();
+      const size_t line_slots = std::min(memo_cap_, PARALLEL_LINE_TABLE_SLOTS);
+      worker->line_proofs_.set_max_slots(line_slots);
+      worker->line_refutations_.set_max_slots(line_slots);
+      worker->limits_.share_node_budget(&spent_nodes);
+      adapters.emplace_back(*worker);
+    }
+    for (SplitWorker &adapter : adapters)
+      handles.push_back(&adapter);
+
+    SplitNode root;
+    root.game = game.clone_light();
+    root.game.board.hash(); // read by several threads: cache it now
+    root.reveal_state = reveal_state_;
+    root.line_hash = line_hash_;
+    root.path = DepthPath(path_reserve_capacity(depth_));
+    root.depth = depth_;
+    root.exact = exact;
+    csplendor::solver_internal::ParallelMateSearch<SplitWorker> search;
+    const auto result = search.run(handles, root, limits_.cancellation_token());
+    stats_ = RevealVerifiedSearchStats();
+    for (const auto &worker : workers)
+      add_search_stats(stats_, worker->stats_);
+    // This thread reads the shared tables until solve() ends.
+    shared_ = shared_tables_.get();
+    shared_->growth.attach();
+    if (!result.decided)
+      throw SearchLimitExceeded(result.unknown_reason);
+    return result.status;
+  }
+
+  // Applies one edge of a split node to `game` (at the node, with this
+  // worker's reveal state and line hash at the node) as the serial search
+  // visits it; `depth` and `exact` become the child's.
+  bool apply_split_edge(Game &game, const SplitNodeExpansion::Branch &branch,
+                        int outcome, int &depth, bool &exact) {
+    const OrderedAction &ordered = branch.move;
+    const int mover = game.current_player();
+    if (mover == attacker_)
+      line_hash_ = mix_line_hash(line_hash_, ordered.code);
+    const Action action = Action::unpack(ordered.code);
+    bool applied = false;
+    if (outcome == csplendor::solver_internal::SPLIT_BLANK) {
+      ++stats_.blank_cut_attempts;
+      game.blank_refill_mode = true;
+      exact = false;
+      applied = apply_action_tracked(game, action);
+    } else {
+      const int reveal = branch.outcomes[static_cast<size_t>(outcome)];
+      if (!is_replayable(ordered)) {
+        applied = apply_tracked(game,
+                                [&] { return apply_oracle_action(game, ordered); });
+      } else if (action.type == RESERVE_DECK) {
+        applied = apply_deck_reserve_outcome(game, action, reveal);
+        stats_.deck_reserve_branches += applied;
+      } else if (reveal >= 0) {
+        applied = apply_visible_refill_outcome(
+            game, action, visible_refill_level(action),
+            visible_refill_slot(game.board, action), reveal);
+      } else {
+        applied = apply_action_tracked(game, action);
+      }
+    }
+    depth = child_depth(depth, mover, game);
+    return applied;
+  }
+
+  void resume_split_node(const SplitNode &node) {
+    reveal_state_ = node.reveal_state;
+    line_hash_ = node.line_hash;
+  }
+
+  // The serial search's node up to its moves, then every move with the
+  // outcomes it would visit (none searched).
+  void split_expand(const SplitNode &node, SplitNodeExpansion &out) {
+    out = SplitNodeExpansion();
+    Game game = node.game.clone_light();
+    DepthPath path = node.path;
+    resume_split_node(node);
+    check_limits();
+    ++stats_.nodes;
+    StateKey state;
+    bool last_move = false;
+    const auto open = [&](auto &table) {
+      if (decide_before_moves(game, path, node.depth, node.exact, table,
+                              state, last_move, out.status)) {
+        out.decided = true;
+        return;
+      }
+      std::vector<OrderedAction> actions;
+      fill_node_moves(game, path, node.depth, node.exact, state, last_move,
+                      actions);
+      if (actions.empty()) {
+        using MemoEntry = typename std::decay_t<decltype(table)>::mapped_type;
+        ++stats_.terminal_nodes;
+        store_entry(table, {state, node.depth},
+                    MemoEntry{ForceStatus::REFUTED, 0, -1, false, 0});
+        out.decided = true;
+        out.status = ForceStatus::REFUTED;
+        return;
+      }
+      out.key = DepthStateKey{state, node.depth};
+      out.or_node = game.current_player() == attacker_;
+      for (const OrderedAction &ordered : actions) {
+        SplitNodeExpansion::Branch branch;
+        branch.move = ordered;
+        const auto record = [&](int reveal) {
+          branch.outcomes.push_back(reveal);
+          return true;
+        };
+        const auto blank = [&](Game &, const Action &) {
+          branch.blank = true;
+          return false;
+        };
+        branch.complete =
+            node.exact ? for_each_proof_outcome(game, ordered, record, blank)
+                       : for_each_search_outcome(game, ordered, record);
+        out.branches.push_back(std::move(branch));
+      }
+    };
+    if (node.exact)
+      open(shared_->exact);
+    else
+      open(shared_->blank);
+  }
+
+  SplitNode split_child(const SplitNode &node,
+                        const SplitNodeExpansion &expansion, size_t branch,
+                        int outcome) {
+    SplitNode child;
+    child.game = node.game.clone_light();
+    child.path = node.path;
+    child.path.push(expansion.key);
+    resume_split_node(node);
+    child.depth = node.depth;
+    child.exact = node.exact;
+    if (!apply_split_edge(child.game, expansion.branches[branch], outcome,
+                          child.depth, child.exact))
+      throw std::logic_error("parallel mate search could not replay a move");
+    child.game.board.hash(); // read by several threads: cache it now
+    child.reveal_state = reveal_state_;
+    child.line_hash = line_hash_;
+    return child;
+  }
+
+  ForceStatus split_search(const SplitNode &node,
+                           const SplitNodeExpansion &expansion, size_t branch,
+                           int outcome) {
+    Game game = node.game.clone_light();
+    DepthPath path = node.path;
+    resume_split_node(node);
+    ScopedPathEntry<DepthPath> path_entry(path, expansion.key);
+    int depth = node.depth;
+    bool exact = node.exact;
+    if (!apply_split_edge(game, expansion.branches[branch], outcome, depth,
+                          exact))
+      throw std::logic_error("parallel mate search could not replay a move");
+    const ForceStatus status = forced_win(game, path, depth, exact);
+    if (outcome == csplendor::solver_internal::SPLIT_BLANK)
+      stats_.blank_cut_proofs += status == ForceStatus::PROVEN;
+    return status;
+  }
+
+  // The entry of a decided split node, as the serial search stores it.
+  void split_store(const SplitNodeExpansion &expansion, ForceStatus status,
+                   size_t branch, int outcome) {
+    const auto &chosen = expansion.branches[branch];
+    const int reveal = chosen.outcomes[static_cast<size_t>(outcome)];
+    const size_t count = expansion.branches.size();
+    const bool replayable = is_replayable(chosen.move);
+    if (exact_reveal_search_)
+      store_entry(shared_->exact,
+                  ExactDepthStateKey{expansion.key.state, expansion.key.depth()},
+                  PersistentEntry{status, chosen.move.code, reveal, true, count,
+                                  replayable});
+    else
+      store_entry(shared_->blank, expansion.key,
+                  Entry{status, chosen.move.code, reveal, true, count,
+                        replayable});
+  }
+
   int attacker_ = 0;
   int depth_ = 0;
   uint64_t max_nodes_ = 0;
+  unsigned jobs_ = 1; // 0 = csplendor::default_mate_jobs()
+  unsigned parallel_jobs_ = 1; // the threads of the last solve()
+  // The parallel search's tables (owned here, shared with the workers) and
+  // the tables forced_win() and principal_line() use while set.
+  std::shared_ptr<SharedTables> shared_tables_;
+  SharedTables *shared_ = nullptr;
   size_t max_cache_states_ = 0;
   size_t max_memo_states_ = 0; // 0 = from the memory budget
   size_t memo_cap_ = 0;        // resolved at begin_search()
@@ -820,26 +1115,41 @@ private:
 
   ForceStatus forced_win(Game &game, DepthPath &path, int depth,
                          bool exact_refinement) {
+    if (shared_ != nullptr)
+      return exact_refinement
+                 ? forced_win_with_memo(game, path, depth, true, shared_->exact)
+                 : forced_win_with_memo(game, path, depth, false, shared_->blank);
     if (exact_refinement)
       return forced_win_with_memo(game, path, depth, true, exact_memo_);
     return forced_win_with_memo(game, path, depth, false, memo_);
   }
 
-  template <typename MemoType>
-  ForceStatus forced_win_with_memo(Game &game, DepthPath &path, int depth,
-                                   bool exact_refinement, MemoType &memo) {
-    check_limits();
-    ++stats_.nodes;
+  // The exact table of this search: the shared one in a parallel search.
+  const PersistentEntry *find_exact(const ExactDepthStateKey &key) const {
+    return shared_ != nullptr ? shared_->exact.find(key) : exact_memo_.find(key);
+  }
 
+  // The checks of a node before its moves: terminal, out of depth, the
+  // final-round rules, the table, the path (a repetition is unknown) and the
+  // cuts. True when they decide the node (`decided`); otherwise `state` is the
+  // node's key and `last_move` whether only winning last moves are generated.
+  template <typename MemoType>
+  bool decide_before_moves(Game &game, const DepthPath &path, int depth,
+                           bool exact_refinement, MemoType &memo,
+                           StateKey &state, bool &last_move,
+                           ForceStatus &decided) {
     const TerminalResult terminal{game.is_game_over(), game.winner(),
                                   "game_over"};
     if (terminal.terminal) {
       ++stats_.terminal_nodes;
-      return terminal.winner == attacker_ ? ForceStatus::PROVEN
-                                          : ForceStatus::REFUTED;
+      decided = terminal.winner == attacker_ ? ForceStatus::PROVEN
+                                             : ForceStatus::REFUTED;
+      return true;
     }
-    if (game.current_player() == attacker_ && depth <= 0)
-      return ForceStatus::REFUTED;
+    if (game.current_player() == attacker_ && depth <= 0) {
+      decided = ForceStatus::REFUTED;
+      return true;
+    }
     // Final-round nodes decided by the direct rule skip the hash and the
     // table (doc/mate_usage.md「最終ラウンドの直接判定の前置き」): the rule
     // costs a few comparisons, an entry costs more than deciding again.
@@ -848,44 +1158,49 @@ private:
       if (resolve_final_round_direct(game, direct, exact_refinement)) {
         ++stats_.final_round_direct_resolutions;
         stats_.final_round_score_prunes += direct == ForceStatus::PROVEN;
-        return direct;
+        decided = direct;
+        return true;
       }
     }
 
-    const StateKey state = state_key(game, exact_refinement);
+    state = state_key(game, exact_refinement);
     const DepthStateKey path_key{state, depth};
     using MemoKey = typename MemoType::key_type;
     using MemoEntry = typename MemoType::mapped_type;
     const MemoKey key{state, depth};
     CSPLENDOR_PERF_TT_PROBE_SCOPE(tt_probe);
-    MemoEntry *hit = memo.find(key);
+    auto *hit = memo.find(key);
     CSPLENDOR_PERF_TT_PROBE_FINISH(tt_probe);
     if (hit != nullptr) {
       CSPLENDOR_PERF_INC(SolverTtHits);
       ++stats_.memo_hits;
-      if constexpr (MemoEntry::tracks_persistence) {
+      if constexpr (MemoEntry::tracks_persistence && !MemoType::concurrent) {
         if (hit->generation() != search_generation_)
           ++stats_.persistent_memo_hits;
         hit->set_generation(search_generation_);
         hit->set_last_touched(++cache_touch_counter_);
       }
-      return hit->status();
+      decided = hit->status();
+      return true;
     }
     if (path.contains(path_key)) {
       ++stats_.terminal_nodes;
-      return ForceStatus::UNKNOWN;
+      decided = ForceStatus::UNKNOWN;
+      return true;
     }
     if (can_resolve_final_round(game)) {
       const MemoEntry resolved =
           resolve_final_round<MemoEntry>(game, exact_refinement);
       store_entry(memo, key, resolved);
-      return resolved.status();
+      decided = resolved.status();
+      return true;
     }
-    const bool last_move = last_move_cut_applies(game, attacker_, depth);
+    last_move = last_move_cut_applies(game, attacker_, depth);
     if (last_move && !can_win_this_turn(game.board)) {
       ++stats_.terminal_nodes;
       store_entry(memo, key, MemoEntry{ForceStatus::REFUTED, 0, -1, false, 0});
-      return ForceStatus::REFUTED;
+      decided = ForceStatus::REFUTED;
+      return true;
     }
     if (reach_cut_applies(game, attacker_, depth)) {
       CardList oracle_now;
@@ -895,7 +1210,8 @@ private:
         ++stats_.reach_cut_refutations;
         ++stats_.terminal_nodes;
         store_entry(memo, key, MemoEntry{ForceStatus::REFUTED, 0, -1, false, 0});
-        return ForceStatus::REFUTED;
+        decided = ForceStatus::REFUTED;
+        return true;
       }
     }
     if (last_reply_cut_applies(game, depth)) {
@@ -903,9 +1219,62 @@ private:
       if (attacker_wins_after_any_reply(game, exact_refinement)) {
         ++stats_.last_reply_cut_proofs;
         store_entry(memo, key, MemoEntry{ForceStatus::PROVEN, 0, -1, false, 0});
-        return ForceStatus::PROVEN;
+        decided = ForceStatus::PROVEN;
+        return true;
       }
     }
+    return false;
+  }
+
+  // A node's moves in visiting order, all generated at once (the eager path;
+  // the lazy path of a defender yields the same order group by group).
+  void fill_node_moves(const Game &game, const DepthPath &path, int depth,
+                       bool exact_refinement, const StateKey &state,
+                       bool last_move, std::vector<OrderedAction> &actions) {
+    const bool attacker_node = game.current_player() == attacker_;
+    if (last_move)
+      fill_winning_last_moves(game, actions);
+    else
+      fill_ordered_actions(game, actions, exact_refinement);
+    CSPLENDOR_PERF_INC(SolverTemporaryVectorAllocations);
+    filter_probe_actions(attacker_node, actions);
+    apply_order_hints(state.board_hash(), attacker_node, actions);
+    if (exact_refinement)
+      prefer_iterative_action(state, depth, game.current_player(), actions);
+    prefer_line_move(attacker_node, actions);
+    if (attacker_node) {
+#ifdef CSPLENDOR_REUSE_SEARCH_SCRATCH
+      // The exhaustive path only reordered a copy. Keep this frame's
+      // capacity; constrained/filtering paths retain the existing selection
+      // algorithm.
+      if (exhaustive_attacker_actions_ &&
+          !strict_preferred_attacker_actions_ &&
+          strict_preferred_attacker_prefix_ == 0 &&
+          !(path.empty() && required_root_action_ != UINT64_MAX))
+        prefer_candidate_action(actions, depth);
+      else
+#endif
+        actions = forced_attacker_actions(game, actions, depth, path.empty());
+    }
+    stats_.legal_moves += actions.size();
+  }
+
+  template <typename MemoType>
+  ForceStatus forced_win_with_memo(Game &game, DepthPath &path, int depth,
+                                   bool exact_refinement, MemoType &memo) {
+    check_limits();
+    ++stats_.nodes;
+
+    StateKey state;
+    bool last_move = false;
+    ForceStatus early = ForceStatus::UNKNOWN;
+    if (decide_before_moves(game, path, depth, exact_refinement, memo, state,
+                            last_move, early))
+      return early;
+    const DepthStateKey path_key{state, depth};
+    using MemoKey = typename MemoType::key_type;
+    using MemoEntry = typename MemoType::mapped_type;
+    const MemoKey key{state, depth};
 
 #ifdef CSPLENDOR_REUSE_SEARCH_SCRATCH
     SearchScratch::Lease scratch_lease(scratch_);
@@ -923,31 +1292,8 @@ private:
     const bool lazy = !attacker_node && lazy_replies_apply(game) &&
                       prefer_remembered_replies(replies, state, depth, front);
     if (!lazy) {
-      if (last_move)
-        fill_winning_last_moves(game, actions);
-      else
-        fill_ordered_actions(game, actions, exact_refinement);
-      CSPLENDOR_PERF_INC(SolverTemporaryVectorAllocations);
-      filter_probe_actions(attacker_node, actions);
-      apply_order_hints(state.board_hash(), attacker_node, actions);
-      if (exact_refinement)
-        prefer_iterative_action(state, depth, current_player, actions);
-      prefer_line_move(attacker_node, actions);
-      if (attacker_node) {
-#ifdef CSPLENDOR_REUSE_SEARCH_SCRATCH
-        // The exhaustive path only reordered a copy. Keep this frame's
-        // capacity; constrained/filtering paths retain the existing selection
-        // algorithm.
-        if (exhaustive_attacker_actions_ &&
-            !strict_preferred_attacker_actions_ &&
-            strict_preferred_attacker_prefix_ == 0 &&
-            !(path.empty() && required_root_action_ != UINT64_MAX))
-          prefer_candidate_action(actions, depth);
-        else
-#endif
-          actions = forced_attacker_actions(game, actions, depth, path.empty());
-      }
-      stats_.legal_moves += actions.size();
+      fill_node_moves(game, path, depth, exact_refinement, state, last_move,
+                      actions);
       if (actions.empty()) {
         ++stats_.terminal_nodes;
         store_entry(memo, key, MemoEntry{ForceStatus::REFUTED, 0, -1, false, 0});
@@ -1005,9 +1351,8 @@ private:
         if (!apply_action_tracked(blank, action))
           return false;
         const int next_depth = child_depth(depth, current_player, blank);
-        const bool proven =
-            forced_win_with_memo(blank, path, next_depth, false, memo_) ==
-            ForceStatus::PROVEN;
+        const bool proven = forced_win(blank, path, next_depth, false) ==
+                            ForceStatus::PROVEN;
         stats_.blank_cut_proofs += proven;
         return proven;
       };
@@ -1106,7 +1451,7 @@ private:
            cached_depth >= 0 && iterative == nullptr; --cached_depth) {
         CSPLENDOR_PERF_TT_PROBE_SCOPE(iterative_memo_probe);
         const PersistentEntry *cached =
-            exact_memo_.find(ExactDepthStateKey{state, cached_depth});
+            find_exact(ExactDepthStateKey{state, cached_depth});
         CSPLENDOR_PERF_TT_PROBE_FINISH(iterative_memo_probe);
         if (cached != nullptr)
           CSPLENDOR_PERF_INC(SolverTtHits);
@@ -1197,20 +1542,25 @@ private:
     // entries, which starves the search of memoisation. 64-byte slots at a
     // load factor of at most 0.7: about 92 bytes per entry at the cap.
     CSPLENDOR_PERF_INC(SolverTtStores);
-    using MemoEntry = typename MemoType::mapped_type;
-    if constexpr (MemoEntry::tracks_persistence) {
-      entry.set_generation(search_generation_);
-      entry.set_last_touched(++cache_touch_counter_);
+    if constexpr (MemoType::concurrent) {
+      // The shared table keeps the first entry of a key and never flushes.
+      memo.insert(key, entry);
+    } else {
+      using MemoEntry = typename MemoType::mapped_type;
+      if constexpr (MemoEntry::tracks_persistence) {
+        entry.set_generation(search_generation_);
+        entry.set_last_touched(++cache_touch_counter_);
+      }
+      if (MemoEntry *existing = memo.find(key)) {
+        *existing = entry;
+        return;
+      }
+      if (memo.size() >= memo_cap_) {
+        ++stats_.memo_flushes;
+        memo.clear();
+      }
+      memo.insert(key, entry);
     }
-    if (MemoEntry *existing = memo.find(key)) {
-      *existing = entry;
-      return;
-    }
-    if (memo.size() >= memo_cap_) {
-      ++stats_.memo_flushes;
-      memo.clear();
-    }
-    memo.insert(key, entry);
   }
 
   void prefer_iterative_action(const StateKey &state, int depth,
@@ -1221,7 +1571,7 @@ private:
     for (int cached_depth = depth - 1; cached_depth >= 0; --cached_depth) {
       CSPLENDOR_PERF_TT_PROBE_SCOPE(iterative_memo_probe);
       const PersistentEntry *cached =
-          exact_memo_.find(ExactDepthStateKey{state, cached_depth});
+          find_exact(ExactDepthStateKey{state, cached_depth});
       CSPLENDOR_PERF_TT_PROBE_FINISH(iterative_memo_probe);
       if (cached != nullptr)
         CSPLENDOR_PERF_INC(SolverTtHits);
@@ -3228,6 +3578,10 @@ private:
     ScopedRevealStateRestore restore_state(*this);
     Game game = root_.clone_light();
     reveal_state_ = root_reveal_state_;
+    if (shared_ != nullptr)
+      return exact_refinement
+                 ? principal_line_from_memo(game, true, shared_->exact)
+                 : principal_line_from_memo(game, false, shared_->blank);
     if (exact_refinement)
       return principal_line_from_memo(game, true, exact_memo_);
     return principal_line_from_memo(game, false, memo_);
@@ -3265,7 +3619,7 @@ private:
         // Search the skipped attacker node into a scratch table (a few
         // nodes), leaving the table, its recency order and the statistics as
         // the search left them.
-        MemoType scratch;
+        typename MemoType::serial_table scratch;
         const RevealVerifiedSearchStats saved_stats = stats_;
         bool searched = true;
         try {
@@ -3333,7 +3687,11 @@ private:
     return line;
   }
 
-  void check_limits() const { limits_.check(stats_.nodes); }
+  void check_limits() {
+    limits_.check(stats_.nodes);
+    if (shared_ != nullptr)
+      shared_->growth.safepoint(); // holds no pointer into the tables here
+  }
 };
 
 RevealVerifiedSolver::RevealVerifiedSolver(
@@ -3395,6 +3753,8 @@ NearMateResult RevealVerifiedSolver::near_mate(const Game &input, bool root_exac
 void RevealVerifiedSolver::set_line_transplant(bool enabled) {
   impl_->set_line_transplant(enabled);
 }
+
+void RevealVerifiedSolver::set_jobs(unsigned jobs) { impl_->set_jobs(jobs); }
 
 void RevealVerifiedSolver::set_max_memo_states(size_t limit) {
   impl_->set_max_memo_states(limit);

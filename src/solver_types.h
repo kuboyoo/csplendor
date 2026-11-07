@@ -80,6 +80,37 @@ struct RevealVerifiedSearchStats {
   double elapsed_ms = 0.0;
 };
 
+// Sums the counters of `part` into `total` (the threads of a parallel
+// search); elapsed_ms is left to the caller.
+inline void add_search_stats(RevealVerifiedSearchStats &total,
+                             const RevealVerifiedSearchStats &part) noexcept {
+  total.nodes += part.nodes;
+  total.hint_lookups += part.hint_lookups;
+  total.hint_hits += part.hint_hits;
+  total.hint_restricted_nodes += part.hint_restricted_nodes;
+  total.line_order_hits += part.line_order_hits;
+  total.probe_dropped_actions += part.probe_dropped_actions;
+  total.memo_flushes += part.memo_flushes;
+  total.memo_hits += part.memo_hits;
+  total.persistent_memo_hits += part.persistent_memo_hits;
+  total.iterative_order_hits += part.iterative_order_hits;
+  total.terminal_nodes += part.terminal_nodes;
+  total.legal_moves += part.legal_moves;
+  total.reveal_branches += part.reveal_branches;
+  total.final_round_reveal_collapses += part.final_round_reveal_collapses;
+  total.final_round_score_prunes += part.final_round_score_prunes;
+  total.final_round_direct_resolutions += part.final_round_direct_resolutions;
+  total.oracle_purchase_actions += part.oracle_purchase_actions;
+  total.oracle_reserve_actions += part.oracle_reserve_actions;
+  total.deck_reserve_candidates += part.deck_reserve_candidates;
+  total.deck_reserve_branches += part.deck_reserve_branches;
+  total.blank_cut_attempts += part.blank_cut_attempts;
+  total.blank_cut_proofs += part.blank_cut_proofs;
+  total.last_reply_cut_attempts += part.last_reply_cut_attempts;
+  total.last_reply_cut_proofs += part.last_reply_cut_proofs;
+  total.reach_cut_refutations += part.reach_cut_refutations;
+}
+
 struct RevealVerifiedLineEntry {
   uint64_t action_code = 0;
   int reveal_card = -1;
@@ -156,6 +187,7 @@ struct RevealVerifiedSearchResult {
   bool proven = false;
   int attacker = -1;
   int depth = -1;
+  unsigned jobs = 1; // threads the search ran on (doc/mate_usage.md「並列の詰み探索」)
   std::string reason = "unknown";
   std::string unknown_reason;
   size_t memoized_states = 0;
@@ -211,21 +243,44 @@ public:
       : max_nodes_(max_nodes), time_limit_seconds_(time_limit_seconds),
         cancellation_token_(std::move(cancellation_token)) {}
 
+  static constexpr uint64_t EXPENSIVE_CHECK_INTERVAL = 64;
+
   void reset() noexcept { start_time_ = Clock::now(); }
+
+  const std::shared_ptr<RevealSearchCancellationToken> &
+  cancellation_token() const noexcept {
+    return cancellation_token_;
+  }
+  void set_cancellation_token(
+      std::shared_ptr<RevealSearchCancellationToken> token) noexcept {
+    cancellation_token_ = std::move(token);
+  }
+  // The threads of a parallel search spend the node limit together
+  // (doc/mate_usage.md「並列の詰み探索」): each poll takes the next
+  // EXPENSIVE_CHECK_INTERVAL nodes from `spent`, so the limit is exact to
+  // within that many nodes per thread.
+  void share_node_budget(std::atomic<uint64_t> *spent) noexcept {
+    shared_nodes_ = spent;
+  }
 
   void check(uint64_t visited_nodes) const {
     // Node limits are exact.  Clock and atomic cancellation reads are sampled:
     // at solver throughput, checking them on every node costs a meaningful
     // fraction of the available move time while adding negligible response
     // latency.  Node zero keeps immediate timeout/pre-cancellation semantics.
-    constexpr uint64_t EXPENSIVE_CHECK_INTERVAL = 64;
     const bool poll_expensive_limits =
         (visited_nodes & (EXPENSIVE_CHECK_INTERVAL - 1)) == 0;
     if (poll_expensive_limits && cancellation_token_ &&
         cancellation_token_->is_cancelled())
       throw SearchLimitExceeded("search cancelled");
-    if (max_nodes_ && visited_nodes >= max_nodes_)
+    if (shared_nodes_ != nullptr) {
+      if (max_nodes_ && poll_expensive_limits &&
+          shared_nodes_->fetch_add(EXPENSIVE_CHECK_INTERVAL,
+                                   std::memory_order_relaxed) >= max_nodes_)
+        throw SearchLimitExceeded("node limit exceeded");
+    } else if (max_nodes_ && visited_nodes >= max_nodes_) {
       throw SearchLimitExceeded("node limit exceeded");
+    }
     if (poll_expensive_limits && time_limit_seconds_ > 0.0 &&
         elapsed_ms() >= time_limit_seconds_ * 1000.0)
       throw SearchLimitExceeded("time limit exceeded");
@@ -242,6 +297,7 @@ private:
   uint64_t max_nodes_ = 0;
   double time_limit_seconds_ = 0.0;
   std::shared_ptr<RevealSearchCancellationToken> cancellation_token_;
+  std::atomic<uint64_t> *shared_nodes_ = nullptr;
   Clock::time_point start_time_ = Clock::now();
 };
 

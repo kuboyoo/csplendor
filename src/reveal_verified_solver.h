@@ -65,6 +65,13 @@ public:
   // Proof transplantation across sibling reveals/defender replies (ordering
   // only, on by default); off reproduces the plain depth-first order.
   void set_line_transplant(bool enabled);
+  // Threads of solve() with the depth-first search (doc/mate_usage.md
+  // 「並列の詰み探索」): 1 (the default) is the serial search; more split the
+  // root's moves and the moves below them across threads over shared tables
+  // (same verdicts; nodes, statistics and the principal line may differ);
+  // 0 = csplendor::default_mate_jobs(). Depths below 3, df-pn and the other
+  // entry points always run on one thread.
+  void set_jobs(unsigned jobs);
   // Cap of the transposition tables (flushed and refilled at the cap; the
   // search remains exact). 0 = resolve_max_memo_states() at the start of each
   // search (src/solver_memory_budget.h).
