@@ -35,6 +35,8 @@ restored = cs.Game.deserialize_snapshot(snapshot)
 assert restored.serialize_snapshot() == snapshot
 ```
 
+A position occurring for the fourth time in a game (not necessarily consecutively) is a draw by repetition (`GameEndReason.REPETITION`).
+
 `simple_payment_mode=True` chooses one minimum-gold payment per purchase; `False` enumerates every valid payment. Token-return choices remain available in both modes. **Game defaults to False, while HTTP POST /game defaults to True.** Set the mode explicitly for each match. Seed 0 is deterministic too.
 
 ## Benchmarks and specifications
@@ -48,18 +50,16 @@ The [Japanese README](README.md) contains the complete guide; focused documents 
 | Cards and nobles | [All 90 cards and 12 nobles: IDs, colors, costs, points](doc/card_catalog.md) |
 | Python | [API reference](doc/api_ref.md) |
 | AI inputs | [196-feature schema and action masks](doc/ml_integration.md) |
-| Full action space | [V2: 4869 IDs](doc/action_space_v2.md), [V3: 3133 IDs](doc/action_space_v3.md) |
+| Full action space | [V2: 4869 IDs](doc/action_space_v2.md), [V3: 3133 IDs](doc/action_space_v3.md), [V5: 3049 IDs, recommended](doc/action_space_v5.md) |
 | Search | [Mate search](doc/mate_usage.md), [experimental parallel MCTS](doc/parallel_mcts_usage.md) |
 | Persistence | [Full snapshot](doc/game_snapshot.md), [observer-safe identity](doc/information_state.md), [KIFU](doc/KIFU.md) |
 | External engines | [USI specification source](https://github.com/kuboyoo/usi/blob/main/docs/USI.md) |
 | HTTP integration | [Web API](doc/web_api.md) |
 | All documents | [Documentation index](doc/index.md) |
 
-October 4, 2026 hot-path work (main `0088f76` → `c35062d`, bit-identical results) made the native `V3SearchSession` 1.31–1.43x faster single threaded. It added an opt-in `V3SearchConfig.num_threads` (per-game parallel `collect()`/`apply()`, identical results for any thread count; 8.0x the previous sequential rate at 16 threads in a 64-game benchmark) and a batched `ActionEncoderV3.legal_action_ids(game)` returning an int32 array. These figures exclude neural-network inference.
+Measured on November 14, 2026 (main `e361b6e`, Apple M4 Pro, macOS 27.2, Apple clang 21, Python 3.13, portable Release; no neural-network inference): native legal-action counting 6.49M calls/s and packed generation 0.47M calls/s on a 190-action position, native random self-play 3.16M moves/s, `Game.legal_actions` 12k calls/s from Python on a 182-action position, `ActionEncoderV5.legal_action_ids` 1.3 µs, and `V3SearchSession` 0.14M / 0.35M / 0.49M simulations/s with `num_threads` 1 / 4 / 10 (64 games × 400 simulations). The benchmark reference lists every workload and how to reproduce it.
 
-Saved September 6, 2026 measurements of the F1 candidate include 3,112,938 native legal-count calls/sec and 1,051.16 ms for an exact-reveal search with a 1-million-node cap. The latter stops at UNKNOWN, not a completed mate proof. These are measurements of identified historical binaries, not a fresh benchmark of the latest HEAD. The benchmark reference records fixtures, revisions, confidence intervals and limitations.
-
-Gem arrays use White, Blue, Green, Red, Black, Gold order; five-element arrays omit Gold. USI symbols are W, U, G, R, K, D. Card IDs, action-list indices, packed action codes and policy IDs are different identifiers. Built-in C++ MCTS uses a fixed **48-action** policy; V3 cannot be substituted directly.
+Gem arrays use White, Blue, Green, Red, Black, Gold order; five-element arrays omit Gold. USI symbols are W, U, G, R, K, D. Card IDs, action-list indices, packed action codes and policy IDs are different identifiers. Built-in C++ MCTS uses a fixed **48-action** policy; V3/V5 cannot be substituted directly.
 
 ## Web integration
 

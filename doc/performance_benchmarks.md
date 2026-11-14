@@ -1,6 +1,56 @@
 # 速度ベンチマークの測定条件と出典
 
-[README](../README.md#速度ベンチマーク) の表は保存済み測定の抜粋です。この文書は利用者が処理能力を見積もるために、測定対象と適用範囲をまとめます。開発フェーズごとの採否判断は原記録へ分離しています。
+[README](../README.md#速度ベンチマーク) の表は次の「2026-11-14: 現行版の測定」の抜粋です。この文書は利用者が処理能力を見積もるために、測定対象と適用範囲をまとめます。開発フェーズごとの採否判断は原記録へ分離しています。
+
+## 2026-11-14: 現行版の測定
+
+main `e361b6e` を測りました。旧版との比較ではなく、現行版の処理能力の目安です。
+
+| 条件 | 値 |
+|---|---|
+| CPU / OS | Apple M4 Pro（高性能10コア・高効率4コア）/ macOS 27.2 |
+| ツール | Apple clang 21.0、Python 3.13 |
+| ビルド | portable Release（既定のCMakeオプション） |
+| 集計 | C++は5回の中央値。Pythonは各処理5回（`V3SearchSession` は3回）の中央値。macOSのためCPUの固定はしていない |
+
+C++（`scripts/benchmark_engine_hotpaths.cpp`、`midgame_250` fixture。名前は旧ルールのときの合法手数で、現行ルールでは190件）:
+
+| workload | fixture | 1回あたり | 回/秒 |
+|---|---|---:|---:|
+| `legal_count` | midgame_250 | 154 ns | 649万 |
+| `legal_codes` | midgame_250 | 2,144 ns | 47万 |
+| `legal_actions` | midgame_250 | 2,419 ns | 41万 |
+| `random_selfplay_apply` | 初期配置から終局を繰り返す | 316 ns | 316万 |
+| `clone_light` | midgame_250 | 22 ns | 4,532万 |
+| `state_encoder` | midgame_250 | 829 ns | 121万 |
+| `exact_reveal`（深さ7、100万node上限） | hidden_reserve | 0.58 s / 45.6万node | 78万 node |
+
+Python（`scripts/benchmark_readme.py`、合法手182件の局面）:
+
+| 処理 | 測定値 |
+|---|---:|
+| `Game.legal_actions` | 1.2万 回/秒 |
+| `ActionEncoderV5.legal_action_ids` | 1.30 µs |
+| `ActionEncoderV5.get_action_mask` | 1.31 µs |
+| `StateFeaturizer.featurize` | 0.29 µs |
+| `Game.deserialize_snapshot`（189バイト） | 0.61 µs |
+| `apply_random_action` による自己対戦（200局） | 176万 手/秒 |
+| `V3SearchSession`（64局×400探索、葉batch 32、`num_threads` 1 / 4 / 10） | 14万 / 35万 / 49万 sim/s |
+
+`V3SearchSession` には一様なpriorと葉の特徴量から決まるvalueを返す擬似ネットワークを与えており、NN推論を含みません。
+`exact_reveal` は上限に達せず深さ7の探索を最後まで行い、詰みは証明されません（`proven: false`）。所要時間は局面によって大きく変わります。
+
+再現手順:
+
+```bash
+cmake -S . -B build/bench -DCMAKE_BUILD_TYPE=Release -DCSPLENDOR_BUILD_ENGINE_BENCHMARK=ON -DCSPLENDOR_BUILD_PYTHON_MODULE=OFF
+cmake --build build/bench --target benchmark_engine_hotpaths
+build/bench/benchmark_engine_hotpaths --workload legal_count --fixture midgame_250 --iterations 500000
+build/bench/benchmark_engine_hotpaths --workload exact_reveal --fixture hidden_reserve --depth 7 --iterations 1000000 --time-limit 0
+python scripts/benchmark_readme.py 1 4 10
+```
+
+以下の節は過去の版の測定記録です。
 
 ## 2026-10-04: V3探索・行動符号化・snapshot
 

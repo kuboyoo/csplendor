@@ -864,8 +864,10 @@ Fixture make_fixture(const Arguments &arguments) {
 
   // The golden values apply to the canonical rule mode only.  Alternate
   // payment mode intentionally changes the legal action list, but not state.
+  // midgame_250 keeps its name; it has 190 legal actions since face-up
+  // reservations stopped carrying token returns (554e652).
   if (!arguments.simple_payment_mode && fixture.name == "midgame_250") {
-    validate_fixed_fixture(fixture, 250, 14707374328533802645ULL,
+    validate_fixed_fixture(fixture, 190, 14707374328533802645ULL,
                            11956935861795463816ULL, 4997747067739671915ULL);
   }
   if (!arguments.simple_payment_mode && fixture.name == "five_moves") {
@@ -2733,7 +2735,7 @@ uint64_t digest_solver_key(uint64_t digest,
   digest = digest_u64(digest, key.state.unseen_high());
   digest = digest_u64(digest, key.state.acquired_hidden_low());
   digest = digest_u64(digest, key.state.acquired_hidden_high());
-  return digest_i64(digest, key.depth);
+  return digest_i64(digest, key.depth());
 }
 
 Result run_solver_state_key(const Arguments &arguments,
@@ -2780,7 +2782,7 @@ Result run_solver_tt(const Arguments &arguments,
     const SolverBenchmarkKey full_key = make_solver_benchmark_key(
         transitions[index].game, catalog,
         arguments.depth - static_cast<int>(index % 3), nullptr, true);
-    keys.emplace_back(full_key.state, full_key.depth);
+    keys.emplace_back(full_key.state, full_key.depth());
   }
   using SolverBenchmarkTable =
       std::unordered_map<SolverBenchmarkExactKey, SolverBenchmarkEntry,

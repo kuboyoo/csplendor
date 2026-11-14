@@ -129,51 +129,23 @@ assert game.apply(action)
 
 ## 速度ベンチマーク
 
-以下は**保存済みの測定結果**です。「回/秒」は局面1個の合法手生成などを1回と数え、生成した個々の手の数ではありません。
+2026-11-14 に main `e361b6e` を測った値です。Apple M4 Pro（高性能10コア・高効率4コア）、macOS 27.2、Apple clang 21、Python 3.13、portable Release です。NN推論は含みません。
 
-### V3探索・行動符号化（2026-10-04）
-
-ホットスポット高速化（main `0088f76` → `c35062d`）の測定です。探索結果・特徴量・行動IDは比較元とビット一致します。Ryzen 9 7900X、Linux x86_64、GCC 15.2、Python 3.12.1、portable Release。別の学習ジョブが並走している条件で測っています。
-
-| 処理 | 比較元 | 高速化後 | 速度比 | 条件 |
-|---|---:|---:|---:|---|
-| `V3SearchSession`（決定化あり） | 111,601 sim/s | 157,477 sim/s | 1.41倍 | 48局×400探索、葉batch 32、Pythonから呼出し、NN推論を含まない |
-| `V3SearchSession`（決定化なし） | 116,567 sim/s | 152,908 sim/s | 1.31倍 | 同上 |
-| `V3SearchSession` 16スレッド | 99,574 sim/s（逐次） | 798,148 sim/s | 8.0倍 | 64局×400探索、`num_threads=16` |
-| V3合法手マスク | 3,616 ns | 2,692 ns | 1.34倍 | `midgame_250`、CPU1コア固定 |
-| `ActionEncoderV3.legal_action_ids` | 14.11 µs | 0.72 µs | 約20倍 | 比較元はPythonで1手ずつ `encode` |
-| `Game.deserialize_snapshot` | 1,959 ns | 618 ns | 3.2倍 | 184バイトのsnapshot |
-
-各処理の測定値や、採用しなかった案は [ベンチマーク資料](doc/performance_benchmarks.md) と [高速化レビュー](doc/speed_review_20261004.md) にまとめています。
-
-### 合法手生成・特徴量・詰み探索
-
-2026-09-06の高速化候補（F1計測コード `b202e6a`）の測定です。Ryzen 9 7900X、Linux x86_64、GCC 15.2.0、Python 3.12.1、portable Release、CPU 1論理コア固定。比較元は当時のmain `f5ec6c5` です。
-
-| 処理 | F1候補の測定値 | 比較元に対する速度比 | 条件 |
-|---|---:|---:|---|
-| C++合法手の件数取得 | 3,112,938 回/秒 | 2.629倍 | `midgame_250`、20万回、正式系列 |
-| C++ packed合法手生成 | 378,400 回/秒 | 2.438倍 | 同上 |
-| C++ Action生成 | 346,226 回/秒 | 2.008倍 | 同上。Python object生成を含まない |
-| Python `StateFeaturizer` | 29.04 ms / 5万回 | 12.808倍 | `reachable_32_seed42`、独立再測定 |
-| Python特徴量＋環境step | 89.37 ms / 5万手 | 6.044倍 | 同上 |
-| 厳密めくれ詰み探索 | 1,051.16 ms / 100万node上限 | 2.373倍 | `hidden_reserve`、depth 7、独立再測定 |
-
-詰み探索行はnode上限で `UNKNOWN` になる固定仕事で、7手詰めの証明所要時間ではありません。倍率は対応する測定組の比を集計したもので、表示時間の単純な比とは一致しない場合があります。
-
-高速化は後にmainへ統合されていますが、F1と最終版は同一バイナリではありません。CI互換版との限定solver比較では明確な退行を検出していない、という範囲の結果です。[測定条件・信頼区間・原記録](doc/performance_benchmarks.md) を参照してください。
-
-### Python操作・自己対戦・MCTSの参考値
-
-| 処理 | 測定値 | 測定時点・条件 |
+| 処理 | 測定値 | 条件 |
 |---|---:|---|
-| Python `game.legal_actions` | 27,084 回/秒 | 2026-08-30、合法手250件の局面 |
-| C++内部適用の自己対戦 | 892,607 moves/sec | 2026-08-30、Pythonからnative適用を呼ぶ測定 |
-| MCTS exact / legacy / 1 thread | 387,132 sim/s | 2026-08-04、待ち時間ゼロのnative evaluator |
-| MCTS exact / root-parallel / 8 workers | 1,418,195 sim/s | 同上 |
-| MCTS determinized / root-parallel / 8 workers | 1,584,560 sim/s | 同上 |
+| C++ 合法手の件数取得 | 649万 回/秒（154 ns） | 合法手190件の局面 |
+| C++ 合法手の生成（packed整数） | 47万 回/秒（2.1 µs） | 同上 |
+| C++ ランダム自己対戦 | 316万 手/秒 | 初期配置から終局までを繰り返す。合法手の選択と適用 |
+| C++ 局面の複製（`clone_light`） | 22 ns | 合法手190件の局面 |
+| Python `Game.legal_actions` | 1.2万 回/秒 | 合法手182件の局面。`Action` 182個の生成を含む |
+| Python `ActionEncoderV5.legal_action_ids` / `get_action_mask` | 1.3 µs / 1.3 µs | 同上 |
+| Python `StateFeaturizer.featurize` | 0.29 µs | 196次元 |
+| Python `Game.deserialize_snapshot` | 0.61 µs | 189バイト |
+| Pythonからのランダム自己対戦（`apply_random_action`） | 176万 手/秒 | 初期配置から終局まで200局。1手ごとにPythonから呼ぶ |
+| `V3SearchSession` | 14万 / 35万 / 49万 sim/s | 64局×400探索、葉batch 32、`num_threads` 1 / 4 / 10 |
+| 厳密めくれ詰み探索 | 0.58 秒（78万 node/秒） | 伏せ予約のある局面で深さ7の探索を最後まで行う（45.6万node） |
 
-こちらは9月の高速化候補の再測定ではありません。MCTS値はNN推論を含まず、実モデル・GPU・通信を含む対戦サービスのスループットとは区別します。再現コマンドと詳細は [ベンチマーク資料](doc/performance_benchmarks.md) にまとめています。
+「回/秒」は局面1個に対する呼出し1回を1回と数え、生成した手の数ではありません。C++の値は `scripts/benchmark_engine_hotpaths.cpp` の5回の中央値、Pythonの値は `scripts/benchmark_readme.py` の中央値です。`V3SearchSession` の評価は葉の特徴量から決まる擬似ネットワークで、実モデルの推論時間を含む自己対局全体の速度ではありません。詰み探索の行は詰みが証明されない局面での探索で、所要時間は局面によって大きく変わります。測定の手順は [ベンチマーク資料](doc/performance_benchmarks.md) にあります。
 
 ## ゲームルールと合法手生成モード
 
@@ -188,7 +160,9 @@ assert game.apply(action)
 | 所持上限 | トークン合計10、予約カード3枚 |
 | 終了条件 | 手番終了時に15点以上で最終ラウンド。後手の手番終了まで進める |
 | 勝敗 | 得点が高い方。同点なら購入枚数が少ない方。それも同じなら引き分け |
+| 千日手 | 同一局面が対局中に4回目に現れたら引き分け。連続でなくてよい。局面はトークン・手番・返却待ちなどを含む完全な状態 |
 | `winner` | `-1`: 継続中、`0` / `1`: 勝者、`-2`: 引き分け |
+| `board.end_reason` | `GameEndReason`。`NONE`: 継続中、`NORMAL`: 最終ラウンドの決着、`STALEMATE`: 両者とも行動不能、`REPETITION`: 千日手 |
 
 異色取得は銀行にある色から最大3色を1個ずつ、同色2個取得は銀行にその色が4個以上ある場合に可能です。金は通常取得できず、予約時に銀行にあれば1個得ます。取得で10個を超える場合、超過分の返却までを1個の `Action` に含めます。予約（公開・山札）は返却を含まず、11個になった場合は同じ手番のまま返却フェーズ（`waiting_return=True`）に入り、補充された場札・山札から引いたカードを見てから `RETURN_GEM` で1個返します。返却後に貴族判定を行います。
 
