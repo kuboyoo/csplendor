@@ -129,23 +129,19 @@ assert game.apply(action)
 
 ## 速度ベンチマーク
 
-2026-11-14 に main `e361b6e` を測った値です。Apple M4 Pro（高性能10コア・高効率4コア）、macOS 27.2、Apple clang 21、Python 3.13、portable Release です。NN推論は含みません。
+| 処理 | Apple M4 Pro / macOS | Ryzen 9 7900X / Linux | 条件 |
+|---|---:|---:|---|
+| C++ 合法手の件数取得 | 649万 回/秒 | 307万 回/秒（10/04） | 中盤の局面（macOSは合法手190件、Linuxは250件） |
+| C++ 合法手の生成（packed整数） | 47万 回/秒 | 38万 回/秒（09/06） | 同上 |
+| C++ ランダム自己対戦 | 316万 手/秒 | 309万 手/秒（10/04） | 合法手の選択と適用を繰り返す |
+| Python `Game.legal_actions` | 1.2万 回/秒 | 2.7万 回/秒（08/30） | 中盤の局面（macOSは182件、Linuxは250件）。`Action` の生成を含む |
+| Pythonからのランダム自己対戦 | 176万 手/秒 | 89万 手/秒（08/30） | 1手ごとにPythonからnativeの適用を呼ぶ |
+| `V3SearchSession` | 14万 / 35万 / 49万 sim/s | 16万 / 46万 / 72万 sim/s（10/04） | 64局×400探索、葉batch 32。macOSは `num_threads` 1 / 4 / 10、Linuxは 1 / 4 / 8 |
+| 厳密めくれ詰み探索 | 0.58 秒（78万 node/秒） | 1.05 秒（95万 node/秒、09/06） | 伏せ予約のある局面、深さ7。macOSは探索を最後まで行い（45.6万node）、Linuxは100万nodeの上限で打ち切り |
 
-| 処理 | 測定値 | 条件 |
-|---|---:|---|
-| C++ 合法手の件数取得 | 649万 回/秒（154 ns） | 合法手190件の局面 |
-| C++ 合法手の生成（packed整数） | 47万 回/秒（2.1 µs） | 同上 |
-| C++ ランダム自己対戦 | 316万 手/秒 | 初期配置から終局までを繰り返す。合法手の選択と適用 |
-| C++ 局面の複製（`clone_light`） | 22 ns | 合法手190件の局面 |
-| Python `Game.legal_actions` | 1.2万 回/秒 | 合法手182件の局面。`Action` 182個の生成を含む |
-| Python `ActionEncoderV5.legal_action_ids` / `get_action_mask` | 1.3 µs / 1.3 µs | 同上 |
-| Python `StateFeaturizer.featurize` | 0.29 µs | 196次元 |
-| Python `Game.deserialize_snapshot` | 0.61 µs | 189バイト |
-| Pythonからのランダム自己対戦（`apply_random_action`） | 176万 手/秒 | 初期配置から終局まで200局。1手ごとにPythonから呼ぶ |
-| `V3SearchSession` | 14万 / 35万 / 49万 sim/s | 64局×400探索、葉batch 32、`num_threads` 1 / 4 / 10 |
-| 厳密めくれ詰み探索 | 0.58 秒（78万 node/秒） | 伏せ予約のある局面で深さ7の探索を最後まで行う（45.6万node） |
+macOSの列は2026-11-14にmain `e361b6e` を測った値です（Apple M4 Pro（高性能10コア・高効率4コア）、macOS 27.2、Apple clang 21、Python 3.13、portable Release）。Linuxの列はRyzen 9 7900Xで最後に測った値で、括弧内が2026年の測定日です（GCC 15.2、Python 3.12.1、portable Release、C++はCPU1コア固定。10/04は別の学習ジョブが並走）。Linuxの値は当時の版の測定で、その後のルール変更（公開予約が返却を含まなくなった）で同じ局面の合法手数も変わっているため、2つの列は同じ仕事の比較ではありません。
 
-「回/秒」は局面1個に対する呼出し1回を1回と数え、生成した手の数ではありません。C++の値は `scripts/benchmark_engine_hotpaths.cpp` の5回の中央値、Pythonの値は `scripts/benchmark_readme.py` の中央値です。`V3SearchSession` の評価は葉の特徴量から決まる擬似ネットワークで、実モデルの推論時間を含む自己対局全体の速度ではありません。詰み探索の行は詰みが証明されない局面での探索で、所要時間は局面によって大きく変わります。測定の手順は [ベンチマーク資料](doc/performance_benchmarks.md) にあります。
+「回/秒」は局面1個に対する呼出し1回を1回と数え、生成した手の数ではありません。どちらの列もNN推論を含みません。`V3SearchSession` の評価は葉の特徴量から決まる擬似ネットワークで、実モデルの推論時間を含む自己対局全体の速度ではありません。詰み探索の行は詰みが証明されない局面での探索で、所要時間は局面によって大きく変わります。測定条件と再現手順は [ベンチマーク資料](doc/performance_benchmarks.md) にあります。
 
 ## ゲームルールと合法手生成モード
 
