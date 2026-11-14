@@ -35,8 +35,7 @@
 |---|---|
 | [READMEのサービス連携](../README.md#web-apiと対戦サービスへの組み込み) | 正規局面、秘匿情報、時間・排他・永続化の分担 |
 | [Web API](web_api.md) | HTTPルート、支払いモード、状態レスポンス |
-| [USI正本（別repo）](https://github.com/kuboyoo/usi/blob/main/docs/USI.md) | コマンド、SPN、着手記法の仕様 |
-| [USI実装側資料](USI.md) | このrepoの互換性資料。仕様変更はusi側を先に更新 |
+| [USIプロトコル仕様](USI.md) | Universal Splendor Protocol。コマンド、SPN、着手記法の仕様 |
 | [棋譜](KIFU.md) | 棋譜の保存・再生形式 |
 
 ## エンジン内部開発

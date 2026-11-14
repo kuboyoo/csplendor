@@ -4,7 +4,7 @@
 
 Splendorの**2人対戦用ルールエンジン**です。C++17の合法手生成・局面更新・探索をPythonから利用できます。AIの学習環境、対局管理、棋譜再生、Webサービスのルール判定に使えます。
 
-このリポジトリはエンジンとPython/API補助を管理します。学習済みモデル、学習実験、ブラウザGUI、対戦サービスの認証・運用基盤は別プロジェクトで実装します。USI仕様の正本は [usi](https://github.com/kuboyoo/usi) です。
+このリポジトリはエンジンとPython/API補助を管理します。学習済みモデル、学習実験、ブラウザGUI、対戦サービスの認証・運用基盤は別プロジェクトで実装します。USI仕様は [doc/USI.md](doc/USI.md) にあります。
 
 ## 目次
 
@@ -324,7 +324,7 @@ SPNの復元は未知カードを補完するため、元の山札順や終局ph
 
 ## USIプロトコル
 
-仕様の正本は [usi/docs/USI.md](https://github.com/kuboyoo/usi/blob/main/docs/USI.md) です。`csplendor` は着手のparse・serialize・合法手照合とSPN/KIFU変換を提供します。stdin/stdoutのUSIエンジン実行プロセスはAI側で実装します。仕様側に3〜4人対戦の記述があっても、このエンジンの対応は2人です。
+USI（**Universal Splendor Protocol**）は、Splendorの対局サーバーとAIエンジンが標準入出力で着手・局面をやり取りするためのテキストプロトコルです。仕様は [USIプロトコル仕様](doc/USI.md) にあります。`csplendor` は着手のparse・serialize・合法手照合とSPN/KIFU変換を提供します。stdin/stdoutのUSIエンジン実行プロセスはAI側で実装します。仕様側に3〜4人対戦の記述があっても、このエンジンの対応は2人です。
 
 接続の基本順序は、`usi` → `id` / `option` / `usiok`、`isready` → `readyok`、`usinewgame`、`position ...`、`go time <ms>` → `info ...` / `bestmove ...`、終了時に `gameover` / `quit` です。サーバーが着手を合法性検査して適用し、更新した局面を次のAIへ渡します。
 
@@ -352,7 +352,7 @@ assert game.apply(game.legal_actions[index])
 print(game_to_spn(game))
 ```
 
-`action_to_usi(action, game=game)` は購入の支払枚数を `/pay:...` で出力します。これはcsplendorの互換拡張で、上記USI正本の `/gold:` 表記とは区別します。相手が拡張を扱わない場合は `game` 引数なしで出力してください。SPNの `?C<id>` や追加棋譜メタデータも含め、[互換性テスト](tests/test_usi_protocol_compatibility.py) と相手実装を照合して接続します。[ローカルUSI資料](doc/USI.md) は実装側の参照資料です。
+`action_to_usi(action, game=game)` は購入の支払枚数を `/pay:...` で出力します。これはcsplendorの互換拡張で、USI仕様の `/gold:` 表記とは区別します。相手が拡張を扱わない場合は `game` 引数なしで出力してください。SPNの `?C<id>` や追加棋譜メタデータも含め、[互換性テスト](tests/test_usi_protocol_compatibility.py) と相手実装を照合して接続します。
 
 ## Web APIと対戦サービスへの組み込み
 

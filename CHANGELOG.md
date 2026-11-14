@@ -5,6 +5,9 @@
 - README の速度ベンチマークを、旧版との比較をやめて現行版（main `e361b6e`）の測定値だけにした。測定条件と再現手順は
   `doc/performance_benchmarks.md` の「2026-11-14: 現行版の測定」。Python 側の計測を `scripts/benchmark_readme.py` にした。
   表は主な7処理に絞り、Ryzen 9 7900X / Linux で最後に測った値（2026-08-30〜10-04、当時の版）の列を並べた。
+- USI の正式名称（Universal Splendor Protocol）を README に書き、存在しない `kuboyoo/usi` を指していた仕様のリンクを
+  このリポジトリの `doc/USI.md` に向けた（README・英語版・`doc/index.md`・`doc/architecture.md`）。`doc/USI.md` に千日手の
+  引き分けを書き、USI の色の並びを照合するテストは隣の usi の clone ではなく `doc/USI.md` を読むようにした（常に実行される）。
 - README の2人用ルールの表に千日手（同一局面の4回目で引き分け）と `board.end_reason` を足し、英語版 README に V5 と千日手を書いた。
 - `scripts/benchmark_engine_hotpaths.cpp` がビルドできなくなっていたのを直した（置換表のキーの `depth` が関数になった）。
   `midgame_250` fixture の合法手数の照合を、公開予約が返却を含まなくなった後の 190 件にした（局面の hash は同じ）。

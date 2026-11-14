@@ -129,10 +129,8 @@ def test_kifu_result_without_detail_parses_to_none():
     assert (parsed["result"], parsed["result_detail"]) == ("DRAW", None)
 
 
-def test_sibling_usi_repository_color_contract_when_checkout_is_available():
-    canonical = Path(__file__).resolve().parents[2] / "usi" / "docs" / "USI.md"
-    if not canonical.is_file():
-        pytest.skip("canonical usi repository is not checked out beside csplendor")
+def test_usi_specification_color_contract():
+    canonical = Path(__file__).resolve().parents[1] / "doc" / "USI.md"
     text = canonical.read_text(encoding="utf-8")
     rows = re.findall(
         r"\| `([WUGRKD])` \|.*?`(?:DIAMOND|SAPPHIRE|EMERALD|RUBY|ONYX|GOLD) = (\d)`",

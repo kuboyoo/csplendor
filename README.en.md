@@ -53,7 +53,7 @@ The [Japanese README](README.md) contains the complete guide; focused documents 
 | Full action space | [V2: 4869 IDs](doc/action_space_v2.md), [V3: 3133 IDs](doc/action_space_v3.md), [V5: 3049 IDs, recommended](doc/action_space_v5.md) |
 | Search | [Mate search](doc/mate_usage.md), [experimental parallel MCTS](doc/parallel_mcts_usage.md) |
 | Persistence | [Full snapshot](doc/game_snapshot.md), [observer-safe identity](doc/information_state.md), [KIFU](doc/KIFU.md) |
-| External engines | [USI specification source](https://github.com/kuboyoo/usi/blob/main/docs/USI.md) |
+| External engines | [USI (Universal Splendor Protocol) specification](doc/USI.md) |
 | HTTP integration | [Web API](doc/web_api.md) |
 | All documents | [Documentation index](doc/index.md) |
 
@@ -67,7 +67,7 @@ Gem arrays use White, Blue, Green, Red, Black, Gold order; five-element arrays o
 python -m uvicorn csplendor.api:app --host 127.0.0.1 --port 8000
 ```
 
-OpenAPI is available at `http://127.0.0.1:8000/docs`. The included API stores sessions in process memory and returns hidden reservation IDs. A hosted competition service must add observer-specific responses, authentication, match locking/version checks, persistence and isolated AI workers. Full snapshots are server-only data. USI process management belongs to the external AI/service; this package provides move and position conversion helpers.
+OpenAPI is available at `http://127.0.0.1:8000/docs`. The included API stores sessions in process memory and returns hidden reservation IDs. A hosted competition service must add observer-specific responses, authentication, match locking/version checks, persistence and isolated AI workers. Full snapshots are server-only data. USI (**Universal Splendor Protocol**) is the text protocol over stdin/stdout between a Splendor game server and AI engines. USI process management belongs to the external AI/service; this package provides move and position conversion helpers.
 
 ## Validation
 

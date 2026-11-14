@@ -3,8 +3,8 @@
 最終更新: 2026-08-05
 
 `csplendor` は2人用 Splendor の状態、合法手、局面更新、探索、C++/Python
-bindingを管理する。GUI、学習実験、モデル、収集データは対象外であり、USIの仕様は
-`usi` repositoryを正本とする。
+bindingを管理する。GUI、学習実験、モデル、収集データは対象外である。USIの仕様は
+[doc/USI.md](USI.md) に置く。
 
 ## レイヤーと依存方向
 
@@ -61,8 +61,8 @@ FastAPI endpointは`GameSessionService`、`KifuApplicationService`、
 背後にあり、既定実装は単一process向け`InMemoryStore`である。JSONへの変換は
 `game_presenter.py`が担う。
 
-USI/KIFUはtoken/parser/DTO、legal-action resolver、serializer/codecに分かれ、仕様の正本は
-`usi` repositoryとする。Web APIはAIの着手選択を持たず、外部repositoryやmodel fileに依存しない。legacy replay pickleは管理者が配置した
+USI/KIFUはtoken/parser/DTO、legal-action resolver、serializer/codecに分かれ、仕様は
+[doc/USI.md](USI.md) に置く。Web APIはAIの着手選択を持たず、外部repositoryやmodel fileに依存しない。legacy replay pickleは管理者が配置した
 信頼済みローカルファイル専用readerに隔離する。
 
 ## 状態・互換性
