@@ -2,7 +2,7 @@
 
 F1測定code `b202e6a0cbb2eded9bc2ee5e59f750428e73ca49`、F1記録
 `49878b661298bf45e39c5f5ca5afa6d0e363736a`。性能再測定は不要。
-[F1報告](final_main_vs_candidate_20260906.md)のCSV/manifestを正本とし、F2の単発実NN時間を
+[F1報告](final_main_vs_candidate_20260906.md)のCSV/manifestを基準とし、F2の単発実NN時間を
 paired A/BやCI付きの高速化率として扱わない。
 
 F3 lint是正後はtestsを含むsource digestだけが変わった。本体/build/binaryは同一。

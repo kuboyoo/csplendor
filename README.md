@@ -225,7 +225,7 @@ BGAでいう支払い方の選択に対応する設定は `Game.simple_payment_m
 
 1枚ずつの画像は `assets/cards/card_XX.svg`（XXはカードID）です。
 
-**全90枚のID・色・得点・5色コスト表**は [カード・貴族カタログ](doc/card_catalog.md) にあります。正本は [src/card_data.h](src/card_data.h) です。
+**全90枚のID・色・得点・5色コスト表**は [カード・貴族カタログ](doc/card_catalog.md) にあります。データの定義は [src/card_data.h](src/card_data.h) にあります。
 
 ```python
 import csplendor as cs
@@ -245,7 +245,7 @@ assert len(cs.get_all_nobles()) == 12
 
 1枚ずつの画像は `assets/nobles/noble_XX.svg`、数値の表は [カード・貴族カタログ](doc/card_catalog.md) にあります。
 
-`cs.get_noble(id)` の `points` と `requirement` から取得できます。正本は [src/noble_data.h](src/noble_data.h) です。カード・貴族の画像は `python scripts/render_card_assets.py` でエンジンのデータから生成しており、データを変更したら再生成します（`--check` でずれを検出）。
+`cs.get_noble(id)` の `points` と `requirement` から取得できます。データの定義は [src/noble_data.h](src/noble_data.h) にあります。カード・貴族の画像は `python scripts/render_card_assets.py` でエンジンのデータから生成しており、データを変更したら再生成します（`--check` でずれを検出）。
 
 ### 対局用の画像
 

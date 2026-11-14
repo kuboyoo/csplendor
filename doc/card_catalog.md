@@ -2,7 +2,7 @@
 
 [README](../README.md) / [エンジン仕様](engine_specs.md)
 
-この表は `get_all_cards()` / `get_all_nobles()` の値から作成しています。正本は [card_data.h](../src/card_data.h) と [noble_data.h](../src/noble_data.h) です。カタログ更新時はこの表も照合してください。
+この表は `get_all_cards()` / `get_all_nobles()` の値から作成しています。データの定義は [card_data.h](../src/card_data.h) と [noble_data.h](../src/noble_data.h) にあります。カタログ更新時はこの表も照合してください。
 
 色順は **白・青・緑・赤・黒**。カードのコストは割引前の必要トークン数、貴族の要求は購入済みカードのボーナス枚数です。IDはcsplendor内の定義で、外部サービスのIDとは別途対応付けます。
 

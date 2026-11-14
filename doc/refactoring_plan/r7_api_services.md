@@ -58,11 +58,11 @@ importではtorch、外部repository、model fileを探索しない。AI moveま
 または従来のsibling checkoutを復元できる。このfallbackは互換期間専用であり、通常import
 では有効化されない。
 
-## USI正本との関係
+## USI仕様との関係
 
-USI仕様は隣接`usi/docs/USI.md`を正本とする。本repositoryではv1の色順序、代表move、
+USI仕様は隣接`usi/docs/USI.md`を基準とする。本repositoryではv1の色順序、代表move、
 全合法手serialize/resolve、KIFU goldenをcompatibility testに固定した。隣接checkoutがある
-開発環境では正本文書の色ID表も直接照合し、単独checkoutのCIでは内蔵v1 fixtureを検証する。
+開発環境ではUSI仕様の色ID表も直接照合し、単独checkoutのCIでは内蔵v1 fixtureを検証する。
 
 `usi_kifu.py`は既存import pathの互換surfaceとして残し、新規application codeは分割moduleを
 直接利用する。SPNの成熟した実装本体は互換期間中そのsurfaceの背後に維持する。
@@ -74,7 +74,7 @@ USI仕様は隣接`usi/docs/USI.md`を正本とする。本repositoryではv1の
 - custom store注入と辞書互換性。
 - Web application import時のmodel/sibling discovery禁止。
 - structured logging fieldとunsafe replay warning header。
-- 隣接`usi`正本の色ID/記号compatibility。
+- 隣接`usi`仕様の色ID/記号compatibility。
 
 ローカルではPython 3.12で通常test 475件、performance test 4件、warnings-as-errors、
 Ruffのerror/import/security rules、`py_compile`、editable install、sdist/wheel buildと

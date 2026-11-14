@@ -187,5 +187,5 @@ raw原本は`doc/performance_experiments/raw/final_integration_20260906/`に保�
 
 F0の統合承認待ちは解消し、**F1の測定範囲ではレビュー可能**。
 F2実利用受入、F3正式PR準備、F4 main統合・導入は行わず停止する。
-READMEの履歴表もF3前に書き換えず、実測の正本はこの報告・CSV・manifestとする。
+READMEの履歴表もF3前に書き換えず、実測の記録はこの報告・CSV・manifestとする。
 mainへのmerge、push、PR/Release/PyPI公開、既存branch/worktree削除は別の明示承認が必要。

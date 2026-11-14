@@ -1,7 +1,7 @@
 # ActionEncoderV3 Action Space Specification
 
 > Schema metadata: `ActionEncoderV3.schema_version()`,
-> `schema_fingerprint()`, `schema_sections()`。sizeとsection offsetのC++正本は
+> `schema_fingerprint()`, `schema_sections()`。sizeとsection offsetのC++での定義は
 > `encoding_schema.h`の`ActionSpaceV3`である。
 
 > **Version**: V3.1 (3133 actions)

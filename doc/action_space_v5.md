@@ -1,7 +1,7 @@
 # ActionEncoderV5 行動空間仕様
 
 > Schema metadata: `ActionEncoderV5.schema_version()`、
-> `schema_fingerprint()`、`schema_sections()`。sizeとsection offsetのC++正本は
+> `schema_fingerprint()`、`schema_sections()`。sizeとsection offsetのC++での定義は
 > `encoding_schema.h`の`ActionSpaceV5`である。
 
 > **Version**: V5 (3049 actions)

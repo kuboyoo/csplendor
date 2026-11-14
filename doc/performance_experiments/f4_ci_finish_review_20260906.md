@@ -107,7 +107,7 @@ branch APIはprotected=false、required checks空、rules空だが、全workflow
 macOSのGNU time実RSSテスト1件だけは適用外。能力モデル、非GNUの実起動/timeout/group回収は実行済み。
 WindowsもPOSIX実I/O8件・process group2件・GNU time実RSS1件が追加の適用外で、共通契約は実行。
 既存2 skipとperformance markerの4 deselectedを変更していない。失敗依存で未到達の必須stepはない。
-既存2 skipは生成済み問題データと隣接するUSI正本checkoutの不在によるもの。
+既存2 skipは生成済み問題データと隣接するUSI仕様リポジトリのcheckoutの不在によるもの。
 ローカルにはUSI checkoutがあるため、全体は637 passed / 1 skippedとなる。
 
 ## F1/F2との差分、性能guard、再利用範囲

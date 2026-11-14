@@ -3,7 +3,7 @@
 ## 目的と境界
 
 48枠、V2、V3のaction spaceと196要素state featureについて、version、size、section
-offset、action type、feature shape、gem色順序の正本を`encoding_schema.h`へ集約した。
+offset、action type、feature shape、gem色順序の定義を`encoding_schema.h`へ集約した。
 公開ID、feature値、既定schema、Python API、無効入力fallbackは変更していない。
 
 ## schema descriptor

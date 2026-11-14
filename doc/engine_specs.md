@@ -2,7 +2,7 @@
 
 最終更新: 2026-10-05
 
-この文書は現在実装の主要なゲーム・探索契約を要約する。数値契約の機械可読な正本は
+この文書は現在実装の主要なゲーム・探索契約を要約する。数値契約の機械可読な定義は
 `src/encoding_schema.h`と[`refactoring_contracts.json`](refactoring_contracts.json)である。
 
 ## 宝石と静的データ
@@ -136,7 +136,7 @@ hot pathであり、不正入力の結果を保証しない。solver向け低レ
 | action V5 | 5 | 3049 | 予約の返却を分離し`RETURN_GEM` 6枠を持つ全行動policy用。[仕様](action_space_v5.md) |
 | state feature V1 | 1 | 196 | bank、players、visible、deck count、nobles、手番 |
 
-schemaのversion、offset、fingerprint、宝石順はC++ descriptorを正本とし、Python wrapperも
+schemaのversion、offset、fingerprint、宝石順はC++ descriptorで定義し、Python wrapperも
 同じ値を公開する。既存schemaの意味は変更せず、変更が必要なら新versionを追加する。
 
 ## MCTSとhidden information

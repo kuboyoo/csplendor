@@ -18,7 +18,7 @@
 - ルール、状態更新、エンコード、探索の責務と依存方向を明確にする。
 - 公開 API と内部実装を分離し、内部表現を段階的に改善できるようにする。
 - 巨大なヘッダー、binding、探索実装、Python モジュールを責務単位に分割する。
-- C++ と Python に重複する仕様・変換ロジックの正本を明確にする。
+- C++ と Python に重複する仕様・変換ロジックの定義元を明確にする。
 - editor 状態、通常対局状態、探索内部状態で異なる不変条件を明文化する。
 - Linux、macOS、Windows、x86_64、arm64 の既存ビルド・テスト経路を維持する。
 - リファクタリングの各段階で、全手同値性、決定性、性能を機械的に確認できるようにする。
@@ -122,7 +122,7 @@ C++ コアは CMake 上で `INTERFACE` ライブラリとして構成され、�
 - 修正前の `csplendor/api/schemas.py`、`csplendor.GEM_NAMES`、`doc/engine_specs.md` の一部は `EMERALD=0, SAPPHIRE=1, RUBY=2, DIAMOND=3, ONYX=4` と解釈していた。
 - 一部 C++ コメントにも後者の並びが残っていた。
 
-2026-08-05 に `usi` リポジトリ、C++ コア、`dlsplendor` の feature/action 利用を横断確認し、C++/USI の `Diamond, Sapphire, Emerald, Ruby, Onyx, Gold` 順を正本と決定した。数値レイアウトは変更せず、Python schema・表示名・文書を正本へ合わせる。cross-layer golden test と state schema fingerprint により、既存モデルの意味を維持したまま将来の不整合を検出する。
+2026-08-05 に `usi` リポジトリ、C++ コア、`dlsplendor` の feature/action 利用を横断確認し、C++/USI の `Diamond, Sapphire, Emerald, Ruby, Onyx, Gold` 順を基準と決定した。数値レイアウトは変更せず、Python schema・表示名・文書をその基準へ合わせる。cross-layer golden test と state schema fingerprint により、既存モデルの意味を維持したまま将来の不整合を検出する。
 
 ### P0: コンパイル境界が弱い
 
@@ -140,11 +140,11 @@ C++ コアは CMake 上で `INTERFACE` ライブラリとして構成され、�
 
 一部の低レベル更新には、途中の検査が失敗した場合に部分更新を残し、solver 側の rollback を前提とする既存挙動がある。これを transactional に変えることも仕様変更であり、検証と移行なしには行わない。
 
-### P1: encoder と feature schema の正本が分散
+### P1: encoder と feature schema の定義が分散
 
 C++ には 48/V2/V3 action encoder と 196 要素の state encoder があり、Python にも独立した `ActionEncoder` と `StateFeaturizer` がある。主要経路は同値テストされているが、無効値への fallback などの境界挙動は完全には同一でない。
 
-サイズ、offset、予約スロット、色順序が複数ファイルの定数として現れるため、将来の schema 追加時に片側だけ更新する危険がある。C++ を計算の正本にしつつ、Python の既存 fallback と import surface を保つ段階的移行が必要である。
+サイズ、offset、予約スロット、色順序が複数ファイルの定数として現れるため、将来の schema 追加時に片側だけ更新する危険がある。C++ を計算の基準にしつつ、Python の既存 fallback と import surface を保つ段階的移行が必要である。
 
 ### P1: MCTS に旧・新の複数 orchestration が同居
 
@@ -320,7 +320,7 @@ external AI provider protocol <--> dlsplendor / model repositories
 
 1. action space ごとに version、size、offset、対応 action type を記述する schema descriptor を導入する。
 2. state feature にも version、shape、section offset、色順序を記述する。
-3. C++ 実装を計算の正本にし、Python helper は native API へ委譲する。
+3. C++ 実装を計算の基準にし、Python helper は native API へ委譲する。
 4. Python に固有の invalid/fallback 動作は compatibility wrapper で明示的に維持する。
 5. schema descriptor から documentation/test fixture を生成できる形を検討する。
 6. gem 色 ID の方針が migration を伴う場合は、旧 schema を変更せず新 version を追加する。
@@ -380,7 +380,7 @@ external AI provider protocol <--> dlsplendor / model repositories
 2. process-global dictionary を `SessionStore` / `KifuStore` interface の背後に置く。
 3. replay の legacy pickle reader を隔離し、入力制限と unsafe-format 表示を明確にする。
 4. USI/KIFU を tokenizer/parser、DTO、legal-action resolver、game builder、serializer に分ける。
-5. USI 仕様自体は `usi` repository を正本とし、本リポジトリでは compatibility test を維持する。
+5. USI 仕様自体は `usi` repository を基準とし、本リポジトリでは compatibility test を維持する。
 6. AI を provider protocol 経由で呼び、model discovery、sibling path 操作、具体的な学習実装を外部 repository へ段階移行する。
 7. `print` による診断を structured logging に置き換える。
 8. AI 未導入時の既存 503 応答と response schema を維持する。
@@ -481,7 +481,7 @@ MCTS、solver、Web/AI の大規模分割を同時に開始しない。基盤と
 
 - domain、rules、encoding、search、binding の依存方向が build target 上でも表現される。
 - binding module 初期化が薄く、各 subsystem の登録と test が独立している。
-- encoder/feature の schema と色順序に明確な正本と version がある。
+- encoder/feature の schema と色順序に明確な定義元と version がある。
 - state profile、不変条件、mutation/cache invalidation の所有者が明確である。
 - MCTS と solver の public facade から内部 tree/scheduler/proof 実装を変更できる。
 - Web endpoint、session store、USI/replay、AI provider が責務単位で test できる。
@@ -525,12 +525,12 @@ delta採用を見送った。public fieldは現行majorのC++互換契約とし�
 
 R3ではcard source、実効費用、token返却、支払、貴族候補、final roundと勝者判定を
 allocation-freeな純粋照会へ集約した。generator、validator、transition、encoderが同じ
-正本を利用し、2,770局面・97,354合法手の固定digestと抽出前referenceとの差分テストで
+定義を利用し、2,770局面・97,354合法手の固定digestと抽出前referenceとの差分テストで
 順序・適用結果を固定した。
 詳細は[`refactoring_plan/r3_rules.md`](refactoring_plan/r3_rules.md)に記録する。
 
 R4ではV1/V2/V3 action spaceとstate feature v1のversion、size、section offset、色順序を
-`encoding_schema.h`へ集約した。Python feature/action wrapperはnative正本へ委譲し、旧Python
+`encoding_schema.h`へ集約した。Python feature/action wrapperはnative実装へ委譲し、旧Python
 固有のinvalid fallbackだけを明示的に維持した。全8,050 action IDと768局面×3 observerの
 byte goldenを固定し、Python wrapperは8.7〜11.2倍へ高速化した。
 詳細は[`refactoring_plan/r4_encoding_schema.md`](refactoring_plan/r4_encoding_schema.md)に記録する。
@@ -551,7 +551,7 @@ solution/action/proof digest、limit理由、生成物、性能とRSSは基準�
 
 R7ではFastAPI endpointをgame/KIFU/replay application serviceへ委譲し、process内辞書を
 `SessionStore`/`KifuStore` interfaceの背後へ置いた。USI/KIFUはtoken/parser/DTO、
-legal-action resolver、serializer/codec surfaceへ分割し、隣接`usi`正本とのcompatibility
+legal-action resolver、serializer/codec surfaceへ分割し、隣接`usi`仕様とのcompatibility
 testを追加した。legacy pickleはtrusted local file専用readerへ隔離し、response headerで
 unsafe formatを明示する。外部AIはlazyな`AIProvider`境界とfake providerで差し替え可能にし、
 sibling path操作をcompatibility bridgeへ集約した。通常importでは外部repository/modelを

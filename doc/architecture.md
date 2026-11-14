@@ -38,7 +38,7 @@ pybind11 subsystem registrations
 - domain: `types.h`、`action.h`、`player.h`、`board.h`、`game.h`。`Game`が現在局面、
   mode、action/undo journalを所有する公開facadeである。
 - rules: `rule_query.h`を副作用のない照会、`rule_transition.h`を内部更新、
-  `move_generator.h`をallocation-freeな合法手列挙の正本とする。
+  `move_generator.h`をallocation-freeな合法手列挙の唯一の実装とする。
 - state safety: `state_invariants.*`がreachable/editor/search/serializedの4 profileを診断し、
   editor更新とtrusted hot pathは別のmutation gatewayを通る。
 - encoding: `encoding_schema.h`がaction V1/V2/V3/V5とstate feature V1のversion、size、offset、
@@ -51,7 +51,7 @@ pybind11 subsystem registrations
 CMakeでは公開include/CPU設定を`csplendor_core_config`、非template実装を
 `csplendor_core`に置く。Python module初期化は薄い`bindings.cpp`からdomain、rules、
 encoding、MCTS、solver別の登録翻訳単位を呼ぶ。公開C++ headerの分類は
-[`refactoring_contracts.json`](refactoring_contracts.json)を正本とし、public headerは
+[`refactoring_contracts.json`](refactoring_contracts.json)で定義し、public headerは
 それぞれ単独includeでCI compileする。
 
 ## Python application層

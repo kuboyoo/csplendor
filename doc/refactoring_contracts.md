@@ -89,7 +89,7 @@ tie-breakに使うcanonical fieldとして扱う。
 - production `undo()`は公開editorでapply後に変更された局面もaction前へ戻すため、完全
   `Board` snapshotを正とする。`UndoRecord`はdebug/differential検証用で本番履歴ではない。
 - fieldごとのcanonical、derived、provenance、cache分類は
-  `state_field_roles.h`を機械検査可能な正本とする。
+  `state_field_roles.h`で機械的に検査できる形で定義する。
 
 - `Game.board` はGameが所有するboardへの参照であり、board setterは元のGameを更新する。
 - `Board.players` と `Board.get_player()` はplayerのcopyを返す。変更は

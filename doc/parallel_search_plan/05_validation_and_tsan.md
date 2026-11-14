@@ -25,7 +25,7 @@ TSANの無警告だけでは正しさを証明できない。次の4層を独立
 4. **soak / replay / Python integration**
    - 多数schedule、cancel、GIL、callback ownership、性能を検証する。
 
-検証の正本は、CPythonや外部NN runtimeに依存しないnative C++ executableにする。
+検証の基準は、CPythonや外部NN runtimeに依存しないnative C++ executableにする。
 Python testはGIL、snapshot、callback、ndarray ownershipを検証する。
 
 ## 2. 公式tool制約

@@ -8,7 +8,7 @@ snapshot byte列、合法手、hashは変更していない。
 
 ## フィールド分類
 
-`state_field_roles.h`を機械検査可能な正本とし、次の分類を用いる。
+`state_field_roles.h`を機械的に検査できる定義とし、次の分類を用いる。
 
 | owner | canonical | derived | provenance | cache |
 |---|---|---|---|---|
@@ -16,7 +16,7 @@ snapshot byte列、合法手、hashは変更していない。
 | `PlayerState` | gems、bonuses、points、reserved、reserved_is_hidden、reserved_count、purchased_count | packed_gems、packed_bonuses、noble_eligibility_mask | purchased_cards、acquired_nobles | - |
 | `Game` | board、simple_payment_mode、blank_refill_mode | - | history、board_history | - |
 
-canonicalはルール結果を決める正本、derivedはcanonicalから再計算する高速化表現、
+canonicalはルール結果を決める元の値、derivedはcanonicalから再計算する高速化表現、
 provenanceは表示・検証・undoに必要な履歴情報、cacheは結果を変えず破棄可能な遅延計算値で
 ある。`purchased_count`は勝敗tie-breakとhashで直接使うため、provenance vectorとは分けて
 canonicalとする。

@@ -9,7 +9,7 @@ python -m pip install -e '.[web]'
 python -m uvicorn csplendor.api:app --host 127.0.0.1 --port 8000
 ```
 
-OpenAPI: `http://127.0.0.1:8000/docs`。現在のリクエスト・レスポンス定義は [app.py](../csplendor/api/app.py) と [schemas.py](../csplendor/api/schemas.py) が正本です。
+OpenAPI: `http://127.0.0.1:8000/docs`。現在のリクエスト・レスポンス定義は [app.py](../csplendor/api/app.py) と [schemas.py](../csplendor/api/schemas.py) にあります。
 
 ## 対局API
 

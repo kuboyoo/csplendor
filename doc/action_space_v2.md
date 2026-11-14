@@ -1,7 +1,7 @@
 # ActionEncoderV2 Action Space Specification
 
 > Schema metadata: `ActionEncoderV2.schema_version()`,
-> `schema_fingerprint()`, `schema_sections()`。sizeとsection offsetのC++正本は
+> `schema_fingerprint()`, `schema_sections()`。sizeとsection offsetのC++での定義は
 > `encoding_schema.h`の`ActionSpaceV2`である。
 
 > **Version**: V2.1 (4869 actions)

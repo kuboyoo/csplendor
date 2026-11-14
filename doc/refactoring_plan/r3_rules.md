@@ -27,7 +27,7 @@ MoveGenerator  Game validation  rule_transition.h
 - final round開始条件と、得点・購入枚数tie-breakによる勝者判定。
 
 `MoveGenerator::EligibleNobles`と公開wrapperはsource互換のため維持し、内部実体を
-`FixedStack` aliasへ移した。エンコーダのvisible/reserved source解決も同じ正本へ委譲した。
+`FixedStack` aliasへ移した。エンコーダのvisible/reserved source解決も同じ定義へ委譲した。
 
 validationは入力全体を検査してから既存transitionへ渡す。低レベルtransitionは探索側の
 rollbackを前提とする既存契約を保ち、色順に更新した後で後続色またはGold検査が失敗した

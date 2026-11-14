@@ -8,7 +8,7 @@
 main変更、merge、push、PR作成、常用install/設定変更、公開はしていない。
 
 [前回のBLOCKED報告](f2_f3_shipping_review_20260906.md)と旧raw/manifestは履歴として保持する。
-今回の正本は本書と[是正manifest](f3_lint_manifest_20260906.json)、
+今回の基準となる記録は本書と[是正manifest](f3_lint_manifest_20260906.json)、
 新規 `raw/f3_lint_20260906/*.json.gz` 16件。
 
 ## 候補・証跡のidentity

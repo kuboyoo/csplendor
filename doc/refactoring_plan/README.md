@@ -354,7 +354,7 @@ invalidate自体は通常のGame apply、Board setter、randomizeで行われる
 - observable information hash: observerから区別不能なstateのkey。deckはsize、hidden cardはplaceholderを使い、専用saltを持つ。
 - solver canonical key: threat equivalenceやvisible-onlyなど、solverが意図的に同値化するkey。
 
-これらを1つの `Board::hash()` へ押し込めない。購入card IDや取得noble ID、turnをexact transitionへ過剰に入れるとtranspositionを減らすため、full fingerprintとの境界を先に決める。pure uncached計算を正本にし、cacheはその上の最適化とする。Game modeはBoard外なので、MCTS側のstate keyでmixする。
+これらを1つの `Board::hash()` へ押し込めない。購入card IDや取得noble ID、turnをexact transitionへ過剰に入れるとtranspositionを減らすため、full fingerprintとの境界を先に決める。pure uncached計算を基準にし、cacheはその上の最適化とする。Game modeはBoard外なので、MCTS側のstate keyでmixする。
 
 ただし `Board.hash()` はPythonに公開され、値変更はsignatureを保ってもbehavior変更である。exact/observable hashの完全化は、挙動維持Phaseには含めず、別承認のCorrectness Trackとする。それまでは現hash domainを変えず、invalidate siteとdebug oracleだけを強化する。
 
@@ -599,7 +599,7 @@ Phase 0の終了条件は、対象となる後続commitの公開API/合法手dig
 
 推奨担当: `codex-terra / high`。hash mutation reviewは `codex-sol / ultra`。
 
-#### Commit 1.1 `整理: static resource packの正本を追加`
+#### Commit 1.1 `整理: static resource packの定義を追加`
 
 - 変更対象: `resource_bundle.h`、card/noble static data、対応test。
 - 目的: constexpr pack helperまたはstatic assertionにより、arrayと手書きpacked値のdriftを検知する。
@@ -607,7 +607,7 @@ Phase 0の終了条件は、対象となる後続commitの公開API/合法手dig
 - 確認test: 全90 cards、全12 nobles、affordability、payment、noble visit、全通常test。
 - 性能測定: compile time/binary sizeとlegal generation。runtime codeが増えないこと。
 
-実装済み: `ResourceBundle::pack()` をconstexprの正本とし、全90 cardと全12 nobleの
+実装済み: `ResourceBundle::pack()` をconstexprの唯一の定義とし、全90 cardと全12 nobleの
 配列値と手書きpacked値を`static_assert`およびPython回帰テストで照合する。カード／
 貴族データの値とruntimeの計算経路は変更しない。
 
@@ -668,7 +668,7 @@ corpusで回帰確認する。
 - 確認test: 同一toolchain A/B digest、全setter/action、randomize、clone/undo。domain外fieldは追加しない。
 - 性能測定: cached/uncached hash、playout、MCTS/solver NPS。releaseのhot pathへ再計算を増やさない。
 
-実装済み: `compute_hash_uncached()` を副作用のない正本として追加し、`hash()` は
+実装済み: `compute_hash_uncached()` を副作用のない基準の実装として追加し、`hash()` は
 lazy cacheのwrapperに限定した。`recompute_hash()` はuncached結果をcacheへ反映する
 従来の観測可能な挙動を維持する。
 
@@ -1302,7 +1302,7 @@ hashは64-bitなので偶然衝突を「なくす」とは表現しない。fiel
 1. world 0のpath再生起点を統一する（解決: path適用済みleafをそのままencodeする）。
 2. bindingのcombined validをrequestのvalid maskと一致させる（解決）。
 3. 未実装 `process_inference_results()` と未登録/未使用 `create_mcts_searcher` の扱いを決める。
-4. 2つのMCTS orchestration経路の正本を、外部consumer調査後に決める。
+4. 2つのMCTS orchestration経路のどちらを基準にするかを、外部consumer調査後に決める。
 
 これらはsearch result、node count、policyを変え得る。Phase 6のfile分割と同じcommitで直さない。
 

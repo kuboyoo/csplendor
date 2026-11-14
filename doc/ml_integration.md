@@ -4,7 +4,7 @@
 
 ## 状態特徴量V1（196要素）
 
-`StateFeaturizer.featurize(game, observer=...)` は `float32` のNumPy配列を返します。定義は [encoding_schema.h](../src/encoding_schema.h) と [state_encoder.h](../src/state_encoder.h) が正本です。
+`StateFeaturizer.featurize(game, observer=...)` は `float32` のNumPy配列を返します。定義は [encoding_schema.h](../src/encoding_schema.h) と [state_encoder.h](../src/state_encoder.h) で定義しています。
 
 | offset | 要素数 | 内容 | スケーリング |
 |---:|---:|---|---|

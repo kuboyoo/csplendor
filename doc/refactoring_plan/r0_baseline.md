@@ -69,7 +69,7 @@ overflow 0、非canonical editor境界では先頭2048手を保持し21,948件�
 
 ## 共通test support
 
-`tests/support.py`をtest専用の正本とし、次を提供する。
+`tests/support.py`をtest専用の共通定義とし、次を提供する。
 
 - Action全fieldのimmutable signature
 - canonical/derived/provenanceを含むPlayer/Game signature
